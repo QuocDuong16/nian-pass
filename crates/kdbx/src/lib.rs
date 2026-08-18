@@ -111,24 +111,42 @@ impl KdbxDocument {
     /// Renames an entry by its stable identifier while retaining the complete
     /// parsed database state.
     ///
+    /// A real change preserves the title field's existing protection mode, and
     /// `keepass-rs` change tracking records the previous entry in history and
-    /// updates its last-modification timestamp. No identifier or title is
-    /// included in errors.
+    /// updates its last-modification timestamp. Setting the visible title to
+    /// its current value is a no-op. No identifier or title is included in
+    /// errors.
     pub fn set_entry_title(&mut self, id: &EntryId, title: &str) -> Result<(), KdbxError> {
         self.ensure_writable_format()?;
 
-        let upstream_id = self
+        let (upstream_id, title_is_protected, title_is_unchanged) = self
             .database
             .iter_all_entries()
             .find(|entry| entry.id().to_string() == id.as_str())
-            .map(|entry| entry.id())
+            .map(|entry| {
+                let existing_title = entry.fields.get(fields::TITLE);
+                (
+                    entry.id(),
+                    existing_title.is_some_and(|value| value.is_protected()),
+                    entry.get_title().unwrap_or_default() == title,
+                )
+            })
             .ok_or(KdbxError::EntryNotFound)?;
+
+        if title_is_unchanged {
+            return Ok(());
+        }
 
         let mut entry = self
             .database
             .entry_mut(upstream_id)
             .ok_or(KdbxError::EntryNotFound)?;
-        entry.track_changes().set_unprotected(fields::TITLE, title);
+        let mut tracked = entry.track_changes();
+        if title_is_protected {
+            tracked.set_protected(fields::TITLE, title);
+        } else {
+            tracked.set_unprotected(fields::TITLE, title);
+        }
         Ok(())
     }
 
@@ -190,6 +208,10 @@ pub enum KdbxError {
     #[error("entry was not found")]
     EntryNotFound,
 
+    /// The caller-owned output writer rejected a write operation.
+    #[error("could not write the KDBX output")]
+    WriteIo(#[source] std::io::Error),
+
     /// The complete KDBX document could not be serialized.
     #[error("the KDBX database could not be serialized")]
     Serialization,
@@ -239,6 +261,7 @@ fn parse_database(
 
 fn map_save_error(error: DatabaseSaveError) -> KdbxError {
     match error {
+        DatabaseSaveError::Io(error) => KdbxError::WriteIo(error),
         DatabaseSaveError::UnsupportedVersion => KdbxError::UnsupportedWriteFormat,
         _ => KdbxError::Serialization,
     }
@@ -304,7 +327,7 @@ mod tests {
         path::{Path, PathBuf},
     };
 
-    use keepass::{Database, DatabaseKey};
+    use keepass::{Database, DatabaseKey, db::fields};
     use vault_core::{EntryId, Group};
 
     use super::{KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
@@ -797,6 +820,331 @@ mod tests {
     }
 
     #[test]
+    fn protected_title_remains_protected_after_edit_and_roundtrip() {
+        const TITLE_BEFORE: &str = "public-protected-title-before";
+        const TITLE_AFTER: &str = "public-protected-title-after";
+
+        let mut document = KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted fixture should open");
+        let target_id = document
+            .projection()
+            .expect("trusted fixture should project")
+            .root()
+            .entries()
+            .first()
+            .expect("fixture should have a root entry")
+            .id()
+            .clone();
+        let upstream_id = document
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == target_id.as_str())
+            .map(|entry| entry.id())
+            .expect("projected entry should exist in the complete database");
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(fields::TITLE, TITLE_BEFORE);
+
+        let prepared_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("target entry should exist");
+        assert!(
+            prepared_entry.get_title() == Some(TITLE_BEFORE),
+            "protected test title was not prepared"
+        );
+        assert!(
+            prepared_entry
+                .fields
+                .get(fields::TITLE)
+                .is_some_and(|value| value.is_protected()),
+            "prepared title should be protected"
+        );
+        let original_history_len = prepared_entry
+            .history
+            .as_ref()
+            .map_or(0, |history| history.get_entries().len());
+        let original_last_modification = prepared_entry.times.last_modification;
+
+        document
+            .set_entry_title(&target_id, TITLE_AFTER)
+            .expect("protected title edit should succeed");
+
+        let edited_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should still exist");
+        assert!(
+            edited_entry.get_title() == Some(TITLE_AFTER),
+            "protected title edit did not apply"
+        );
+        assert!(
+            edited_entry
+                .fields
+                .get(fields::TITLE)
+                .is_some_and(|value| value.is_protected()),
+            "edited title lost its protected state"
+        );
+        assert_eq!(
+            edited_entry
+                .history
+                .as_ref()
+                .map_or(0, |history| history.get_entries().len()),
+            original_history_len + 1,
+            "protected title edit did not append exactly one history item"
+        );
+        let latest_history = edited_entry
+            .history
+            .as_ref()
+            .and_then(|history| history.get_entries().first())
+            .expect("protected title edit should retain the prior state");
+        assert!(
+            latest_history.get_title() == Some(TITLE_BEFORE),
+            "history did not retain the prior protected title"
+        );
+        assert!(
+            latest_history
+                .fields
+                .get(fields::TITLE)
+                .is_some_and(|value| value.is_protected()),
+            "historical title lost its protected state"
+        );
+        assert!(
+            edited_entry.times.last_modification != original_last_modification,
+            "protected title edit did not update LastModificationTime"
+        );
+
+        let expected_database = document.database.clone();
+        let mut saved = Vec::new();
+        document
+            .save_to_writer(&mut saved, FIXTURE_PASSWORD)
+            .expect("KDBX 4.1 document should serialize");
+        let reopened = KdbxDocument::open_reader(&mut Cursor::new(saved), FIXTURE_PASSWORD)
+            .expect("serialized document should reopen");
+        let reopened_entry = reopened
+            .database
+            .entry(upstream_id)
+            .expect("reopened entry should exist");
+
+        assert!(
+            reopened_entry.get_title() == Some(TITLE_AFTER),
+            "reopened title did not retain its edited value"
+        );
+        assert!(
+            reopened_entry
+                .fields
+                .get(fields::TITLE)
+                .is_some_and(|value| value.is_protected()),
+            "reopened title lost its protected state"
+        );
+        assert!(
+            reopened_entry
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .and_then(|historical| historical.fields.get(fields::TITLE))
+                .is_some_and(|value| value.is_protected()),
+            "reopened historical title lost its protected state"
+        );
+        assert!(
+            reopened.database == expected_database,
+            "protected-title round-trip changed the parsed database representation"
+        );
+    }
+
+    #[test]
+    fn unprotected_title_remains_unprotected_after_edit() {
+        const TITLE_AFTER: &str = "public-unprotected-title-after";
+
+        let mut document = KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted fixture should open");
+        let target_id = document
+            .projection()
+            .expect("trusted fixture should project")
+            .root()
+            .entries()
+            .first()
+            .expect("fixture should have a root entry")
+            .id()
+            .clone();
+        let upstream_id = document
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == target_id.as_str())
+            .map(|entry| entry.id())
+            .expect("projected entry should exist in the complete database");
+        let original_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("target entry should exist");
+        assert!(
+            original_entry
+                .fields
+                .get(fields::TITLE)
+                .is_some_and(|value| !value.is_protected()),
+            "fixture title should be unprotected"
+        );
+        let original_history_len = original_entry
+            .history
+            .as_ref()
+            .map_or(0, |history| history.get_entries().len());
+        let original_last_modification = original_entry.times.last_modification;
+
+        document
+            .set_entry_title(&target_id, TITLE_AFTER)
+            .expect("unprotected title edit should succeed");
+
+        let edited_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should still exist");
+        assert!(
+            edited_entry.get_title() == Some(TITLE_AFTER),
+            "unprotected title edit did not apply"
+        );
+        assert!(
+            edited_entry
+                .fields
+                .get(fields::TITLE)
+                .is_some_and(|value| !value.is_protected()),
+            "edited title unexpectedly became protected"
+        );
+        assert_eq!(
+            edited_entry
+                .history
+                .as_ref()
+                .map_or(0, |history| history.get_entries().len()),
+            original_history_len + 1,
+            "unprotected title edit did not append exactly one history item"
+        );
+        assert!(
+            edited_entry.times.last_modification != original_last_modification,
+            "unprotected title edit did not update LastModificationTime"
+        );
+    }
+
+    #[test]
+    fn same_title_is_a_complete_no_op() {
+        let mut document = KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted fixture should open");
+        let target_id = document
+            .projection()
+            .expect("trusted fixture should project")
+            .root()
+            .entries()
+            .first()
+            .expect("fixture should have a root entry")
+            .id()
+            .clone();
+        let upstream_id = document
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == target_id.as_str())
+            .map(|entry| entry.id())
+            .expect("projected entry should exist in the complete database");
+        let original_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("target entry should exist");
+        let existing_title = original_entry
+            .get_title()
+            .expect("target entry should have a title")
+            .to_owned();
+        let original_history_len = original_entry
+            .history
+            .as_ref()
+            .map_or(0, |history| history.get_entries().len());
+        let original_last_modification = original_entry.times.last_modification;
+        let before_database = document.database.clone();
+
+        document
+            .set_entry_title(&target_id, &existing_title)
+            .expect("same-value title update should succeed");
+
+        let unchanged_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("target entry should still exist");
+        assert_eq!(
+            unchanged_entry
+                .history
+                .as_ref()
+                .map_or(0, |history| history.get_entries().len()),
+            original_history_len,
+            "same-value title update changed history"
+        );
+        assert!(
+            unchanged_entry.times.last_modification == original_last_modification,
+            "same-value title update changed LastModificationTime"
+        );
+        assert!(
+            document.database == before_database,
+            "same-value title update changed the database"
+        );
+    }
+
+    #[test]
+    fn missing_title_set_to_empty_is_a_complete_no_op() {
+        let mut document = KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted fixture should open");
+        let target_id = document
+            .projection()
+            .expect("trusted fixture should project")
+            .root()
+            .entries()
+            .first()
+            .expect("fixture should have a root entry")
+            .id()
+            .clone();
+        let upstream_id = document
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == target_id.as_str())
+            .map(|entry| entry.id())
+            .expect("projected entry should exist in the complete database");
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(fields::TITLE);
+        assert!(
+            !document
+                .database
+                .entry(upstream_id)
+                .expect("target entry should exist")
+                .fields
+                .contains_key(fields::TITLE),
+            "title field should be absent for the test"
+        );
+        let before_database = document.database.clone();
+
+        document
+            .set_entry_title(&target_id, "")
+            .expect("missing-to-empty title update should succeed");
+
+        assert!(
+            document.database == before_database,
+            "missing-to-empty title update changed the database"
+        );
+    }
+
+    #[test]
     fn rejects_unknown_entry_identifier() {
         let mut document = KdbxDocument::open(
             fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
@@ -845,7 +1193,7 @@ mod tests {
     }
 
     #[test]
-    fn serialization_failure_returns_a_typed_error() {
+    fn writer_io_failure_returns_write_io() {
         let document = KdbxDocument::open(
             fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
             FIXTURE_PASSWORD,
@@ -854,7 +1202,9 @@ mod tests {
 
         let result = document.save_to_writer(&mut AlwaysFailWriter, FIXTURE_PASSWORD);
 
-        assert!(matches!(result, Err(KdbxError::Serialization)));
+        let error = result.expect_err("failing writer should reject serialized output");
+        assert!(matches!(&error, KdbxError::WriteIo(_)));
+        assert_eq!(error.to_string(), "could not write the KDBX output");
     }
 
     #[test]

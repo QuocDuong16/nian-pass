@@ -59,6 +59,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Filesystem and cloud-storage replacement semantics
 - Concurrent writes and unresolved conflicts
 - Writer serialization bugs
+- Silent protected/unprotected field-state changes during mutation
 - Silent KDBX version downgrade or upgrade
 - Silent KDF, cipher, or compression changes
 - Data loss caused by reconstructing a database from an incomplete projection
@@ -94,9 +95,12 @@ attestation. The project must not claim resistance to those threats yet.
 M1 confines experimental mutation to an opaque `KdbxDocument` retaining the
 complete `keepass-rs` representation. It never serializes from the incomplete
 `Vault` projection, never stores the master password, looks entries up by UUID,
-and reports typed errors for unknown entries, unsupported write formats, and
-serialization failure. KDBX 3.1 and 4.0 writes are rejected. The public save API
-accepts only a caller-owned writer and cannot perform an in-place path write.
+preserves an existing title field's protected/unprotected mode, and avoids
+history or timestamp changes for same-value requests. It reports typed errors
+for unknown entries, unsupported write formats, destination I/O failure, and
+serialization failure. KDBX 3.1 and 4.0 writes are rejected. The public save
+API accepts only a caller-owned writer and cannot perform an in-place path
+write.
 
 Tests serialize to memory, reopen the result, verify preservation invariants,
 exercise wrong credentials and writer failure, and confirm the source fixture

@@ -102,6 +102,8 @@ upgrade a database to a different version.
 | Group/entry counts, hierarchy order, names, UUIDs, and untouched titles | Self-roundtrip verified | Private semantic snapshot assertions |
 | Complete `keepass::Database` parsed representation | Self-roundtrip verified | Expected post-mutation database equals reopened database without debug-dumping contents |
 | Entry history and `LastModificationTime` for title rename | Self-roundtrip verified | Upstream tracked mutation appends one prior-state history item, updates the timestamp, and both survive reopen |
+| Title mutation protection-mode preservation | Self-roundtrip verified | Protected titles remain protected in memory, history, and after reopen; unprotected titles remain unprotected |
+| Same-value title mutation | Verified no-op | Complete parsed database, history, and `LastModificationTime` remain unchanged; a missing title set to empty remains absent |
 | KeePassXC-specific nullable group flags and AutoType obfuscation XML encodings | Supporting regression verified | Output XML asserts literal `null` and integer `0`, matching pinned upstream KeePassXC 2.7+ regressions |
 | KeePassXC opens Nian Pass output | Not yet externally verified | No released KeePassXC process has opened and resaved Nian Pass output in this repository suite |
 | KDBX 4.0 writing | Unsupported | Typed `UnsupportedWriteFormat`; pinned writer only emits exact 4.1 |

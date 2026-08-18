@@ -54,10 +54,12 @@ vault-core presentation
 ```
 
 M1 exposes one mutation: rename an entry title by stable `EntryId`. It uses the
-pinned upstream change-tracking API, which stores the prior entry state in
-history and updates `LastModificationTime`. The document never stores the
-master password; credentials are supplied again when saving. Its writer-first
-API cannot open or overwrite a path.
+pinned upstream change-tracking API only when the visible value changes. A real
+rename preserves the title field's protected/unprotected mode, stores the prior
+entry state in history, and updates `LastModificationTime`; a same-value request
+does none of those things. The document never stores the master password;
+credentials are supplied again when saving. Its writer-first API cannot open or
+overwrite a path.
 
 The pinned writer only accepts exact KDBX 4.1. The adapter therefore returns
 `UnsupportedWriteFormat` for KDBX 3.1 and 4.0 and performs no silent format,
@@ -75,6 +77,7 @@ KDF, cipher, or compression migration.
 8. **Saving a vault must not silently discard unsupported/unknown semantic data.**
 9. **A KDBX file must never be reconstructed from an incomplete presentation projection.**
 10. **Unsupported semantics must be preserved by retaining the complete parsed database representation whenever the underlying library supports it.**
+11. **A mutation must not change unrelated field semantics, including protected/unprotected state, unless explicitly requested.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.
