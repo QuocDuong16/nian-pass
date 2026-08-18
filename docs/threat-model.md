@@ -1,6 +1,6 @@
 # Threat Model
 
-This is the threat model for the M2 secure vault read/edit API foundation. It
+This is the threat model for the M2.5 structural vault operation foundation. It
 records boundaries and assumptions; it is not a claim that Nian Pass is ready
 to protect production credentials.
 
@@ -13,7 +13,8 @@ Secret material includes at least:
 - Entry passwords
 - Entry notes, which may contain recovery codes, API keys, or private text
 - TOTP seeds
-- Future protected or secret-bearing custom-field values
+- Protected and unprotected custom-field values, either of which may contain
+  credentials, recovery material, or private account identifiers
 - Key-file contents
 - Recovery secrets
 
@@ -28,6 +29,7 @@ Privacy-sensitive vault metadata includes at least:
 - Group names
 - URLs
 - Usernames
+- Custom-field names
 - Entry and group identifiers
 - Database paths
 - Vault names
@@ -72,6 +74,12 @@ information to an attacker even when their plaintext remains unavailable.
 - External compatibility commands hanging or failing non-interactively
 - Compatibility-test credential or decrypted-content leakage
 - Plaintext exposure through compatibility-test temporary files
+- Accidental permanent deletion when a caller expected recycle-bin behavior
+- Missing or incorrect deleted-object tombstones that break future sync
+- Recursive group deletion that silently leaves or loses descendants
+- Invalid group moves that create hierarchy cycles
+- Custom-field values copied into bulk projections or diagnostics
+- Standard, TOTP, or passkey fields mutated through a generic custom-field API
 
 ## Security assumptions
 
@@ -86,7 +94,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Backups and remote storage may observe encrypted database bytes and metadata
   such as size and modification time.
 
-## M2 controls and gaps
+## M2.5 controls and gaps
 
 The CLI reads the master password from an interactive terminal without echo and
 does not accept a password argument. Its input buffer is cleared on drop, and
@@ -94,7 +102,7 @@ the adapter returns generic credential and format errors without embedding the
 password. The bulk domain projection exposes privacy-sensitive visible title,
 username, URL, tags, and identifiers plus password/notes presence flags, but
 excludes protected Title/UserName/URL plaintext, password and notes plaintext,
-TOTP seeds, attachment contents, history, and custom-field values. Protected
+TOTP seeds, attachment contents, history, and all custom-field values. Protected
 standard metadata maps to an opaque `SummaryText::Protected` state, and the
 adapter checks protection before copying any visible text into the projection.
 
@@ -106,16 +114,26 @@ implicit string-borrowing implementation. Callers must explicitly invoke
 owned copy from the decrypted dependency representation into `SecretString` and
 does not place secrets in errors or logs.
 
+Custom-field enumeration returns `CustomFieldSummary` values containing only a
+privacy-sensitive name and protection state. Even an unprotected custom value
+requires an explicit entry UUID plus field name and returns `SecretString`.
+Generic custom-field APIs reject the five standard fields, supported legacy and
+current TOTP storage names, and KeePassXC passkey attribute names. Existing
+custom fields retain their protected/unprotected mode on update, while callers
+must select protection for new fields. Add, update, and delete operations retain
+the prior field state in entry history; same-value updates and deletion of a
+missing custom field do not change history or timestamps.
+
 Zeroization reduces accidental residual memory but cannot guarantee removal of
 copies made by the operating system, swap, allocator, runtime, compiler, or
 dependencies. A compromised process while the vault is unlocked can still read
 decrypted dependency state and any explicitly exposed secret.
 
-M2 does not yet address clipboard access, locked-memory allocation, process
+M2.5 does not yet address clipboard access, locked-memory allocation, process
 hardening, secure file replacement, conflict handling, sync, or dependency
 attestation. The project must not claim resistance to those threats yet.
 
-M2 confines experimental mutation to an opaque `KdbxDocument` retaining the
+M2.5 confines experimental mutation to an opaque `KdbxDocument` retaining the
 complete `keepass-rs` representation. It never serializes from the incomplete
 `Vault` projection, never stores the master password, and looks entries up by
 UUID. Title, username, URL, and password edits preserve existing field
@@ -128,19 +146,34 @@ destination I/O failure, and serialization failure do not contain identifiers,
 metadata, or secrets. KDBX 3.1 and 4.0 writes are rejected. The public save API
 accepts only a caller-owned writer and cannot perform an in-place path write.
 
+All entry and group mutations use stable UUID identities. Entry and group moves
+validate their complete source and destination before mutation; group moves
+reject root, self, and descendant targets. Same-parent moves and same-name group
+renames are complete no-ops. Projections remain immutable snapshots, so a fresh
+projection is required to observe document changes.
+
+Permanent deletion is named explicitly and is separate from KeePassXC's
+user-facing recycle-bin policy. Entry deletion creates a timestamped tombstone.
+Recursive group deletion tombstones the parent, every nested group, and every
+contained entry, matching KeePassXC 2.7.12 deletion tests; it also clears
+represented custom-icon back-references and metadata UUID pointers before
+removal. Root deletion is rejected. Tests verify unknown and invalid operations
+leave the complete database unchanged and verify all tombstones after
+save/reopen.
+
 Tests serialize to memory, reopen the result, verify preservation invariants,
 exercise wrong credentials and writer failure, and confirm the source fixture
 bytes remain unchanged. CI verifies every committed fixture against
 `fixtures/kdbx/SHA256SUMS` before running tests.
 
-These controls do not make production save safe. M1.5 has no durable temporary
+These controls do not make production save safe. M2.5 has no durable temporary
 file, `fsync`, backup, atomic replacement, concurrent-writer detection, or
 production conflict handling. See [write safety](write-safety.md) for the
 required future filesystem algorithm. `keepass-rs` cannot preserve fields it
 does not parse, so neither self-roundtrip nor external verification is a claim
 of universal lossless KDBX preservation.
 
-M1.5 invokes a released KeePassXC CLI only from an explicit test harness. The
+M2.5 invokes a released KeePassXC CLI only from an explicit test harness. The
 harness uses one synthetic public fixture credential, supplies it through
 stdin rather than process arguments, disables shell tracing, captures command
 output, never emits decrypted XML or protected field values, and performs all

@@ -1,9 +1,10 @@
 # Write Safety
 
-M1 provides only a writer-first, in-memory-capable KDBX 4.1 serialization
-foundation. It does not implement saving over an opened vault or replacing a
-production file. A successfully serialized buffer is not by itself a safe
-filesystem save.
+M2.5 still provides only a writer-first, in-memory-capable KDBX 4.1
+serialization foundation. Entry/group/custom-field mutations change only an
+opaque in-memory `KdbxDocument`; they do not implement saving over an opened
+vault or replacing a production file. A successfully serialized buffer is not
+by itself a safe filesystem save.
 
 ## Future production save algorithm
 
@@ -32,8 +33,9 @@ platform and reject destinations where it cannot meet them.
 
 ## Still required
 
-Production save also needs concurrent-writer detection, explicit conflict
+Production save also needs dirty-state tracking, unlock/lock session semantics,
+external-modification and concurrent-writer detection, explicit conflict
 handling, disk-full and permission failure tests, cleanup rules for failed
-temporary files, and backup retention and recovery behavior. M1.5's external
+temporary files, and backup retention and recovery behavior. The M2.5 external
 KeePassXC suite writes only isolated synthetic test files; it does not provide
 any production filesystem guarantee.

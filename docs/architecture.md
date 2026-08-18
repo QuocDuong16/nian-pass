@@ -1,8 +1,8 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M2 adds secure, application-facing read/edit APIs to the
-M1.5 preservation architecture without an in-place filesystem save,
+the source of truth. M2.5 adds narrow structural and custom-field operations to
+the M2 preservation architecture without an in-place filesystem save,
 presentation layer, or synchronization layer.
 
 ## Dependency direction
@@ -30,7 +30,7 @@ projection and a dependency-neutral `KdbxVersion`. The version preserves the
 exact major/minor header value, so the CLI can report `3.1`, `4.0`, or `4.1`
 without exposing a `keepass-rs` enum.
 
-The M2 domain model separates bulk metadata from explicit secret access:
+The M2.5 domain model separates bulk metadata from explicit secret access:
 
 - `EntrySummary` contains an identifier, `SummaryText` projections for Title,
   UserName, and URL, tags, and password/notes presence flags. `SummaryText`
@@ -43,6 +43,14 @@ The M2 domain model separates bulk metadata from explicit secret access:
   zeroizing buffer. It has no `Debug`, `Display`, `Clone`, serialization, deref,
   or implicit string-borrowing implementation; plaintext access requires
   `expose_secret()`.
+- `CustomFieldSummary` contains only a privacy-sensitive field name and
+  `FieldProtection`; it never contains a field value and intentionally has no
+  `Debug`, `Display`, or serialization implementation. Custom-field values,
+  including values stored unprotected in KDBX, require an explicit
+  `entry_custom_field` read and return `SecretString`.
+- `NewEntry` is a KDBX-independent request type. Its optional password is a
+  borrowed `SecretString`, so the primary creation API does not accept password
+  plaintext as a raw owned `String`.
 - `Vault` and `Group` remain secret-free list/navigation projections. Their
   metadata is privacy-sensitive and must not be logged or sent to telemetry by
   default.
@@ -53,9 +61,10 @@ not expose or understand.
 
 `KdbxDocument` privately owns the complete decrypted KDBX state represented by
 `keepass::Database`. `keepass-rs` remains only the parser/writer implementation
-behind the adapter. Callers may request a fresh `Vault` projection or one
-explicit password/notes value, but mutations and serialization operate on the
-retained complete database, never on the projection:
+behind the adapter. Callers may request a fresh `Vault` projection,
+custom-field metadata, or one explicit password/notes/custom value, but
+mutations and serialization operate on the retained complete database, never
+on the projection:
 
 ```text
 vault-core presentation
@@ -80,6 +89,47 @@ protected, including when `protect_password` is false. Database policy applies
 only to missing-field creation; an existing field's protection state always
 wins. URLs are stored verbatim without browser normalization.
 
+M2.5 adds only stable-ID structural operations:
+
+- `create_entry`, `move_entry`, and `permanently_delete_entry`
+- `create_group`, `rename_group`, `move_group`, and
+  `permanently_delete_group`
+- `custom_fields`, `entry_custom_field`, `set_entry_custom_field`, and
+  `delete_entry_custom_field`
+
+All lookups use `EntryId` or `GroupId`; names, indexes, paths, and tree position
+are never mutation identities. Upstream constructors generate UUID v4 values
+and initialize KeePass timestamps. Creation does not invent history. Empty
+Title, UserName, and URL inputs remain absent, `None` omits Password, and an
+explicitly supplied password (including empty) is created protected. Existing
+custom fields preserve protection on update; caller-selected protection applies
+only to a missing field. Custom-field add/update/delete uses tracked entry
+mutation, while same-value update and missing-field deletion are complete
+no-ops.
+
+The entry constructor otherwise retains upstream defaults: no Auto-Type,
+tags, custom data, icon, colors, URL override, attachment, or previous parent;
+quality checking is enabled and history exists but is empty. The group
+constructor starts with no notes, tags, icon, custom data, children, or previous
+parent; it is expanded and its Auto-Type/searching values inherit. Upstream
+constructors initialize only the new object's timestamps and do not rewrite the
+parent group's timestamps.
+
+Entry moves preserve UUID, fields, and history, record the previous parent, and
+update `LocationChanged`; same-parent moves are complete no-ops. Group moves
+preserve UUID, reject root/self/descendant cycles, update `LocationChanged`, and
+make same-parent moves complete no-ops. Every public projection call returns a
+fresh snapshot: an older `Vault` value is never mutated after document changes.
+
+Permanent deletion is intentionally distinct from KeePassXC's product-level
+recycle-bin workflow. Entry deletion creates one UUID/timestamp tombstone.
+Recursive group deletion creates a tombstone for every removed entry and group,
+matching KeePassXC 2.7.12's `TestDeletedObjects` behavior, while cleaning custom
+icon back-references and metadata UUID pointers represented by `keepass-rs`.
+Root deletion is rejected. Reserved standard, TOTP, and KeePassXC passkey field
+names cannot be accessed or modified through generic custom-field APIs. Root
+rename remains supported because it is an ordinary KeePass group metadata edit.
+
 The document never stores the master password; credentials are supplied again
 when saving. Its writer-first API cannot open or overwrite a path.
 
@@ -103,13 +153,17 @@ KDF, cipher, or compression migration.
 12. **Secret-bearing fields must be fetched explicitly and must not be included in bulk vault projections.**
 13. **Public mutation APIs must preserve an existing KDBX field's protection mode unless an API explicitly represents a protection-mode change.**
 14. **Bulk projections must not materialize plaintext from fields marked protected in the underlying vault.**
+15. **Every structural mutation must resolve stable UUID identity before changing the database.**
+16. **Permanent deletion must create complete timestamped KDBX tombstones; recycle-bin policy must remain explicit and separate.**
+17. **Invalid, unknown, same-value, and same-parent requests must not partially mutate retained database state.**
+18. **Generic custom-field APIs must not bypass standard-field, TOTP, or passkey-specific semantics.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.
 
 ## Current compatibility boundary
 
-M2 opens local files through `keepass-rs` and maps secret-free vault metadata
+M2.5 opens local files through `keepass-rs` and maps secret-free vault metadata
 into `vault-core`. Trusted fixtures verify specific KDBX 3.1, 4.0,
 and 4.1 combinations; the exact evidence and untested dimensions are recorded
 in [the compatibility matrix](kdbx-compatibility.md). Format-level verification
@@ -119,14 +173,17 @@ M1 proves a KDBX 4.1 Nian Pass self-roundtrip for the trusted KeePassXC 2.7.12
 fixture. M1.5 separately uses a released `keepassxc-cli` as an independent
 implementation: Nian Pass mutates and writes a temporary copy, KeePassXC opens
 and lists it, KeePassXC performs a second explicit title mutation and resave,
-and Nian Pass reopens and compares the result. Self-roundtrip evidence is not
-external interoperability evidence, and neither form proves preservation of
-data the dependency does not parse or byte-for-byte ciphertext stability.
+and Nian Pass reopens and compares the result. The external harness also proves
+that KeePassXC opens and lists a separately generated Nian Pass-created entry.
+Self-roundtrip evidence is not external interoperability evidence, and neither
+form proves preservation of data the dependency does not parse or byte-for-byte
+ciphertext stability.
 
 KeePassXC is test tooling only. It is not a library, runtime, or deployment
 dependency of Nian Pass. The external harness writes only inside an isolated
 temporary directory through the existing caller-owned writer API; no public
 save-to-path API is introduced. Atomic filesystem replacement remains a later
-milestone. M2 self-roundtrip tests extend the evidence to username, URL, and
-password mutation, including protection/history preservation; the external
-suite still proves only its existing title-mutation pipeline.
+milestone. M2.5 self-roundtrip tests extend the evidence to username, URL,
+password, structural operations, recursive tombstones, and protected custom
+fields. External creation evidence proves KeePassXC open/list only; the strict
+KeePassXC resave comparator remains the separate title-mutation pipeline.

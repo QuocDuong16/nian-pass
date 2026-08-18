@@ -14,10 +14,24 @@ use std::{
 use keepass::{
     Database, DatabaseKey,
     config::DatabaseVersion,
-    db::{DatabaseOpenError, DatabaseSaveError, fields},
+    db::{DatabaseOpenError, DatabaseSaveError, MoveGroupError, Times, fields},
 };
 use thiserror::Error;
-use vault_core::{EntryId, EntrySummary, Group, GroupId, SecretString, SummaryText, Vault};
+use vault_core::{
+    CustomFieldSummary, EntryId, EntrySummary, FieldProtection, Group, GroupId, NewEntry,
+    SecretString, SummaryText, Vault,
+};
+
+const PASSKEY_FIELD_PREFIX: &str = "KPEX_PASSKEY";
+const TOTP_FIELD_NAMES: [&str; 7] = [
+    fields::OTP,
+    "TOTP Seed",
+    "TOTP Settings",
+    "TimeOtp-Secret-Base32",
+    "TimeOtp-Algorithm",
+    "TimeOtp-Length",
+    "TimeOtp-Period",
+];
 
 #[derive(Clone, Copy)]
 enum MissingFieldProtection {
@@ -86,7 +100,7 @@ pub struct KdbxDocument {
 impl KdbxDocument {
     /// Opens a KDBX document from a file using a master password.
     ///
-    /// M2 supports password credentials only. The document does not retain the
+    /// M2.5 supports password credentials only. The document does not retain the
     /// password, and the credential API is expected to grow to support keyfiles
     /// in a later milestone.
     pub fn open(path: impl AsRef<Path>, master_password: &str) -> Result<Self, KdbxError> {
@@ -199,6 +213,343 @@ impl KdbxDocument {
         )
     }
 
+    /// Creates an entry in the requested group and returns its generated stable
+    /// identifier.
+    ///
+    /// The upstream constructor generates a UUID v4, initializes all entry
+    /// timestamps, and creates empty history. Empty title, username, and URL
+    /// inputs remain absent. An explicitly supplied password remains present
+    /// even when empty and is always protected. Other non-empty standard fields
+    /// follow the database memory-protection policy.
+    pub fn create_entry(
+        &mut self,
+        group: &GroupId,
+        input: NewEntry<'_>,
+    ) -> Result<EntryId, KdbxError> {
+        self.ensure_writable_format()?;
+
+        let group_id = self.find_group_id(group)?;
+        let protect_title =
+            self.missing_field_is_protected(MissingFieldProtection::DatabaseTitlePolicy);
+        let protect_username =
+            self.missing_field_is_protected(MissingFieldProtection::DatabaseUsernamePolicy);
+        let protect_url =
+            self.missing_field_is_protected(MissingFieldProtection::DatabaseUrlPolicy);
+
+        let mut parent = self
+            .database
+            .group_mut(group_id)
+            .ok_or(KdbxError::GroupNotFound)?;
+        let mut entry = parent.add_entry();
+        let entry_id = entry.id();
+
+        set_new_field(&mut entry, fields::TITLE, input.title, protect_title);
+        set_new_field(
+            &mut entry,
+            fields::USERNAME,
+            input.username,
+            protect_username,
+        );
+        set_new_field(&mut entry, fields::URL, input.url, protect_url);
+        if let Some(password) = input.password {
+            entry.set_protected(fields::PASSWORD, password.expose_secret());
+        }
+
+        Ok(EntryId::new(entry_id.to_string()))
+    }
+
+    /// Permanently removes an entry from the KDBX tree and creates its deleted-
+    /// object tombstone.
+    ///
+    /// This is deliberately not a product-level recycle-bin operation. The
+    /// entry UUID is recorded with an upstream-generated deletion timestamp so
+    /// a future sync layer can distinguish deletion from absence.
+    pub fn permanently_delete_entry(&mut self, id: &EntryId) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let upstream_id = self.find_entry_id(id)?;
+        let mut entry = self
+            .database
+            .entry_mut(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+        entry.track_changes().remove();
+        Ok(())
+    }
+
+    /// Moves an entry by stable identifier without creating field history.
+    ///
+    /// A real move preserves the entry UUID and fields, records the previous
+    /// parent through the upstream model, and updates only `LocationChanged` on
+    /// the entry. Moving to the current parent is a complete no-op.
+    pub fn move_entry(&mut self, entry: &EntryId, destination: &GroupId) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let entry_id = self.find_entry_id(entry)?;
+        let destination_id = self.find_group_id(destination)?;
+        let current_parent = self
+            .database
+            .entry(entry_id)
+            .ok_or(KdbxError::EntryNotFound)?
+            .parent()
+            .id();
+        if current_parent == destination_id {
+            return Ok(());
+        }
+
+        let mut entry = self
+            .database
+            .entry_mut(entry_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+        entry
+            .move_to(destination_id)
+            .map_err(|_| KdbxError::GroupNotFound)?;
+        entry.times.location_changed = Some(Times::now());
+        Ok(())
+    }
+
+    /// Creates an empty group beneath the requested parent.
+    ///
+    /// The upstream constructor generates a UUID v4 and initializes the
+    /// KeePass group defaults and timestamps. Empty group names are accepted.
+    pub fn create_group(&mut self, parent: &GroupId, name: &str) -> Result<GroupId, KdbxError> {
+        self.ensure_writable_format()?;
+
+        let parent_id = self.find_group_id(parent)?;
+        let mut parent = self
+            .database
+            .group_mut(parent_id)
+            .ok_or(KdbxError::GroupNotFound)?;
+        let mut group = parent.add_group();
+        group.name = name.to_owned();
+        Ok(GroupId::new(group.id().to_string()))
+    }
+
+    /// Renames a group by stable identifier.
+    ///
+    /// Setting the existing name is a complete no-op. A real rename updates the
+    /// group's last-modification timestamp without inventing entry history.
+    pub fn rename_group(&mut self, id: &GroupId, name: &str) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let group_id = self.find_group_id(id)?;
+        let current_name = self
+            .database
+            .group(group_id)
+            .ok_or(KdbxError::GroupNotFound)?
+            .name
+            .clone();
+        if current_name == name {
+            return Ok(());
+        }
+
+        let mut group = self
+            .database
+            .group_mut(group_id)
+            .ok_or(KdbxError::GroupNotFound)?;
+        group.track_changes().edit(|tracked| {
+            tracked.name = name.to_owned();
+        });
+        Ok(())
+    }
+
+    /// Moves a non-root group beneath another group by stable identifier.
+    ///
+    /// Root moves, self moves, and descendant cycles return
+    /// [`KdbxError::InvalidGroupMove`]. Moving to the current parent is a
+    /// complete no-op.
+    pub fn move_group(
+        &mut self,
+        group: &GroupId,
+        destination_parent: &GroupId,
+    ) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let group_id = self.find_group_id(group)?;
+        let destination_id = self.find_group_id(destination_parent)?;
+        let current_parent = self
+            .database
+            .group(group_id)
+            .ok_or(KdbxError::GroupNotFound)?
+            .parent()
+            .map(|parent| parent.id());
+        let Some(current_parent) = current_parent else {
+            return Err(KdbxError::InvalidGroupMove);
+        };
+        if current_parent == destination_id {
+            return Ok(());
+        }
+
+        let mut group = self
+            .database
+            .group_mut(group_id)
+            .ok_or(KdbxError::GroupNotFound)?;
+        group
+            .track_changes()
+            .move_to(destination_id)
+            .map_err(map_group_move_error)?;
+        Ok(())
+    }
+
+    /// Permanently removes a non-root group and its complete subtree.
+    ///
+    /// Every removed group and entry receives a deleted-object tombstone, which
+    /// matches KeePassXC 2.7.12 permanent-deletion tests. This method also
+    /// clears internal custom-icon back-references and metadata UUID pointers
+    /// before invoking the tracked upstream recursive remover. It deliberately
+    /// does not implement the product-level recycle-bin workflow.
+    pub fn permanently_delete_group(&mut self, id: &GroupId) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let group_id = self.find_group_id(id)?;
+        if group_id == self.database.root().id() {
+            return Err(KdbxError::CannotDeleteRootGroup);
+        }
+
+        let subtree = self.group_subtree_ids(group_id)?;
+        for descendant in &subtree {
+            self.database
+                .group_mut(*descendant)
+                .ok_or(KdbxError::GroupNotFound)?
+                .set_icon_none();
+        }
+        clear_deleted_group_metadata_references(&mut self.database, &subtree);
+
+        let mut group = self
+            .database
+            .group_mut(group_id)
+            .ok_or(KdbxError::GroupNotFound)?;
+        group
+            .track_changes()
+            .remove()
+            .map_err(|_| KdbxError::CannotDeleteRootGroup)?;
+        Ok(())
+    }
+
+    /// Lists privacy-sensitive custom-field names and protection states without
+    /// copying any field value.
+    ///
+    /// Ordering is unspecified. Standard fields, TOTP storage attributes, and
+    /// KeePassXC passkey attributes are excluded.
+    pub fn custom_fields(&self, id: &EntryId) -> Result<Vec<CustomFieldSummary>, KdbxError> {
+        let upstream_id = self.find_entry_id(id)?;
+        let entry = self
+            .database
+            .entry(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+
+        Ok(entry
+            .fields
+            .iter()
+            .filter(|(name, _)| !is_reserved_field(name))
+            .map(|(name, value)| {
+                let protection = if value.is_protected() {
+                    FieldProtection::Protected
+                } else {
+                    FieldProtection::Unprotected
+                };
+                CustomFieldSummary::new(name.clone(), protection)
+            })
+            .collect())
+    }
+
+    /// Fetches one custom field value explicitly as a secret-bearing value.
+    ///
+    /// A missing field returns `Ok(None)`, distinct from an explicitly empty
+    /// field. Reserved standard, TOTP, and passkey names cannot bypass their
+    /// dedicated APIs through this generic path.
+    pub fn entry_custom_field(
+        &self,
+        entry: &EntryId,
+        name: &str,
+    ) -> Result<Option<SecretString>, KdbxError> {
+        reject_reserved_field(name)?;
+        self.entry_secret(entry, name)
+    }
+
+    /// Creates or updates one custom field through tracked entry mutation.
+    ///
+    /// Existing fields preserve their current protection state; the protection
+    /// argument applies only when the field is missing. Same-value updates are
+    /// complete no-ops.
+    pub fn set_entry_custom_field(
+        &mut self,
+        entry: &EntryId,
+        name: &str,
+        value: &SecretString,
+        new_field_protection: FieldProtection,
+    ) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+        reject_reserved_field(name)?;
+
+        let upstream_id = self.find_entry_id(entry)?;
+        let (same_value, existing_protection) = {
+            let current_entry = self
+                .database
+                .entry(upstream_id)
+                .ok_or(KdbxError::EntryNotFound)?;
+            let existing = current_entry.fields.get(name);
+            let protection = existing.map(|existing| {
+                if existing.is_protected() {
+                    FieldProtection::Protected
+                } else {
+                    FieldProtection::Unprotected
+                }
+            });
+            (
+                existing.is_some_and(|existing| existing.get() == value.expose_secret()),
+                protection,
+            )
+        };
+        if same_value {
+            return Ok(());
+        }
+
+        let protection = existing_protection.unwrap_or(new_field_protection);
+        let mut entry = self
+            .database
+            .entry_mut(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+        let mut tracked = entry.track_changes();
+        match protection {
+            FieldProtection::Protected => tracked.set_protected(name, value.expose_secret()),
+            FieldProtection::Unprotected => tracked.set_unprotected(name, value.expose_secret()),
+        }
+        Ok(())
+    }
+
+    /// Deletes one custom field through tracked entry mutation.
+    ///
+    /// Missing fields are complete no-ops. Reserved names are rejected and an
+    /// unknown entry remains distinct from a missing field.
+    pub fn delete_entry_custom_field(
+        &mut self,
+        entry: &EntryId,
+        name: &str,
+    ) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+        reject_reserved_field(name)?;
+
+        let upstream_id = self.find_entry_id(entry)?;
+        let exists = self
+            .database
+            .entry(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?
+            .fields
+            .contains_key(name);
+        if !exists {
+            return Ok(());
+        }
+
+        let mut entry = self
+            .database
+            .entry_mut(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+        entry.track_changes().edit(|tracked| {
+            tracked.as_mut().fields.remove(name);
+        });
+        Ok(())
+    }
+
     /// Serializes this document to a caller-owned writer using a master
     /// password.
     ///
@@ -299,6 +650,95 @@ impl KdbxDocument {
             .map(|entry| entry.id())
             .ok_or(KdbxError::EntryNotFound)
     }
+
+    fn find_group_id(&self, id: &GroupId) -> Result<keepass::db::GroupId, KdbxError> {
+        self.database
+            .iter_all_groups()
+            .find(|group| group.id().to_string() == id.as_str())
+            .map(|group| group.id())
+            .ok_or(KdbxError::GroupNotFound)
+    }
+
+    fn group_subtree_ids(
+        &self,
+        root: keepass::db::GroupId,
+    ) -> Result<Vec<keepass::db::GroupId>, KdbxError> {
+        let mut pending = vec![root];
+        let mut result = Vec::new();
+
+        while let Some(group_id) = pending.pop() {
+            let group = self
+                .database
+                .group(group_id)
+                .ok_or(KdbxError::GroupNotFound)?;
+            pending.extend(group.group_ids());
+            result.push(group_id);
+        }
+
+        Ok(result)
+    }
+}
+
+fn set_new_field(
+    entry: &mut keepass::db::EntryMut<'_>,
+    name: &str,
+    value: &str,
+    protected_by_policy: bool,
+) {
+    if value.is_empty() {
+        return;
+    }
+
+    if protected_by_policy {
+        entry.set_protected(name, value);
+    } else {
+        entry.set_unprotected(name, value);
+    }
+}
+
+fn map_group_move_error(error: MoveGroupError) -> KdbxError {
+    match error {
+        MoveGroupError::NotFound(_) => KdbxError::GroupNotFound,
+        MoveGroupError::CannotMoveRoot | MoveGroupError::WouldCreateCycle => {
+            KdbxError::InvalidGroupMove
+        }
+        _ => KdbxError::InvalidGroupMove,
+    }
+}
+
+fn clear_deleted_group_metadata_references(
+    database: &mut Database,
+    deleted_groups: &[keepass::db::GroupId],
+) {
+    let contains = |uuid| deleted_groups.iter().any(|group| group.uuid() == uuid);
+    let meta = &mut database.meta;
+
+    if meta.recyclebin_uuid.is_some_and(contains) {
+        meta.recyclebin_uuid = None;
+    }
+    if meta.entry_templates_group.is_some_and(contains) {
+        meta.entry_templates_group = None;
+    }
+    if meta.last_selected_group.is_some_and(contains) {
+        meta.last_selected_group = None;
+    }
+    if meta.last_top_visible_group.is_some_and(contains) {
+        meta.last_top_visible_group = None;
+    }
+}
+
+fn is_reserved_field(name: &str) -> bool {
+    fields::KNOWN_FIELDS.contains(&name)
+        || TOTP_FIELD_NAMES.contains(&name)
+        || name.starts_with(PASSKEY_FIELD_PREFIX)
+}
+
+fn reject_reserved_field(name: &str) -> Result<(), KdbxError> {
+    if is_reserved_field(name) {
+        Err(KdbxError::ReservedField)
+    } else {
+        Ok(())
+    }
 }
 
 /// Errors returned while opening, projecting, mutating, or serializing KDBX.
@@ -332,6 +772,22 @@ pub enum KdbxError {
     /// No entry matched the supplied stable identifier.
     #[error("entry was not found")]
     EntryNotFound,
+
+    /// No group matched the supplied stable identifier.
+    #[error("group was not found")]
+    GroupNotFound,
+
+    /// The root group cannot be permanently deleted.
+    #[error("the root group cannot be permanently deleted")]
+    CannotDeleteRootGroup,
+
+    /// A group move targeted the root, itself, or one of its descendants.
+    #[error("the group move is invalid")]
+    InvalidGroupMove,
+
+    /// A generic custom-field API targeted a reserved field name.
+    #[error("the field name is reserved")]
+    ReservedField,
 
     /// The caller-owned output writer rejected a write operation.
     #[error("could not write the KDBX output")]
@@ -470,9 +926,11 @@ mod tests {
 
     use keepass::{
         Database, DatabaseKey,
-        db::{MemoryProtection, fields},
+        db::{MemoryProtection, Times, Value, fields},
     };
-    use vault_core::{EntryId, Group, SecretString, SummaryText};
+    use vault_core::{
+        EntryId, FieldProtection, Group, GroupId, NewEntry, SecretString, SummaryText,
+    };
 
     use super::{KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
 
@@ -481,10 +939,13 @@ mod tests {
     const WRONG_FIXTURE_PASSWORD: &str = "wrong-public-test-password";
     const EXTERNAL_FIXTURE: &str = "keepassxc-2.7.12-kdbx41.kdbx";
     const NIAN_PASS_EXTERNAL_TITLE: &str = "Nian Pass — Tiếng Việt 日本語 👩‍💻 e\u{301}";
+    const NIAN_PASS_CREATED_TITLE: &str = "Nian Pass created lifecycle entry";
     const KEEPASSXC_ENTRY_TITLE: &str = "ayyyyo";
     const KEEPASSXC_EXTERNAL_TITLE: &str = "KeePassXC resaved title";
     const TEST_SECRET_BEFORE: &str = "public-test-password-before";
     const TEST_SECRET_AFTER: &str = "public-test-password-after";
+    const TEST_CUSTOM_PROTECTED: &str = "public-test-custom-protected";
+    const TEST_CUSTOM_UNPROTECTED: &str = "public-test-custom-unprotected";
 
     struct SemanticSnapshot {
         version: KdbxVersion,
@@ -720,6 +1181,37 @@ mod tests {
             .expect("projected entry should exist in the complete database");
 
         (projected_id, upstream_id)
+    }
+
+    fn root_group_ids(document: &KdbxDocument) -> (GroupId, keepass::db::GroupId) {
+        let upstream_id = document.database.root().id();
+        (GroupId::new(upstream_id.to_string()), upstream_id)
+    }
+
+    fn first_child_group_ids(document: &KdbxDocument) -> (GroupId, keepass::db::GroupId) {
+        let root = document.database.root();
+        let child = root
+            .groups()
+            .next()
+            .expect("fixture root should have a child group");
+        (GroupId::new(child.id().to_string()), child.id())
+    }
+
+    fn unknown_entry_id() -> EntryId {
+        EntryId::new("00000000-0000-0000-0000-000000000000")
+    }
+
+    fn unknown_group_id() -> GroupId {
+        GroupId::new("00000000-0000-0000-0000-000000000000")
+    }
+
+    fn reopen(document: &KdbxDocument) -> KdbxDocument {
+        let mut saved = Vec::new();
+        document
+            .save_to_writer(&mut saved, FIXTURE_PASSWORD)
+            .expect("mutated document should serialize");
+        KdbxDocument::open_reader(&mut Cursor::new(saved), FIXTURE_PASSWORD)
+            .expect("mutated document should reopen")
     }
 
     fn history_len(entry: &keepass::db::Entry) -> usize {
@@ -1439,9 +1931,74 @@ mod tests {
         let source_bytes = fs::read(&source_path).expect("trusted fixture should be readable");
         let temp = TestTempDir::create();
         let fixture_copy = temp.join("external-source-copy.kdbx");
+        let created_output = temp.join("nian-pass-created-entry.kdbx");
         let nian_output = temp.join("nian-pass-output.kdbx");
         let keepassxc_output = temp.join("keepassxc-output.kdbx");
         fs::copy(&source_path, &fixture_copy).expect("fixture should copy into the temp directory");
+
+        let mut creation_document = KdbxDocument::open(&fixture_copy, FIXTURE_PASSWORD)
+            .expect("trusted KDBX 4.1 fixture should open for creation");
+        let (creation_root_id, _) = root_group_ids(&creation_document);
+        let created_entry_id = creation_document
+            .create_entry(
+                &creation_root_id,
+                NewEntry {
+                    title: NIAN_PASS_CREATED_TITLE,
+                    username: "created-user",
+                    url: "https://created.example.test",
+                    password: None,
+                },
+            )
+            .expect("Nian Pass entry creation should succeed");
+        assert!(
+            creation_document.find_entry_id(&created_entry_id).is_ok(),
+            "created entry UUID was not retained"
+        );
+        let expected_creation_database = creation_document.database.clone();
+        let mut creation_output_file =
+            fs::File::create(&created_output).expect("test-only creation output should be created");
+        creation_document
+            .save_to_writer(&mut creation_output_file, FIXTURE_PASSWORD)
+            .expect("created entry should serialize");
+        drop(creation_output_file);
+        let creation_reopened = KdbxDocument::open(&created_output, FIXTURE_PASSWORD)
+            .expect("created-entry output should reopen");
+        assert!(
+            creation_reopened.database == expected_creation_database,
+            "created-entry output changed before external validation"
+        );
+        let creation_info = run_keepassxc(
+            "KeePassXC opening Nian Pass created-entry output",
+            vec![
+                OsString::from("db-info"),
+                OsString::from("-q"),
+                created_output.as_os_str().to_owned(),
+            ],
+        );
+        let creation_info = String::from_utf8(creation_info.stdout)
+            .expect("KeePassXC created-entry db-info output should be UTF-8");
+        assert!(
+            creation_info.contains("Number of entries: 3"),
+            "KeePassXC did not count the Nian Pass-created entry"
+        );
+        let creation_listing = run_keepassxc(
+            "KeePassXC listing Nian Pass created-entry output",
+            vec![
+                OsString::from("ls"),
+                OsString::from("-q"),
+                OsString::from("-R"),
+                OsString::from("-f"),
+                created_output.as_os_str().to_owned(),
+            ],
+        );
+        let creation_listing = String::from_utf8(creation_listing.stdout)
+            .expect("KeePassXC created-entry listing should be UTF-8");
+        assert!(
+            creation_listing
+                .lines()
+                .any(|line| line == NIAN_PASS_CREATED_TITLE),
+            "KeePassXC did not list the entry created by Nian Pass"
+        );
 
         let mut document = KdbxDocument::open(&fixture_copy, FIXTURE_PASSWORD)
             .expect("trusted KDBX 4.1 fixture should open");
@@ -1964,6 +2521,1009 @@ mod tests {
             empty.expose_secret().is_empty(),
             "explicit empty notes changed value"
         );
+    }
+
+    #[test]
+    fn entry_creation_uses_upstream_identity_defaults_and_fresh_projection() {
+        let path = fixture_path(EXTERNAL_FIXTURE);
+        let source_bytes = fs::read(&path).expect("fixture should be readable");
+        let mut document = kdbx41_document();
+        let old_projection = document.projection().expect("fixture should project");
+        let (root_id, upstream_root_id) = root_group_ids(&document);
+        let original_entries = document.database.num_entries();
+        let original_groups = document.database.num_groups();
+        let policy = MemoryProtection {
+            protect_title: true,
+            protect_username: false,
+            protect_password: false,
+            protect_url: true,
+            protect_notes: false,
+        };
+        document.database.meta.memory_protection = Some(policy);
+        let password = SecretString::new("public-created-password".to_owned());
+        let empty_password = SecretString::new(String::new());
+
+        let created = document
+            .create_entry(
+                &root_id,
+                NewEntry {
+                    title: "Created entry",
+                    username: "",
+                    url: "https://created.example.test/đường-dẫn",
+                    password: Some(&password),
+                },
+            )
+            .expect("entry creation should succeed");
+        let second = document
+            .create_entry(
+                &root_id,
+                NewEntry {
+                    title: "",
+                    username: "",
+                    url: "",
+                    password: None,
+                },
+            )
+            .expect("minimal entry creation should succeed");
+        let third = document
+            .create_entry(
+                &root_id,
+                NewEntry {
+                    title: "",
+                    username: "",
+                    url: "",
+                    password: Some(&empty_password),
+                },
+            )
+            .expect("explicit empty password creation should succeed");
+
+        assert!(
+            created != second && second != third && created != third,
+            "generated entry UUIDs collided"
+        );
+        assert!(!created.as_str().is_empty(), "created UUID was empty");
+        assert_eq!(document.database.num_entries(), original_entries + 3);
+        assert_eq!(document.database.num_groups(), original_groups);
+        assert!(
+            old_projection.find_entry(&created).is_none(),
+            "old projection changed after document mutation"
+        );
+        assert!(
+            document
+                .projection()
+                .expect("mutated document should project")
+                .find_entry(&created)
+                .is_some(),
+            "fresh projection omitted created entry"
+        );
+
+        let upstream_created = document
+            .find_entry_id(&created)
+            .expect("created entry should be discoverable by UUID");
+        let entry = document
+            .database
+            .entry(upstream_created)
+            .expect("created entry should exist");
+        assert!(entry.parent().id() == upstream_root_id);
+        assert!(entry.autotype.is_none());
+        assert!(entry.tags.is_empty());
+        assert!(entry.custom_data.is_empty());
+        assert!(entry.icon().is_none());
+        assert!(entry.foreground_color.is_none());
+        assert!(entry.background_color.is_none());
+        assert!(entry.override_url.is_none());
+        assert!(entry.quality_check);
+        assert!(entry.attachments().next().is_none());
+        assert!(entry.previous_parent().is_none());
+        assert!(
+            entry
+                .fields
+                .get(fields::TITLE)
+                .is_some_and(|value| value.get() == "Created entry" && value.is_protected()),
+            "created title did not follow database protection policy"
+        );
+        assert!(
+            !entry.fields.contains_key(fields::USERNAME),
+            "empty username should remain absent"
+        );
+        assert!(
+            entry
+                .fields
+                .get(fields::URL)
+                .is_some_and(|value| value.is_protected()),
+            "created URL did not follow database protection policy"
+        );
+        assert!(
+            entry
+                .fields
+                .get(fields::PASSWORD)
+                .is_some_and(|value| value.is_protected()),
+            "created password was not protected"
+        );
+        assert_eq!(history_len(&entry), 0, "creation invented entry history");
+        assert!(entry.times.creation.is_some());
+        assert!(entry.times.last_modification.is_some());
+        assert!(entry.times.last_access.is_some());
+        assert!(entry.times.location_changed.is_some());
+
+        let upstream_second = document
+            .find_entry_id(&second)
+            .expect("second entry should be discoverable by UUID");
+        assert!(
+            document
+                .database
+                .entry(upstream_second)
+                .is_some_and(|entry| entry.fields.is_empty()),
+            "empty optional creation fields were materialized"
+        );
+        let upstream_third = document
+            .find_entry_id(&third)
+            .expect("third entry should be discoverable by UUID");
+        let third_entry = document
+            .database
+            .entry(upstream_third)
+            .expect("third entry should exist");
+        assert_eq!(third_entry.fields.len(), 1);
+        assert!(
+            third_entry
+                .fields
+                .get(fields::PASSWORD)
+                .is_some_and(|value| value.get().is_empty() && value.is_protected()),
+            "explicit empty password was not preserved as protected"
+        );
+
+        let expected_database = document.database.clone();
+        let reopened = reopen(&document);
+        assert!(
+            reopened.database == expected_database,
+            "entry creation round-trip changed parsed database semantics"
+        );
+        assert!(
+            fs::read(path).expect("source fixture should remain readable") == source_bytes,
+            "entry creation test modified its source fixture"
+        );
+    }
+
+    #[test]
+    fn entry_move_preserves_identity_fields_history_and_roundtrips() {
+        let mut document = kdbx41_document();
+        let old_projection = document.projection().expect("fixture should project");
+        let (entry_id, upstream_entry_id) = first_entry_ids(&document);
+        let (destination_id, upstream_destination_id) = first_child_group_ids(&document);
+        let source_id = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist")
+            .parent()
+            .id();
+        document
+            .database
+            .entry_mut(upstream_entry_id)
+            .expect("entry should exist")
+            .times
+            .location_changed = Some(Times::epoch());
+        let before = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist");
+        let fields_before = before.fields.clone();
+        let history_before = before.history.clone();
+        let last_modification_before = before.times.last_modification;
+
+        document
+            .move_entry(&entry_id, &destination_id)
+            .expect("entry move should succeed");
+        let moved = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("moved entry should exist");
+        assert!(moved.id() == upstream_entry_id);
+        assert!(moved.parent().id() == upstream_destination_id);
+        assert!(
+            moved
+                .previous_parent()
+                .is_some_and(|group| group.id() == source_id)
+        );
+        assert!(
+            moved.fields == fields_before,
+            "entry move changed field data"
+        );
+        assert!(
+            moved.history == history_before,
+            "entry move changed history"
+        );
+        assert!(moved.times.last_modification == last_modification_before);
+        assert!(moved.times.location_changed != Some(Times::epoch()));
+        assert!(
+            !document
+                .database
+                .group(source_id)
+                .expect("source group should exist")
+                .entry_ids()
+                .any(|id| id == upstream_entry_id)
+        );
+        assert_eq!(
+            document
+                .database
+                .group(upstream_destination_id)
+                .expect("destination should exist")
+                .entry_ids()
+                .filter(|id| *id == upstream_entry_id)
+                .count(),
+            1
+        );
+        let fresh_projection = document
+            .projection()
+            .expect("moved document should project");
+        assert!(
+            old_projection
+                .root()
+                .entries()
+                .iter()
+                .any(|entry| entry.id() == &entry_id),
+            "old projection changed after entry move"
+        );
+        assert!(
+            !fresh_projection
+                .root()
+                .entries()
+                .iter()
+                .any(|entry| entry.id() == &entry_id),
+            "fresh projection retained moved entry in source"
+        );
+        assert!(
+            fresh_projection
+                .find_group(&destination_id)
+                .is_some_and(|group| group.entries().iter().any(|entry| entry.id() == &entry_id)),
+            "fresh projection omitted moved entry from destination"
+        );
+
+        let before_same_group = document.database.clone();
+        document
+            .move_entry(&entry_id, &destination_id)
+            .expect("same-group move should succeed");
+        assert!(
+            document.database == before_same_group,
+            "same-group entry move changed the database"
+        );
+
+        let expected_database = document.database.clone();
+        let reopened = reopen(&document);
+        assert!(
+            reopened.database == expected_database,
+            "entry move round-trip changed parsed semantics"
+        );
+    }
+
+    #[test]
+    fn entry_move_validation_and_unknown_delete_leave_database_unchanged() {
+        let mut document = kdbx41_document();
+        let (entry_id, _) = first_entry_ids(&document);
+        let before = document.database.clone();
+
+        assert!(matches!(
+            document.move_entry(&unknown_entry_id(), &unknown_group_id()),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(document.database == before);
+        assert!(matches!(
+            document.move_entry(&entry_id, &unknown_group_id()),
+            Err(KdbxError::GroupNotFound)
+        ));
+        assert!(document.database == before);
+        assert!(matches!(
+            document.create_entry(
+                &unknown_group_id(),
+                NewEntry {
+                    title: "unused",
+                    username: "",
+                    url: "",
+                    password: None,
+                }
+            ),
+            Err(KdbxError::GroupNotFound)
+        ));
+        assert!(document.database == before);
+        assert!(matches!(
+            document.permanently_delete_entry(&unknown_entry_id()),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(document.database == before);
+    }
+
+    #[test]
+    fn permanent_entry_delete_creates_and_roundtrips_tombstone() {
+        let mut document = kdbx41_document();
+        let old_projection = document.projection().expect("fixture should project");
+        let (entry_id, upstream_entry_id) = first_entry_ids(&document);
+        let original_count = document.database.num_entries();
+        let original_deleted = document.database.deleted_objects.len();
+
+        document
+            .permanently_delete_entry(&entry_id)
+            .expect("permanent entry deletion should succeed");
+
+        assert_eq!(document.database.num_entries(), original_count - 1);
+        assert!(document.database.entry(upstream_entry_id).is_none());
+        assert_eq!(
+            document.database.deleted_objects.len(),
+            original_deleted + 1
+        );
+        assert!(old_projection.find_entry(&entry_id).is_some());
+        assert!(
+            document
+                .projection()
+                .expect("deleted document should project")
+                .find_entry(&entry_id)
+                .is_none(),
+            "fresh projection retained permanently deleted entry"
+        );
+        assert!(
+            document
+                .database
+                .deleted_objects
+                .get(&upstream_entry_id.uuid())
+                .is_some_and(|timestamp| timestamp.is_some()),
+            "entry tombstone did not contain a deletion timestamp"
+        );
+
+        let expected_database = document.database.clone();
+        let reopened = reopen(&document);
+        assert!(reopened.database.entry(upstream_entry_id).is_none());
+        assert!(
+            reopened
+                .database
+                .deleted_objects
+                .get(&upstream_entry_id.uuid())
+                .is_some_and(|timestamp| timestamp.is_some())
+        );
+        assert!(
+            reopened.database == expected_database,
+            "entry deletion round-trip changed parsed semantics"
+        );
+    }
+
+    #[test]
+    fn group_create_rename_and_move_preserve_defaults_and_validate_cycles() {
+        let mut document = kdbx41_document();
+        let (root_id, upstream_root_id) = root_group_ids(&document);
+        let group_a = document
+            .create_group(&root_id, "Group A")
+            .expect("group creation should succeed");
+        let group_b = document
+            .create_group(&root_id, "")
+            .expect("empty group name should be accepted");
+        let group_c = document
+            .create_group(&group_a, "Group C")
+            .expect("nested group creation should succeed");
+        assert!(group_a != group_b && group_b != group_c && group_a != group_c);
+        let upstream_a = document
+            .find_group_id(&group_a)
+            .expect("group A should exist");
+        let upstream_b = document
+            .find_group_id(&group_b)
+            .expect("group B should exist");
+        let upstream_c = document
+            .find_group_id(&group_c)
+            .expect("group C should exist");
+        let created_b = document
+            .database
+            .group(upstream_b)
+            .expect("group B should exist");
+        assert!(created_b.name.is_empty());
+        assert!(
+            created_b
+                .parent()
+                .is_some_and(|parent| parent.id() == upstream_root_id)
+        );
+        assert!(created_b.previous_parent().is_none());
+        assert!(created_b.notes.is_none());
+        assert!(created_b.tags.is_empty());
+        assert!(created_b.icon().is_none());
+        assert!(created_b.custom_data.is_empty());
+        assert!(created_b.is_expanded);
+        assert!(created_b.default_autotype_sequence.is_none());
+        assert!(created_b.enable_autotype.is_none());
+        assert!(created_b.enable_searching.is_none());
+        assert!(created_b.group_ids().next().is_none());
+        assert!(created_b.entry_ids().next().is_none());
+        assert!(created_b.times.creation.is_some());
+        assert!(created_b.times.last_modification.is_some());
+        assert!(created_b.times.last_access.is_some());
+        assert!(created_b.times.location_changed.is_some());
+
+        let before_same_name = document.database.clone();
+        document
+            .rename_group(&group_a, "Group A")
+            .expect("same-name rename should succeed");
+        assert!(document.database == before_same_name);
+        document
+            .database
+            .group_mut(upstream_a)
+            .expect("group A should exist")
+            .times
+            .last_modification = Some(Times::epoch());
+        document
+            .rename_group(&group_a, "Renamed A")
+            .expect("real group rename should succeed");
+        let renamed = document
+            .database
+            .group(upstream_a)
+            .expect("renamed group should exist");
+        assert!(renamed.name == "Renamed A");
+        assert!(renamed.times.last_modification != Some(Times::epoch()));
+        document
+            .rename_group(&root_id, "Renamed Root")
+            .expect("root rename should be supported");
+        assert!(
+            document
+                .database
+                .group(upstream_root_id)
+                .is_some_and(|root| root.name == "Renamed Root")
+        );
+
+        for result in [
+            document.move_group(&root_id, &group_a),
+            document.move_group(&group_a, &group_a),
+            document.move_group(&group_a, &group_c),
+        ] {
+            assert!(matches!(result, Err(KdbxError::InvalidGroupMove)));
+        }
+        let before_unknown = document.database.clone();
+        assert!(matches!(
+            document.create_group(&unknown_group_id(), "unused"),
+            Err(KdbxError::GroupNotFound)
+        ));
+        assert!(document.database == before_unknown);
+        assert!(matches!(
+            document.rename_group(&unknown_group_id(), "unused"),
+            Err(KdbxError::GroupNotFound)
+        ));
+        assert!(document.database == before_unknown);
+        assert!(matches!(
+            document.move_group(&unknown_group_id(), &group_b),
+            Err(KdbxError::GroupNotFound)
+        ));
+        assert!(document.database == before_unknown);
+        assert!(matches!(
+            document.move_group(&group_c, &unknown_group_id()),
+            Err(KdbxError::GroupNotFound)
+        ));
+        assert!(document.database == before_unknown);
+
+        document
+            .database
+            .group_mut(upstream_c)
+            .expect("group C should exist")
+            .times
+            .location_changed = Some(Times::epoch());
+        document
+            .move_group(&group_c, &group_b)
+            .expect("valid group move should succeed");
+        let moved = document
+            .database
+            .group(upstream_c)
+            .expect("moved group should exist");
+        assert!(moved.id() == upstream_c);
+        assert!(
+            moved
+                .parent()
+                .is_some_and(|parent| parent.id() == upstream_b)
+        );
+        assert!(
+            moved
+                .previous_parent()
+                .is_some_and(|parent| parent.id() == upstream_a)
+        );
+        assert!(moved.times.location_changed != Some(Times::epoch()));
+        assert!(
+            document
+                .database
+                .group(upstream_root_id)
+                .expect("root should exist")
+                .group_ids()
+                .any(|id| id == upstream_b)
+        );
+
+        let before_same_parent = document.database.clone();
+        document
+            .move_group(&group_c, &group_b)
+            .expect("same-parent group move should succeed");
+        assert!(document.database == before_same_parent);
+
+        let expected_database = document.database.clone();
+        let reopened = reopen(&document);
+        assert!(
+            reopened.database == expected_database,
+            "group create/rename/move round-trip changed parsed semantics"
+        );
+    }
+
+    #[test]
+    fn invalid_group_moves_and_root_delete_are_complete_no_ops() {
+        let mut document = kdbx41_document();
+        let (root_id, _) = root_group_ids(&document);
+        let child = document
+            .create_group(&root_id, "Cycle parent")
+            .expect("group should be created");
+        let descendant = document
+            .create_group(&child, "Cycle descendant")
+            .expect("descendant should be created");
+
+        for operation in [
+            (root_id.clone(), child.clone()),
+            (child.clone(), child.clone()),
+            (child.clone(), descendant),
+        ] {
+            let before = document.database.clone();
+            assert!(matches!(
+                document.move_group(&operation.0, &operation.1),
+                Err(KdbxError::InvalidGroupMove)
+            ));
+            assert!(
+                document.database == before,
+                "invalid group move changed the database"
+            );
+        }
+
+        let before = document.database.clone();
+        assert!(matches!(
+            document.permanently_delete_group(&root_id),
+            Err(KdbxError::CannotDeleteRootGroup)
+        ));
+        assert!(document.database == before);
+    }
+
+    #[test]
+    fn permanent_group_delete_tombstones_complete_subtree_and_roundtrips() {
+        let mut document = kdbx41_document();
+        let (root_id, _) = root_group_ids(&document);
+        let parent = document
+            .create_group(&root_id, "Delete parent")
+            .expect("parent should be created");
+        let child = document
+            .create_group(&parent, "Delete child")
+            .expect("child should be created");
+        let parent_entry = document
+            .create_entry(
+                &parent,
+                NewEntry {
+                    title: "Parent entry",
+                    username: "",
+                    url: "",
+                    password: None,
+                },
+            )
+            .expect("parent entry should be created");
+        let child_entry = document
+            .create_entry(
+                &child,
+                NewEntry {
+                    title: "Child entry",
+                    username: "",
+                    url: "",
+                    password: None,
+                },
+            )
+            .expect("child entry should be created");
+        let upstream_parent = document
+            .find_group_id(&parent)
+            .expect("parent should exist");
+        let upstream_child = document.find_group_id(&child).expect("child should exist");
+        let upstream_parent_entry = document
+            .find_entry_id(&parent_entry)
+            .expect("parent entry should exist");
+        let upstream_child_entry = document
+            .find_entry_id(&child_entry)
+            .expect("child entry should exist");
+        {
+            let mut raw_parent = document
+                .database
+                .group_mut(upstream_parent)
+                .expect("parent should exist");
+            let _custom_icon = raw_parent.set_icon_custom_new(vec![1, 2, 3, 4]);
+        }
+        {
+            let mut raw_child_entry = document
+                .database
+                .entry_mut(upstream_child_entry)
+                .expect("child entry should exist");
+            raw_child_entry.add_attachment(
+                "synthetic-attachment.txt",
+                Value::protected(b"public-test-attachment".to_vec()),
+            );
+            let _custom_icon = raw_child_entry.set_icon_custom_new(vec![5, 6, 7, 8]);
+        }
+        document.database.meta.last_selected_group = Some(upstream_parent.uuid());
+        document.database.meta.last_top_visible_group = Some(upstream_child.uuid());
+        document.database.meta.recyclebin_uuid = Some(upstream_parent.uuid());
+        document.database.meta.entry_templates_group = Some(upstream_child.uuid());
+        let original_deleted = document.database.deleted_objects.len();
+        let original_groups = document.database.num_groups();
+        let original_entries = document.database.num_entries();
+        let original_attachments = document.database.num_attachments();
+
+        document
+            .permanently_delete_group(&parent)
+            .expect("recursive permanent deletion should succeed");
+
+        assert_eq!(document.database.num_groups(), original_groups - 2);
+        assert_eq!(document.database.num_entries(), original_entries - 2);
+        assert_eq!(
+            document.database.num_attachments(),
+            original_attachments - 1
+        );
+        assert_eq!(
+            document.database.deleted_objects.len(),
+            original_deleted + 4
+        );
+        for uuid in [
+            upstream_parent.uuid(),
+            upstream_child.uuid(),
+            upstream_parent_entry.uuid(),
+            upstream_child_entry.uuid(),
+        ] {
+            assert!(
+                document
+                    .database
+                    .deleted_objects
+                    .get(&uuid)
+                    .is_some_and(|timestamp| timestamp.is_some()),
+                "recursive deletion omitted a tombstone or timestamp"
+            );
+        }
+        assert!(document.database.meta.last_selected_group.is_none());
+        assert!(document.database.meta.last_top_visible_group.is_none());
+        assert!(document.database.meta.recyclebin_uuid.is_none());
+        assert!(document.database.meta.entry_templates_group.is_none());
+        assert!(document.database.group(upstream_parent).is_none());
+        assert!(document.database.group(upstream_child).is_none());
+        assert!(document.database.entry(upstream_parent_entry).is_none());
+        assert!(document.database.entry(upstream_child_entry).is_none());
+
+        let expected_database = document.database.clone();
+        let reopened = reopen(&document);
+        assert!(
+            reopened.database == expected_database,
+            "recursive group deletion round-trip changed parsed semantics"
+        );
+
+        let before_unknown = document.database.clone();
+        assert!(matches!(
+            document.permanently_delete_group(&unknown_group_id()),
+            Err(KdbxError::GroupNotFound)
+        ));
+        assert!(document.database == before_unknown);
+    }
+
+    #[test]
+    fn custom_field_metadata_and_explicit_reads_exclude_reserved_values() {
+        let mut document = kdbx41_document();
+        let (entry_id, upstream_entry_id) = first_entry_ids(&document);
+        {
+            let mut entry = document
+                .database
+                .entry_mut(upstream_entry_id)
+                .expect("entry should exist");
+            entry.set_protected("Protected custom", TEST_CUSTOM_PROTECTED);
+            entry.set_unprotected("Unprotected custom", TEST_CUSTOM_UNPROTECTED);
+            entry.set_protected("Empty custom", "");
+            entry.set_protected(fields::OTP, "public-test-totp-seed");
+            entry.set_protected("KPEX_PASSKEY_PRIVATE_KEY_PEM", "public-test-passkey");
+        }
+
+        let summaries = document
+            .custom_fields(&entry_id)
+            .expect("custom metadata lookup should succeed");
+        assert_eq!(summaries.len(), 3);
+        assert!(summaries.iter().any(|summary| {
+            summary.name() == "Protected custom"
+                && summary.protection() == FieldProtection::Protected
+        }));
+        assert!(summaries.iter().any(|summary| {
+            summary.name() == "Unprotected custom"
+                && summary.protection() == FieldProtection::Unprotected
+        }));
+        assert!(summaries.iter().all(|summary| {
+            summary.name() != fields::TITLE
+                && summary.name() != fields::OTP
+                && !summary.name().starts_with("KPEX_PASSKEY")
+        }));
+
+        let protected = document
+            .entry_custom_field(&entry_id, "Protected custom")
+            .expect("protected custom read should succeed")
+            .expect("protected custom field should exist");
+        assert!(
+            protected.expose_secret() == TEST_CUSTOM_PROTECTED,
+            "protected synthetic custom value changed"
+        );
+        let unprotected = document
+            .entry_custom_field(&entry_id, "Unprotected custom")
+            .expect("unprotected custom read should succeed")
+            .expect("unprotected custom field should exist");
+        assert!(
+            unprotected.expose_secret() == TEST_CUSTOM_UNPROTECTED,
+            "unprotected synthetic custom value changed"
+        );
+        let empty = document
+            .entry_custom_field(&entry_id, "Empty custom")
+            .expect("empty custom read should succeed")
+            .expect("empty custom field should remain present");
+        assert!(empty.expose_secret().is_empty());
+        assert!(
+            document
+                .entry_custom_field(&entry_id, "Missing custom")
+                .expect("missing custom read should succeed")
+                .is_none()
+        );
+        assert!(matches!(
+            document.custom_fields(&unknown_entry_id()),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(matches!(
+            document.entry_custom_field(&unknown_entry_id(), "Unknown custom"),
+            Err(KdbxError::EntryNotFound)
+        ));
+    }
+
+    #[test]
+    fn custom_field_mutations_preserve_protection_history_noops_and_roundtrip() {
+        let mut document = kdbx41_document();
+        let (entry_id, upstream_entry_id) = first_entry_ids(&document);
+        let protected_before = SecretString::new(TEST_CUSTOM_PROTECTED.to_owned());
+        let unprotected_before = SecretString::new(TEST_CUSTOM_UNPROTECTED.to_owned());
+        let empty = SecretString::new(String::new());
+
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "Protected custom",
+                &protected_before,
+                FieldProtection::Protected,
+            )
+            .expect("protected custom field creation should succeed");
+        let after_protected_create = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist");
+        assert!(
+            after_protected_create
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .is_some_and(|historical| !historical.fields.contains_key("Protected custom")),
+            "custom-field creation history did not preserve prior absence"
+        );
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "Unprotected custom",
+                &unprotected_before,
+                FieldProtection::Unprotected,
+            )
+            .expect("unprotected custom field creation should succeed");
+        document
+            .set_entry_custom_field(&entry_id, "", &empty, FieldProtection::Protected)
+            .expect("empty custom field name and value should be preserved");
+        let created = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist");
+        assert!(
+            created
+                .fields
+                .get("Protected custom")
+                .is_some_and(|value| value.is_protected())
+        );
+        assert!(
+            created
+                .fields
+                .get("Unprotected custom")
+                .is_some_and(|value| !value.is_protected())
+        );
+        assert!(created.fields.contains_key(""));
+
+        document
+            .database
+            .entry_mut(upstream_entry_id)
+            .expect("entry should exist")
+            .times
+            .last_modification = Some(Times::epoch());
+
+        let protected_after = SecretString::new("public-test-custom-protected-after".to_owned());
+        let prepared = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist");
+        let history_before = history_len(&prepared);
+        let modification_before = prepared.times.last_modification;
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "Protected custom",
+                &protected_after,
+                FieldProtection::Unprotected,
+            )
+            .expect("protected custom update should succeed");
+        let updated = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist");
+        assert_eq!(history_len(&updated), history_before + 1);
+        assert!(updated.times.last_modification != modification_before);
+        assert!(
+            updated
+                .fields
+                .get("Protected custom")
+                .is_some_and(|value| value.is_protected()),
+            "existing protected custom field lost protection"
+        );
+        assert!(
+            updated
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .and_then(|historical| historical.fields.get("Protected custom"))
+                .is_some_and(|value| {
+                    value.is_protected() && value.get() == TEST_CUSTOM_PROTECTED
+                }),
+            "custom history lost the prior protected state"
+        );
+
+        let unprotected_after =
+            SecretString::new("public-test-custom-unprotected-after".to_owned());
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "Unprotected custom",
+                &unprotected_after,
+                FieldProtection::Protected,
+            )
+            .expect("unprotected custom update should succeed");
+        let updated_unprotected = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist");
+        assert!(
+            updated_unprotected
+                .fields
+                .get("Unprotected custom")
+                .is_some_and(|value| !value.is_protected()),
+            "existing unprotected custom field changed protection"
+        );
+        assert!(
+            updated_unprotected
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .and_then(|historical| historical.fields.get("Unprotected custom"))
+                .is_some_and(|value| {
+                    !value.is_protected() && value.get() == TEST_CUSTOM_UNPROTECTED
+                }),
+            "custom history lost the prior unprotected state"
+        );
+
+        let before_same = document.database.clone();
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "Protected custom",
+                &protected_after,
+                FieldProtection::Unprotected,
+            )
+            .expect("same-value custom update should succeed");
+        assert!(document.database == before_same);
+
+        let delete_history_before = history_len(
+            &document
+                .database
+                .entry(upstream_entry_id)
+                .expect("entry should exist"),
+        );
+        document
+            .delete_entry_custom_field(&entry_id, "Protected custom")
+            .expect("custom field deletion should succeed");
+        let deleted = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("entry should exist");
+        assert!(!deleted.fields.contains_key("Protected custom"));
+        assert_eq!(history_len(&deleted), delete_history_before + 1);
+        assert!(
+            deleted
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .and_then(|historical| historical.fields.get("Protected custom"))
+                .is_some_and(|value| value.is_protected()),
+            "custom deletion history lost the previous protected field"
+        );
+
+        let before_missing_delete = document.database.clone();
+        document
+            .delete_entry_custom_field(&entry_id, "Missing custom")
+            .expect("missing custom deletion should succeed");
+        assert!(document.database == before_missing_delete);
+
+        let survives = SecretString::new("public-test-protected-roundtrip".to_owned());
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "Protected survives",
+                &survives,
+                FieldProtection::Protected,
+            )
+            .expect("round-trip custom field should be created");
+        let expected_database = document.database.clone();
+        let reopened = reopen(&document);
+        let reopened_secret = reopened
+            .entry_custom_field(&entry_id, "Protected survives")
+            .expect("reopened custom read should succeed")
+            .expect("reopened protected custom field should exist");
+        assert!(
+            reopened_secret.expose_secret() == "public-test-protected-roundtrip",
+            "reopened protected custom field changed"
+        );
+        assert!(
+            reopened.database == expected_database,
+            "custom mutation round-trip changed parsed semantics"
+        );
+    }
+
+    #[test]
+    fn reserved_custom_field_names_and_unknown_entries_are_rejected_without_mutation() {
+        let mut document = kdbx41_document();
+        let (entry_id, _) = first_entry_ids(&document);
+        let value = SecretString::new("public-test-reserved-value".to_owned());
+
+        for reserved in [
+            fields::TITLE,
+            fields::USERNAME,
+            fields::PASSWORD,
+            fields::URL,
+            fields::NOTES,
+            fields::OTP,
+            "TOTP Seed",
+            "TimeOtp-Secret-Base32",
+            "KPEX_PASSKEY_PRIVATE_KEY_PEM",
+        ] {
+            let before = document.database.clone();
+            assert!(matches!(
+                document.entry_custom_field(&entry_id, reserved),
+                Err(KdbxError::ReservedField)
+            ));
+            assert!(matches!(
+                document.set_entry_custom_field(
+                    &entry_id,
+                    reserved,
+                    &value,
+                    FieldProtection::Protected
+                ),
+                Err(KdbxError::ReservedField)
+            ));
+            assert!(matches!(
+                document.delete_entry_custom_field(&entry_id, reserved),
+                Err(KdbxError::ReservedField)
+            ));
+            assert!(document.database == before);
+        }
+
+        let before = document.database.clone();
+        assert!(matches!(
+            document.set_entry_custom_field(
+                &unknown_entry_id(),
+                "Unknown custom",
+                &value,
+                FieldProtection::Protected
+            ),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(matches!(
+            document.delete_entry_custom_field(&unknown_entry_id(), "Unknown custom"),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(document.database == before);
     }
 
     #[test]
@@ -2825,6 +4385,83 @@ mod tests {
                 matches!(save_result, Err(KdbxError::UnsupportedWriteFormat)),
                 "unproven write format was not rejected"
             );
+        }
+    }
+
+    #[test]
+    fn rejects_every_structural_mutation_on_unproven_write_formats() {
+        let mut document = KdbxDocument::open(
+            fixture_path("keepassxc-upstream-kdbx40-argon2d-aes.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted KDBX 4.0 fixture should open");
+        let (entry_id, _) = first_entry_ids(&document);
+        let (root_id, _) = root_group_ids(&document);
+        let secret = SecretString::new("unpersisted-public-test-value".to_owned());
+
+        assert!(matches!(
+            document.create_entry(
+                &root_id,
+                NewEntry {
+                    title: "unpersisted",
+                    username: "",
+                    url: "",
+                    password: None,
+                }
+            ),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.permanently_delete_entry(&entry_id),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.move_entry(&entry_id, &root_id),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.create_group(&root_id, "unpersisted"),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.rename_group(&root_id, "unpersisted"),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.move_group(&root_id, &root_id),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.permanently_delete_group(&root_id),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.set_entry_custom_field(
+                &entry_id,
+                "unpersisted",
+                &secret,
+                FieldProtection::Protected
+            ),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            document.delete_entry_custom_field(&entry_id, "unpersisted"),
+            Err(KdbxError::UnsupportedWriteFormat)
+        ));
+    }
+
+    #[test]
+    fn structural_error_messages_do_not_disclose_identifiers_or_field_names() {
+        for (error, expected) in [
+            (KdbxError::GroupNotFound, "group was not found"),
+            (
+                KdbxError::CannotDeleteRootGroup,
+                "the root group cannot be permanently deleted",
+            ),
+            (KdbxError::InvalidGroupMove, "the group move is invalid"),
+            (KdbxError::ReservedField, "the field name is reserved"),
+        ] {
+            assert!(error.to_string() == expected);
         }
     }
 

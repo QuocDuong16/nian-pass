@@ -19,28 +19,43 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M2 — Secure Vault Read/Edit APIs
+M2.5 — Entry CRUD, Groups & Protected Custom Fields
 
 The workspace contains a KDBX-independent, secret-free metadata projection; an
-explicit zeroizing `SecretString` for narrow password and notes reads; a
-`keepass-rs` adapter with preservation-aware title, username, URL, and password
-mutations; and a small read-only CLI. Group names, entry metadata, identifiers,
-and file paths remain privacy-sensitive even when they are not cryptographic
-secrets. Protected Title, UserName, and URL fields are represented without
-plaintext in bulk projections.
+explicit zeroizing `SecretString` for narrow password and notes reads; an
+opaque `keepass-rs` adapter with preservation-aware field and structural
+mutations; and a small read-only CLI. Entries can be created, moved, and
+permanently deleted by stable UUID. Groups can be created, renamed, moved, and
+permanently deleted with root/cycle validation. Custom-field listing exposes
+only names and protection metadata; values require an explicit `SecretString`
+read. Group names, custom-field names, entry metadata, identifiers, and file
+paths remain privacy-sensitive even when they are not cryptographic secrets.
+Protected Title, UserName, and URL fields are represented without plaintext in
+bulk projections.
 
 Read support is verified only for the combinations backed by trusted fixtures.
 See [KDBX compatibility](docs/kdbx-compatibility.md) for the evidence matrix and
 known gaps. The experimental KDBX 4.1-only library foundation retains the
 complete parsed database, fetches password or notes only for an explicit entry
-UUID, changes only the requested standard field, serializes to a caller-owned
-writer, and verifies both Nian Pass self-roundtrips and the exact external
-KeePassXC title-mutation pipeline recorded in the compatibility matrix.
+UUID, fetches custom values only for an explicit entry UUID plus field name,
+mutates the retained source of truth through narrow stable-ID APIs, serializes
+to a caller-owned writer, and verifies structural/custom-field self-roundtrips
+plus the exact external KeePassXC creation/open and title-mutation pipelines
+recorded in the compatibility matrix.
 
 There is no CLI mutation command, no in-place or production filesystem save,
-and no broad CRUD API. Notes editing, TOTP, arbitrary custom-field access,
-create/delete/move, UI, sync, and server features remain out of scope. KDBX 3.1
-and 4.0 writing are deliberately rejected rather than upgraded or rewritten.
+and no raw database escape hatch. Product-level recycle-bin behavior, notes
+editing, TOTP, attachments, icons, expiry editing, history restore, duplicate,
+bulk operations, search, UI, sync, and server features remain out of scope.
+KDBX 3.1 and 4.0 writing are deliberately rejected rather than upgraded or
+rewritten.
+
+The deletion APIs are explicitly named `permanently_delete_entry` and
+`permanently_delete_group`: they remove objects from the KDBX tree and create
+deleted-object tombstones; they do not implement KeePassXC's user-facing
+recycle-bin policy. Entry creation omits empty Title, UserName, and URL fields,
+omits Password for `None`, and treats `Some("")` as an explicitly present,
+protected password.
 
 ## CLI
 

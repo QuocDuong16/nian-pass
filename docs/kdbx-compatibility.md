@@ -57,18 +57,18 @@ mean every feature in that database version is supported or tested.
 | Empty groups | Verified | KDBX 3.1 fixture: empty `Recycle Bin` group |
 | Multiple entries | Verified | KDBX 3.1, KDBX 4.0 Argon2d, and KDBX 4.1 fixture counts |
 | Entry summary projection | Verified | Exact visible root titles are asserted across all four fixtures; protected Title/UserName/URL fields project only an opaque protected state, while absent and explicit-empty visible metadata remain distinct |
-| Empty fields | Partially verified | Empty entry titles are asserted in KDBX 3.1 and KDBX 4.0; M2 preserves absent versus explicit-empty username/URL and secret reads preserve absent versus explicit-empty password and notes |
+| Empty fields | Partially verified | Empty entry titles are asserted in KDBX 3.1 and KDBX 4.0; M2.5 preserves absent versus explicit-empty username/URL and secret reads preserve absent versus explicit-empty password, notes, and custom values |
 | Unicode | Partially externally verified | A title containing Vietnamese, Japanese, emoji, and a combining character is written by Nian Pass, read by KeePassXC, resaved, and reopened unchanged; the source fixture has no externally created Unicode case |
-| Custom fields | Not yet tested | Not exposed by the minimal domain projection |
-| Entry history | Partially externally verified | Nian Pass and KeePassXC title mutations each append exactly one prior-state history item and preserve it through the external round-trip; the fixture has no pre-existing external history |
+| Custom fields | Self-roundtrip verified | Metadata-only listing excludes values and reserved fields; explicit protected/unprotected reads preserve missing versus empty; add/update/delete preserves protection and tracked history |
+| Entry history | Partially externally verified | Nian Pass and KeePassXC title mutations each append exactly one prior-state history item and preserve it through the external round-trip; M2.5 custom add/update/delete preserves prior absence/value/protection; the fixture has no pre-existing external history |
 | Entry modification timestamp | Partially externally verified | Both tracked title mutations update `LastModificationTime`; KeePassXC `edit` also updates `LastAccessTime`, and other time fields are asserted unchanged |
 | Attachments | Not yet tested | Not exposed by the minimal domain projection |
 | Tags | Externally verified for fixture | The externally created three-element tag vector, including order, survives Nian Pass save and KeePassXC resave |
 | Notes | Partially verified | Exact non-empty and explicit-empty synthetic notes values can be fetched by entry UUID through `SecretString`, distinct from an absent field; notes editing and large-note behavior are not tested |
-| Deleted objects | Not yet tested | No Nian Pass assertion |
-| Custom icons | Not yet tested | No Nian Pass assertion |
+| Deleted objects | Self-roundtrip verified | Permanent entry deletion creates one UUID/timestamp tombstone; recursive group deletion creates tombstones for every descendant entry and group and preserves them after reopen |
+| Custom icons | Partially verified | Recursive group deletion cleans one synthetic group-icon back-reference and preserves the complete parsed database after reopen; public icon editing is not implemented |
 | Protected values | Externally verified for fixture | Both existing password fields remain protected through Nian Pass save and KeePassXC resave; plaintext values are never logged |
-| Group metadata | Externally verified for fixture | Complete parsed group equality covers UUIDs, hierarchy/order, notes, tags, times, icons, and custom data represented by `keepass-rs` |
+| Group metadata | Self-roundtrip and externally verified for fixture | Existing complete parsed equality covers UUIDs, hierarchy/order, notes, tags, times, icons, and custom data represented by `keepass-rs`; M2.5 create/rename/move preserves defaults and rejects root/self/descendant cycles |
 
 ## Malformed input and error behavior
 
@@ -94,7 +94,7 @@ An invalid or unknown future major-version header currently maps to
 
 ## Write compatibility
 
-M1.5 retains the pinned `keepass-rs` `save_kdbx4` boundary. Version `0.13.21`
+M2.5 retains the pinned `keepass-rs` `save_kdbx4` boundary. Version `0.13.21`
 accepts exact KDBX 4.1 and rejects KDBX 4.0, KDBX 3.x, KDBX 2.x, and KDB. Nian
 Pass does not silently upgrade or normalize a database to a different version,
 KDF, cipher, or compression mode.
@@ -129,6 +129,15 @@ remain accurately unverified.
 | Missing password creation | Verified in memory | Non-empty creates a protected Password field with history/timestamp tracking; missing plus empty remains a complete no-op |
 | Missing standard-field memory-protection policy | Self-roundtrip verified | Missing non-empty Title/UserName/URL follow their database protection flags with history/timestamp tracking; false and absent-policy fallbacks remain unprotected, missing plus empty is a no-op, and a protected policy-created UserName survives reopen |
 | Same-value username, URL, and password mutations | Verified no-op | Complete parsed database, history, timestamps, protection, and absence remain unchanged |
+| Entry creation by `GroupId` | Self-roundtrip verified; externally opened locally | Upstream UUID v4 identities are non-empty/unique; target membership, timestamp defaults, empty history, memory protection, absent empty metadata, source-fixture immutability, and full parsed equality after reopen are asserted. KeePassXC 2.7.10 independently opens, counts, and lists the created entry |
+| Entry move by `EntryId` | Self-roundtrip verified | UUID, fields, history, previous parent, and unrelated timestamps are preserved; `LocationChanged` and membership change; same-parent move is exact no-op |
+| Permanent entry deletion | Self-roundtrip verified | Entry is absent and its exact UUID has a non-empty deletion timestamp before and after reopen; unknown UUID is exact no-op with `EntryNotFound` |
+| Group creation and rename | Self-roundtrip verified | UUID uniqueness, constructor defaults, empty name support, empty children, same-name no-op, and real rename timestamp are asserted |
+| Group move | Self-roundtrip verified | UUID and subtree survive; `LocationChanged` and previous parent update; root/self/descendant cycles and unknown destinations leave the complete database unchanged |
+| Permanent recursive group deletion | Self-roundtrip verified | Root deletion is rejected; parent, nested groups, and entries each receive timestamped tombstones; custom-icon back-references and represented metadata UUID pointers are cleaned before round-trip equality |
+| Custom-field metadata and explicit reads | Self-roundtrip verified | Listing returns name plus protection only and has unspecified order; values always require explicit `SecretString` reads, including unprotected values; absent and explicit empty remain distinct |
+| Custom-field mutation | Self-roundtrip verified | Protected/unprotected creation, protection-preserving update, empty key/value, same-value no-op, tracked deletion, missing deletion no-op, and protected-value reopen are asserted |
+| Reserved generic field access | Verified rejected | Standard fields, current/legacy TOTP storage names, and KeePassXC passkey attributes return generic `ReservedField` without mutation |
 | KeePassXC-specific nullable group flags and AutoType obfuscation XML encodings | Supporting regression verified | Output XML asserts literal `null` and integer `0`, matching pinned upstream KeePassXC 2.7+ regressions |
 | KDBX 4.0 writing | Unsupported | Typed `UnsupportedWriteFormat`; pinned writer only emits exact 4.1 |
 | KDBX 3.1 writing | Unsupported | Typed `UnsupportedWriteFormat`; no silent KDBX 4.1 upgrade |
@@ -150,14 +159,21 @@ The same suite also passes locally with KeePassXC CLI `2.7.10` from Ubuntu
 normalizes its internal `KPXC_RANDOM_SLUG`; the comparator allowlists that one
 key while still requiring equality for all other metadata.
 
-The harness creates a unique temporary directory, copies the trusted fixture,
-performs a Nian Pass Unicode title rename, saves to a new file, asks KeePassXC
-to run `db-info` and `ls`, copies that output again, asks KeePassXC `edit` to
-rename the second synthetic entry and resave, then reopens the result with Nian
-Pass. Password input is supplied through stdin; command arguments and logs do
-not contain it. The shell applies a 180-second suite timeout. Local runs skip
-with an explicit message when KeePassXC is absent, while the dedicated Forgejo
-job requires the binary and pins the package version.
+The harness creates a unique temporary directory and copies the trusted
+fixture. One isolated path creates an entry with Nian Pass, verifies exact
+self-roundtrip equality, and asks KeePassXC to run `db-info` and `ls`; this path
+was executed locally with KeePassXC 2.7.10. A separate strict path performs the
+existing Nian Pass Unicode title rename, asks KeePassXC to open/list it, copies
+that output, asks KeePassXC `edit` to rename the second synthetic entry and
+resave, then reopens and compares the result. Keeping the creation path separate
+is deliberate: KeePassXC materializes missing empty default standard fields
+when it resaves an entry, while the M2.5 creation API preserves absent empty
+Title/UserName/URL and optional Password semantics. Therefore current external
+creation evidence proves open/list, not strict post-KeePassXC-resave equality.
+Password input is supplied through stdin; command arguments and logs do not
+contain it. The shell applies a 180-second suite timeout. Local runs skip with
+an explicit message when KeePassXC is absent, while the dedicated Forgejo job
+requires the binary and pins the package version.
 
 The complete parsed-representation checks cover semantics represented by
 `keepass-rs`, including fixture metadata beyond the public `vault-core`

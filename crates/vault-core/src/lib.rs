@@ -1,10 +1,11 @@
 //! KDBX-independent domain types used by Nian Pass clients.
 //!
-//! M2 retains a deliberately secret-free presentation projection and adds an
-//! explicit secret-bearing value type. Group names, visible entry metadata, and
-//! identifiers remain privacy-sensitive. `Vault`, `Group`, `EntrySummary`,
-//! `SummaryText`, `GroupId`, `EntryId`, and `SecretString` do not implement `Debug`,
-//! which prevents accidental dumps.
+//! M2.5 retains a deliberately secret-free presentation projection and adds
+//! narrow request and metadata types for structural vault operations. Group
+//! names, custom-field names, visible entry metadata, and identifiers remain
+//! privacy-sensitive. `Vault`, `Group`, `EntrySummary`, `CustomFieldSummary`,
+//! `SummaryText`, `GroupId`, `EntryId`, and `SecretString` do not implement
+//! `Debug`, which prevents accidental dumps.
 
 use zeroize::Zeroizing;
 
@@ -59,6 +60,77 @@ impl SecretString {
     }
 }
 
+/// Protection state for a custom entry field.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum FieldProtection {
+    /// The field is encrypted by the KDBX inner protected stream.
+    Protected,
+    /// The field is stored as ordinary XML inside the encrypted database.
+    Unprotected,
+}
+
+/// Privacy-sensitive metadata for one custom field, without its value.
+///
+/// Ordering between summaries is unspecified because the underlying KDBX
+/// representation used by the adapter is key-based and unordered. Values must
+/// be requested explicitly from the adapter as [`SecretString`].
+///
+/// ```compile_fail
+/// use vault_core::{CustomFieldSummary, FieldProtection};
+/// let summary = CustomFieldSummary::new("private-name", FieldProtection::Protected);
+/// let rendered = format!("{summary:?}");
+/// ```
+///
+/// ```compile_fail
+/// use vault_core::{CustomFieldSummary, FieldProtection};
+/// let summary = CustomFieldSummary::new("private-name", FieldProtection::Protected);
+/// let rendered = format!("{summary}");
+/// ```
+#[derive(Clone, Eq, PartialEq)]
+pub struct CustomFieldSummary {
+    name: String,
+    protection: FieldProtection,
+}
+
+impl CustomFieldSummary {
+    /// Creates custom-field metadata without carrying the field value.
+    #[must_use]
+    pub fn new(name: impl Into<String>, protection: FieldProtection) -> Self {
+        Self {
+            name: name.into(),
+            protection,
+        }
+    }
+
+    /// Returns the privacy-sensitive field name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns whether the KDBX value is protected or unprotected.
+    #[must_use]
+    pub const fn protection(&self) -> FieldProtection {
+        self.protection
+    }
+}
+
+/// Input for creating one entry without exposing adapter-specific types.
+///
+/// Empty title, username, and URL values are omitted rather than materialized
+/// as empty KDBX fields. `None` omits Password, while `Some` represents an
+/// explicitly present password, including an explicitly empty one.
+pub struct NewEntry<'a> {
+    /// Entry title metadata.
+    pub title: &'a str,
+    /// Entry username metadata.
+    pub username: &'a str,
+    /// Entry URL metadata, stored without normalization.
+    pub url: &'a str,
+    /// Optional password, always protected when newly created.
+    pub password: Option<&'a SecretString>,
+}
+
 /// A read-only view containing privacy-sensitive, non-secret vault metadata.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Vault {
@@ -88,6 +160,18 @@ impl Vault {
     #[must_use]
     pub fn entry_count(&self) -> usize {
         self.root.entry_count()
+    }
+
+    /// Finds a group recursively by stable identifier.
+    #[must_use]
+    pub fn find_group(&self, id: &GroupId) -> Option<&Group> {
+        self.root.find_group(id)
+    }
+
+    /// Finds an entry recursively by stable identifier.
+    #[must_use]
+    pub fn find_entry(&self, id: &EntryId) -> Option<&EntrySummary> {
+        self.root.find_entry(id)
     }
 }
 
@@ -167,6 +251,15 @@ impl Group {
         }
 
         self.groups.iter().find_map(|group| group.find_group(id))
+    }
+
+    /// Finds an entry recursively by identifier.
+    #[must_use]
+    pub fn find_entry(&self, id: &EntryId) -> Option<&EntrySummary> {
+        self.entries
+            .iter()
+            .find(|entry| entry.id() == id)
+            .or_else(|| self.groups.iter().find_map(|group| group.find_entry(id)))
     }
 
     fn group_count(&self) -> usize {
@@ -321,7 +414,10 @@ impl EntrySummary {
 
 #[cfg(test)]
 mod tests {
-    use super::{EntryId, EntrySummary, Group, GroupId, SecretString, SummaryText, Vault};
+    use super::{
+        CustomFieldSummary, EntryId, EntrySummary, FieldProtection, Group, GroupId, SecretString,
+        SummaryText, Vault,
+    };
 
     fn entry(id: &str, title: &str) -> EntrySummary {
         EntrySummary::new(
@@ -361,6 +457,20 @@ mod tests {
 
         assert!(archive.is_some_and(|group| group.name() == "Archive"));
         assert!(vault.root().find_group(&GroupId::new("missing")).is_none());
+        assert!(vault.find_group(&GroupId::new("personal")).is_some());
+    }
+
+    #[test]
+    fn traverses_nested_entries_by_id() {
+        let vault = sample_vault();
+
+        assert!(
+            vault
+                .find_entry(&EntryId::new("old"))
+                .is_some_and(|entry| entry.title().visible() == Some("Old account"))
+        );
+        assert!(vault.root().find_entry(&EntryId::new("github")).is_some());
+        assert!(vault.find_entry(&EntryId::new("missing")).is_none());
     }
 
     #[test]
@@ -418,5 +528,13 @@ mod tests {
             secret.expose_secret() == "public-test-password",
             "synthetic secret was not retained"
         );
+    }
+
+    #[test]
+    fn custom_field_summary_exposes_metadata_without_a_value() {
+        let summary = CustomFieldSummary::new("synthetic-name", FieldProtection::Protected);
+
+        assert!(summary.name() == "synthetic-name");
+        assert!(summary.protection() == FieldProtection::Protected);
     }
 }
