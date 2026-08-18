@@ -17,7 +17,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Open a database and show non-sensitive counts.
+    /// Open a database and show counts without printing vault metadata.
     Info { file: PathBuf },
     /// List group names and entry titles only.
     List { file: PathBuf },
@@ -40,14 +40,16 @@ fn run(cli: Cli) -> Result<(), CliError> {
 
     match cli.command {
         Command::Info { file } => {
-            let vault = kdbx::open(file, password.as_str()).map_err(CliError::Open)?;
+            let opened = kdbx::open(file, password.as_str()).map_err(CliError::Open)?;
+            let vault = opened.vault();
             println!("Database opened successfully.");
+            println!("KDBX: {}", opened.version());
             println!("Groups: {} (including root)", vault.group_count());
             println!("Entries: {}", vault.entry_count());
         }
         Command::List { file } => {
-            let vault = kdbx::open(file, password.as_str()).map_err(CliError::Open)?;
-            print_group(vault.root(), 0);
+            let opened = kdbx::open(file, password.as_str()).map_err(CliError::Open)?;
+            print_group(opened.vault().root(), 0);
         }
     }
 

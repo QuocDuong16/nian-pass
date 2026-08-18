@@ -1,10 +1,12 @@
 //! KDBX-independent domain types used by Nian Pass clients.
 //!
-//! M0 deliberately exposes only non-secret presentation data. `Vault`, `Group`,
-//! and `Entry` do not implement `Debug`, which prevents accidental bulk dumps.
-//! If sensitive fields are added later, their types must redact debug output.
+//! M0.5 deliberately exposes only credential-free vault metadata. Group names,
+//! entry titles, and identifiers are not secret material, but they remain
+//! privacy-sensitive. `Vault`, `Group`, and `Entry` do not implement `Debug`,
+//! which prevents accidental bulk dumps. If secret fields are added later,
+//! their types must redact debug output.
 
-/// A read-only, non-sensitive view of an opened vault.
+/// A read-only view containing privacy-sensitive, non-secret vault metadata.
 #[derive(Clone, Eq, PartialEq)]
 pub struct Vault {
     root: Group,
@@ -141,7 +143,7 @@ impl EntryId {
     }
 }
 
-/// A deliberately non-sensitive entry projection for M0.
+/// A deliberately credential-free entry projection for M0.5.
 ///
 /// Passwords, notes, TOTP seeds, custom fields, and attachments are not copied
 /// into this type. This model is not a save model and must not be used to
