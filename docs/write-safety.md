@@ -34,5 +34,6 @@ platform and reject destinations where it cannot meet them.
 
 Production save also needs concurrent-writer detection, explicit conflict
 handling, disk-full and permission failure tests, cleanup rules for failed
-temporary files, backup retention and recovery behavior, and external
-KeePassXC verification. None of those guarantees is implied by M1.
+temporary files, and backup retention and recovery behavior. M1.5's external
+KeePassXC suite writes only isolated synthetic test files; it does not provide
+any production filesystem guarantee.

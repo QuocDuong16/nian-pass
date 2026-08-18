@@ -322,9 +322,12 @@ fn convert_group(group: keepass::db::GroupRef<'_>) -> Group {
 #[cfg(test)]
 mod tests {
     use std::{
+        ffi::OsString,
         fs,
         io::{Cursor, Write},
         path::{Path, PathBuf},
+        process::{Command, Output, Stdio},
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     use keepass::{Database, DatabaseKey, db::fields};
@@ -335,6 +338,10 @@ mod tests {
     // Synthetic public test credential from the upstream fixture suite.
     const FIXTURE_PASSWORD: &str = "demopass";
     const WRONG_FIXTURE_PASSWORD: &str = "wrong-public-test-password";
+    const EXTERNAL_FIXTURE: &str = "keepassxc-2.7.12-kdbx41.kdbx";
+    const NIAN_PASS_EXTERNAL_TITLE: &str = "Nian Pass — Tiếng Việt 日本語 👩‍💻 e\u{301}";
+    const KEEPASSXC_ENTRY_TITLE: &str = "ayyyyo";
+    const KEEPASSXC_EXTERNAL_TITLE: &str = "KeePassXC resaved title";
 
     struct SemanticSnapshot {
         version: KdbxVersion,
@@ -451,6 +458,45 @@ mod tests {
         }
     }
 
+    struct TestTempDir {
+        path: PathBuf,
+    }
+
+    impl TestTempDir {
+        fn create() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos();
+
+            for attempt in 0..100_u8 {
+                let path = std::env::temp_dir().join(format!(
+                    "nian-pass-keepassxc-{}-{nonce}-{attempt}",
+                    std::process::id()
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self { path },
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => {
+                        panic!("could not create isolated compatibility directory: {error}")
+                    }
+                }
+            }
+
+            panic!("could not allocate a unique compatibility directory");
+        }
+
+        fn join(&self, file: &str) -> PathBuf {
+            self.path.join(file)
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
     struct Fixture {
         file: &'static str,
         password: &'static str,
@@ -501,6 +547,296 @@ mod tests {
             .join(file)
     }
 
+    fn keepassxc_version() -> Option<String> {
+        match Command::new("keepassxc-cli").arg("--version").output() {
+            Ok(output) if output.status.success() => {
+                let version = String::from_utf8(output.stdout)
+                    .expect("KeePassXC version output should be UTF-8");
+                Some(version.trim().to_owned())
+            }
+            Ok(output) => panic!(
+                "KeePassXC version detection failed with status {}",
+                output.status
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => panic!("KeePassXC version detection failed: {error}"),
+        }
+    }
+
+    fn run_keepassxc(stage: &str, arguments: Vec<OsString>) -> Output {
+        let mut child = Command::new("keepassxc-cli")
+            .args(arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|error| {
+                panic!("{stage}: could not start KeePassXC for {EXTERNAL_FIXTURE}: {error}")
+            });
+
+        let mut password_input = child
+            .stdin
+            .take()
+            .expect("KeePassXC password input should be piped");
+        password_input
+            .write_all(FIXTURE_PASSWORD.as_bytes())
+            .and_then(|()| password_input.write_all(b"\n"))
+            .unwrap_or_else(|error| {
+                panic!("{stage}: could not provide synthetic fixture credentials: {error}")
+            });
+        drop(password_input);
+
+        let output = child
+            .wait_with_output()
+            .unwrap_or_else(|error| panic!("{stage}: could not wait for KeePassXC: {error}"));
+        assert!(
+            output.status.success(),
+            "{stage}: KeePassXC command failed for {EXTERNAL_FIXTURE} with status {}",
+            output.status
+        );
+        output
+    }
+
+    fn assert_keepassxc_title_edit(before: &keepass::db::Entry, after: &keepass::db::Entry) {
+        let before_title = before
+            .fields
+            .get(fields::TITLE)
+            .expect("external edit target should have a title");
+        let after_title = after
+            .fields
+            .get(fields::TITLE)
+            .expect("externally edited entry should retain a title field");
+        assert!(
+            after_title.as_str() == KEEPASSXC_EXTERNAL_TITLE,
+            "KeePassXC title mutation did not persist"
+        );
+        assert!(
+            before_title.is_protected() == after_title.is_protected(),
+            "KeePassXC title mutation changed the title protection mode"
+        );
+        assert_eq!(
+            before.fields.len(),
+            after.fields.len(),
+            "KeePassXC title mutation changed the field count"
+        );
+        for (key, value) in &before.fields {
+            if key != fields::TITLE {
+                assert!(
+                    after.fields.get(key) == Some(value),
+                    "KeePassXC title mutation changed an unrelated field"
+                );
+            }
+        }
+
+        assert!(
+            before.times.creation == after.times.creation,
+            "KeePassXC title mutation changed CreationTime"
+        );
+        assert!(
+            before.times.last_access != after.times.last_access,
+            "KeePassXC edit should update LastAccessTime"
+        );
+        assert!(
+            before.times.expiry == after.times.expiry,
+            "KeePassXC title mutation changed ExpiryTime"
+        );
+        assert!(
+            before.times.location_changed == after.times.location_changed,
+            "KeePassXC title mutation changed LocationChanged"
+        );
+        assert!(
+            before.times.expires == after.times.expires,
+            "KeePassXC title mutation changed Expires"
+        );
+        assert!(
+            before.times.usage_count == after.times.usage_count,
+            "KeePassXC title mutation changed UsageCount"
+        );
+        assert!(
+            before.times.last_modification != after.times.last_modification,
+            "KeePassXC title mutation did not update LastModificationTime"
+        );
+
+        let before_history = before
+            .history
+            .as_ref()
+            .map_or(&[][..], |history| history.get_entries().as_slice());
+        let after_history = after
+            .history
+            .as_ref()
+            .map_or(&[][..], |history| history.get_entries().as_slice());
+        let (latest_history, older_history) = after_history
+            .split_first()
+            .expect("KeePassXC title mutation should create a history item");
+        let mut expected_history = before.clone();
+        expected_history.history = None;
+        assert!(
+            latest_history == &expected_history,
+            "KeePassXC history did not preserve the pre-edit entry state"
+        );
+        assert!(
+            older_history == before_history,
+            "KeePassXC title mutation changed existing history"
+        );
+
+        let mut expected_entry = before.clone();
+        expected_entry.set(fields::TITLE, after_title.clone());
+        expected_entry.times.last_modification = after.times.last_modification;
+        expected_entry.times.last_access = after.times.last_access;
+        expected_entry.history = after.history.clone();
+        assert!(
+            &expected_entry == after,
+            "KeePassXC title mutation changed unrelated entry semantics"
+        );
+    }
+
+    fn assert_database_preserved_after_keepassxc_edit(
+        before: &Database,
+        after: &Database,
+        edited_id: keepass::db::EntryId,
+    ) {
+        assert!(
+            before.config == after.config,
+            "database configuration changed"
+        );
+        let mut expected_meta = before.meta.clone();
+        let keepassxc_last_modified = after
+            .meta
+            .custom_data
+            .get("_LAST_MODIFIED")
+            .expect("KeePassXC resave should record _LAST_MODIFIED")
+            .clone();
+        assert!(
+            expected_meta.custom_data.get("_LAST_MODIFIED") != Some(&keepassxc_last_modified),
+            "KeePassXC resave should update _LAST_MODIFIED"
+        );
+        expected_meta
+            .custom_data
+            .insert("_LAST_MODIFIED".to_owned(), keepassxc_last_modified);
+        if let Some(random_slug) = after.meta.custom_data.get("KPXC_RANDOM_SLUG") {
+            expected_meta
+                .custom_data
+                .insert("KPXC_RANDOM_SLUG".to_owned(), random_slug.clone());
+        } else {
+            expected_meta.custom_data.remove("KPXC_RANDOM_SLUG");
+        }
+        if expected_meta != after.meta {
+            let mut changed_fields = Vec::new();
+            macro_rules! record_changed {
+                ($field:ident) => {
+                    if expected_meta.$field != after.meta.$field {
+                        changed_fields.push(stringify!($field));
+                    }
+                };
+            }
+            record_changed!(generator);
+            record_changed!(database_name);
+            record_changed!(database_name_changed);
+            record_changed!(database_description);
+            record_changed!(database_description_changed);
+            record_changed!(default_username);
+            record_changed!(default_username_changed);
+            record_changed!(maintenance_history_days);
+            record_changed!(color);
+            record_changed!(master_key_changed);
+            record_changed!(master_key_change_rec);
+            record_changed!(master_key_change_force);
+            record_changed!(memory_protection);
+            record_changed!(recyclebin_enabled);
+            record_changed!(recyclebin_uuid);
+            record_changed!(recyclebin_changed);
+            record_changed!(entry_templates_group);
+            record_changed!(entry_templates_group_changed);
+            record_changed!(last_selected_group);
+            record_changed!(last_top_visible_group);
+            record_changed!(history_max_items);
+            record_changed!(history_max_size);
+            record_changed!(settings_changed);
+            record_changed!(custom_data);
+            let mut changed_custom_data = expected_meta
+                .custom_data
+                .keys()
+                .chain(after.meta.custom_data.keys())
+                .filter(|key| {
+                    expected_meta.custom_data.get(*key) != after.meta.custom_data.get(*key)
+                })
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            changed_custom_data.sort_unstable();
+            changed_custom_data.dedup();
+            panic!(
+                "KeePassXC resave changed metadata beyond allowed internal keys: {}; custom-data keys: {}",
+                changed_fields.join(", "),
+                changed_custom_data.join(", ")
+            );
+        }
+        assert!(
+            before.deleted_objects == after.deleted_objects,
+            "deleted-object records changed"
+        );
+        assert_eq!(
+            before.num_groups(),
+            after.num_groups(),
+            "group count changed"
+        );
+        assert_eq!(
+            before.num_entries(),
+            after.num_entries(),
+            "entry count changed"
+        );
+        assert_eq!(
+            before.num_attachments(),
+            after.num_attachments(),
+            "attachment count changed"
+        );
+        assert_eq!(
+            before.num_custom_icons(),
+            after.num_custom_icons(),
+            "custom-icon count changed"
+        );
+
+        for group in before.iter_all_groups() {
+            let after_group = after
+                .group(group.id())
+                .expect("KeePassXC output should retain every group UUID");
+            assert!(
+                *group == *after_group,
+                "KeePassXC title mutation changed group semantics"
+            );
+        }
+        for attachment in before.iter_all_attachments() {
+            let after_attachment = after
+                .attachment(attachment.id())
+                .expect("KeePassXC output should retain every attachment ID");
+            assert!(
+                *attachment == *after_attachment,
+                "KeePassXC title mutation changed attachment semantics"
+            );
+        }
+        for icon in before.iter_all_custom_icons() {
+            let after_icon = after
+                .custom_icon(icon.id())
+                .expect("KeePassXC output should retain every custom-icon UUID");
+            assert!(
+                *icon == *after_icon,
+                "KeePassXC title mutation changed custom-icon semantics"
+            );
+        }
+        for entry in before.iter_all_entries() {
+            let after_entry = after
+                .entry(entry.id())
+                .expect("KeePassXC output should retain every entry UUID");
+            if entry.id() == edited_id {
+                assert_keepassxc_title_edit(&entry, &after_entry);
+            } else {
+                assert!(
+                    *entry == *after_entry,
+                    "KeePassXC title mutation changed an unrelated entry"
+                );
+            }
+        }
+    }
+
     #[test]
     fn opens_trusted_compatibility_fixtures() {
         for fixture in FIXTURES {
@@ -533,6 +869,194 @@ mod tests {
                 fixture.file
             );
         }
+    }
+
+    #[test]
+    #[ignore = "requires a released keepassxc-cli; run scripts/test-keepassxc-compat.sh"]
+    fn external_keepassxc_roundtrip_preserves_semantics() {
+        let Some(version) = keepassxc_version() else {
+            if std::env::var_os("NIAN_PASS_REQUIRE_KEEPASSXC").is_some() {
+                panic!("keepassxc-cli is required but was not found");
+            }
+            eprintln!("SKIP: keepassxc-cli not found");
+            return;
+        };
+        assert!(!version.is_empty(), "KeePassXC version should not be empty");
+        eprintln!("External KeePassXC binary: {version}");
+
+        let source_path = fixture_path(EXTERNAL_FIXTURE);
+        let source_bytes = fs::read(&source_path).expect("trusted fixture should be readable");
+        let temp = TestTempDir::create();
+        let fixture_copy = temp.join("external-source-copy.kdbx");
+        let nian_output = temp.join("nian-pass-output.kdbx");
+        let keepassxc_output = temp.join("keepassxc-output.kdbx");
+        fs::copy(&source_path, &fixture_copy).expect("fixture should copy into the temp directory");
+
+        let mut document = KdbxDocument::open(&fixture_copy, FIXTURE_PASSWORD)
+            .expect("trusted KDBX 4.1 fixture should open");
+        assert!(
+            document.version() == (KdbxVersion::Kdbx4 { minor: 1 }),
+            "external fixture should be exact KDBX 4.1"
+        );
+        let nian_target = document
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.get_title() == Some("tagged-entry-41"))
+            .expect("fixture should contain the tagged Nian Pass edit target");
+        assert_eq!(
+            nian_target.tags.len(),
+            3,
+            "fixture should retain its externally created tag set"
+        );
+        assert!(
+            nian_target
+                .fields
+                .get(fields::PASSWORD)
+                .is_some_and(|value| value.is_protected()),
+            "fixture password should be protected"
+        );
+        let original_history_len = nian_target
+            .history
+            .as_ref()
+            .map_or(0, |history| history.get_entries().len());
+        let nian_target_id = nian_target.id();
+        let projected_id = EntryId::new(nian_target_id.to_string());
+
+        document
+            .set_entry_title(&projected_id, NIAN_PASS_EXTERNAL_TITLE)
+            .expect("Nian Pass title mutation should succeed");
+        let mutated_entry = document
+            .database
+            .entry(nian_target_id)
+            .expect("Nian Pass mutation should retain the target UUID");
+        assert_eq!(
+            mutated_entry
+                .history
+                .as_ref()
+                .map_or(0, |history| history.get_entries().len()),
+            original_history_len + 1,
+            "Nian Pass mutation should add exactly one history item"
+        );
+        assert_eq!(
+            mutated_entry.tags.len(),
+            3,
+            "Nian Pass mutation changed the external tag set"
+        );
+        assert!(
+            mutated_entry
+                .fields
+                .get(fields::PASSWORD)
+                .is_some_and(|value| value.is_protected()),
+            "Nian Pass mutation changed password protection"
+        );
+
+        let expected_nian_database = document.database.clone();
+        let mut output_file = fs::File::create(&nian_output)
+            .expect("test-only Nian Pass output should be created in the temp directory");
+        document
+            .save_to_writer(&mut output_file, FIXTURE_PASSWORD)
+            .expect("Nian Pass should serialize the external fixture");
+        drop(output_file);
+
+        let nian_reopened = KdbxDocument::open(&nian_output, FIXTURE_PASSWORD)
+            .expect("Nian Pass output should reopen before external validation");
+        assert!(
+            nian_reopened.version() == document.version(),
+            "Nian Pass output changed the exact KDBX version"
+        );
+        assert!(
+            nian_reopened.database == expected_nian_database,
+            "Nian Pass output changed parsed semantics before external validation"
+        );
+
+        let info = run_keepassxc(
+            "KeePassXC opening Nian Pass output",
+            vec![
+                OsString::from("db-info"),
+                OsString::from("-q"),
+                nian_output.as_os_str().to_owned(),
+            ],
+        );
+        let info =
+            String::from_utf8(info.stdout).expect("KeePassXC db-info output should be UTF-8");
+        assert!(
+            info.contains("Cipher: AES 256-bit")
+                && info.contains("KDF: AES")
+                && info.contains("Number of entries: 2"),
+            "KeePassXC db-info did not report the expected public fixture metadata"
+        );
+
+        let listing = run_keepassxc(
+            "KeePassXC listing Nian Pass output",
+            vec![
+                OsString::from("ls"),
+                OsString::from("-q"),
+                OsString::from("-R"),
+                OsString::from("-f"),
+                nian_output.as_os_str().to_owned(),
+            ],
+        );
+        let listing = String::from_utf8(listing.stdout).expect("KeePassXC listing should be UTF-8");
+        assert!(
+            listing.lines().any(|line| line == NIAN_PASS_EXTERNAL_TITLE),
+            "KeePassXC did not read the Unicode title written by Nian Pass"
+        );
+
+        let keepassxc_target_id = nian_reopened
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.get_title() == Some(KEEPASSXC_ENTRY_TITLE))
+            .map(|entry| entry.id())
+            .expect("fixture should contain the KeePassXC edit target");
+        fs::copy(&nian_output, &keepassxc_output)
+            .expect("Nian Pass output should copy before KeePassXC mutation");
+        run_keepassxc(
+            "KeePassXC mutation and resave",
+            vec![
+                OsString::from("edit"),
+                OsString::from("-q"),
+                OsString::from("--title"),
+                OsString::from(KEEPASSXC_EXTERNAL_TITLE),
+                keepassxc_output.as_os_str().to_owned(),
+                OsString::from(KEEPASSXC_ENTRY_TITLE),
+            ],
+        );
+
+        let keepassxc_reopened = KdbxDocument::open(&keepassxc_output, FIXTURE_PASSWORD)
+            .expect("Nian Pass should reopen the KeePassXC-resaved output");
+        assert!(
+            keepassxc_reopened.version() == nian_reopened.version(),
+            "KeePassXC resave changed the exact KDBX version"
+        );
+        assert_database_preserved_after_keepassxc_edit(
+            &nian_reopened.database,
+            &keepassxc_reopened.database,
+            keepassxc_target_id,
+        );
+        let final_nian_entry = keepassxc_reopened
+            .database
+            .entry(nian_target_id)
+            .expect("KeePassXC resave should retain the Nian Pass target UUID");
+        assert!(
+            final_nian_entry.get_title() == Some(NIAN_PASS_EXTERNAL_TITLE),
+            "KeePassXC resave changed the Nian Pass Unicode title"
+        );
+        assert_eq!(
+            final_nian_entry.tags.len(),
+            3,
+            "KeePassXC resave changed the external tag set"
+        );
+        assert!(
+            final_nian_entry
+                .fields
+                .get(fields::PASSWORD)
+                .is_some_and(|value| value.is_protected()),
+            "KeePassXC resave changed protected-password semantics"
+        );
+        assert!(
+            fs::read(&source_path).expect("source fixture should remain readable") == source_bytes,
+            "external compatibility test modified its source fixture"
+        );
     }
 
     #[test]

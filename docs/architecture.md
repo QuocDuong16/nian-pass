@@ -1,8 +1,8 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M1 retains the established read path and introduces an
-experimental KDBX 4.1 write foundation without an in-place filesystem save or
+the source of truth. M1.5 retains the M1 write architecture and adds external
+interoperability evidence without an in-place filesystem save or
 synchronization layer.
 
 ## Dependency direction
@@ -91,9 +91,15 @@ in [the compatibility matrix](kdbx-compatibility.md). Format-level verification
 is not evidence of complete feature compatibility for that format.
 
 M1 proves a KDBX 4.1 Nian Pass self-roundtrip for the trusted KeePassXC 2.7.12
-fixture. The test compares version, KDF, ciphers, compression, group and entry
-structure, identifiers, titles, history/timestamp behavior, and equality of the
-complete representation parsed by `keepass-rs`. This does not prove preservation
-of data that the dependency does not parse, byte-for-byte stability, or that
-KeePassXC can open Nian Pass output. External compatibility and atomic
-filesystem replacement remain later milestones.
+fixture. M1.5 separately uses a released `keepassxc-cli` as an independent
+implementation: Nian Pass mutates and writes a temporary copy, KeePassXC opens
+and lists it, KeePassXC performs a second explicit title mutation and resave,
+and Nian Pass reopens and compares the result. Self-roundtrip evidence is not
+external interoperability evidence, and neither form proves preservation of
+data the dependency does not parse or byte-for-byte ciphertext stability.
+
+KeePassXC is test tooling only. It is not a library, runtime, or deployment
+dependency of Nian Pass. The external harness writes only inside an isolated
+temporary directory through the existing caller-owned writer API; no public
+save-to-path API is introduced. Atomic filesystem replacement remains a later
+milestone.

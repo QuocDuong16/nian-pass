@@ -1,6 +1,6 @@
 # Threat Model
 
-This is the threat model for the M1 experimental write foundation. It records
+This is the threat model for the M1.5 experimental write foundation. It records
 boundaries and assumptions; it is not a claim that Nian Pass is ready to
 protect production credentials.
 
@@ -64,6 +64,10 @@ information to an attacker even when their plaintext remains unavailable.
 - Silent KDF, cipher, or compression changes
 - Data loss caused by reconstructing a database from an incomplete projection
 - Compromised supply-chain dependencies
+- Interoperability failures hidden by parser/writer self-roundtrips
+- External compatibility commands hanging or failing non-interactively
+- Compatibility-test credential or decrypted-content leakage
+- Plaintext exposure through compatibility-test temporary files
 
 ## Security assumptions
 
@@ -78,7 +82,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Backups and remote storage may observe encrypted database bytes and metadata
   such as size and modification time.
 
-## M1 controls and gaps
+## M1.5 controls and gaps
 
 The CLI reads the master password from an interactive terminal without echo and
 does not accept a password argument. Its input buffer is cleared on drop, and
@@ -107,9 +111,18 @@ exercise wrong credentials and writer failure, and confirm the source fixture
 bytes remain unchanged. CI verifies every committed fixture against
 `fixtures/kdbx/SHA256SUMS` before running tests.
 
-These controls do not make production save safe. M1 has no durable temporary
+These controls do not make production save safe. M1.5 has no durable temporary
 file, `fsync`, backup, atomic replacement, concurrent-writer detection, or
-external KeePassXC output verification. See [write safety](write-safety.md) for
-the required future filesystem algorithm. `keepass-rs` cannot preserve fields
-it does not parse, so the self-roundtrip is not a claim of universal lossless
-KDBX preservation.
+production conflict handling. See [write safety](write-safety.md) for the
+required future filesystem algorithm. `keepass-rs` cannot preserve fields it
+does not parse, so neither self-roundtrip nor external verification is a claim
+of universal lossless KDBX preservation.
+
+M1.5 invokes a released KeePassXC CLI only from an explicit test harness. The
+harness uses one synthetic public fixture credential, supplies it through
+stdin rather than process arguments, disables shell tracing, captures command
+output, never emits decrypted XML or protected field values, and performs all
+writes in a uniquely created temporary directory removed on drop. A shell
+timeout bounds the suite. The immutable source fixture is copied before use and
+its bytes are checked again after the external round-trip. Local absence is an
+explicit skip; the dedicated CI job uses `--require`, so absence is a failure.
