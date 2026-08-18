@@ -17,12 +17,14 @@ use keepass::{
     db::{DatabaseOpenError, DatabaseSaveError, fields},
 };
 use thiserror::Error;
-use vault_core::{EntryId, EntrySummary, Group, GroupId, SecretString, Vault};
+use vault_core::{EntryId, EntrySummary, Group, GroupId, SecretString, SummaryText, Vault};
 
 #[derive(Clone, Copy)]
 enum MissingFieldProtection {
-    Protected,
-    Unprotected,
+    DatabaseTitlePolicy,
+    DatabaseUsernamePolicy,
+    DatabaseUrlPolicy,
+    AlwaysProtected,
 }
 
 /// Exact KDBX format version reported by the database header.
@@ -135,40 +137,48 @@ impl KdbxDocument {
     /// Renames an entry by its stable identifier while retaining the complete
     /// parsed database state.
     ///
-    /// A real change preserves the title field's existing protection mode, and
+    /// A real change preserves the title field's existing protection mode. A
+    /// missing non-empty Title follows the database's Title memory-protection
+    /// policy, falling back to unprotected when metadata is absent.
     /// `keepass-rs` change tracking records the previous entry in history and
-    /// updates its last-modification timestamp. Setting the visible title to
-    /// its current value is a no-op. No identifier or title is included in
-    /// errors.
+    /// updates its last-modification timestamp. Setting the current value is a
+    /// no-op. No identifier or title is included in errors.
     pub fn set_entry_title(&mut self, id: &EntryId, title: &str) -> Result<(), KdbxError> {
         self.set_standard_field(
             id,
             fields::TITLE,
             title,
-            MissingFieldProtection::Unprotected,
+            MissingFieldProtection::DatabaseTitlePolicy,
         )
     }
 
     /// Changes one entry username while preserving its existing protection mode.
     ///
-    /// A missing username is created unprotected only for a non-empty value.
-    /// Setting the current value, or setting a missing username to empty, is a
-    /// complete no-op.
+    /// A missing non-empty username follows the database's UserName
+    /// memory-protection policy, falling back to unprotected when metadata is
+    /// absent. Setting the current value, or setting a missing username to
+    /// empty, is a complete no-op.
     pub fn set_entry_username(&mut self, id: &EntryId, username: &str) -> Result<(), KdbxError> {
         self.set_standard_field(
             id,
             fields::USERNAME,
             username,
-            MissingFieldProtection::Unprotected,
+            MissingFieldProtection::DatabaseUsernamePolicy,
         )
     }
 
     /// Changes one entry URL without parsing or normalizing it.
     ///
-    /// Existing protection mode is preserved. A missing URL is created
-    /// unprotected only for a non-empty value; missing plus empty is a no-op.
+    /// Existing protection mode is preserved. A missing non-empty URL follows
+    /// the database's URL memory-protection policy, falling back to unprotected
+    /// when metadata is absent; missing plus empty is a no-op.
     pub fn set_entry_url(&mut self, id: &EntryId, url: &str) -> Result<(), KdbxError> {
-        self.set_standard_field(id, fields::URL, url, MissingFieldProtection::Unprotected)
+        self.set_standard_field(
+            id,
+            fields::URL,
+            url,
+            MissingFieldProtection::DatabaseUrlPolicy,
+        )
     }
 
     /// Changes one entry password while preserving its existing protection mode.
@@ -185,7 +195,7 @@ impl KdbxDocument {
             id,
             fields::PASSWORD,
             password.expose_secret(),
-            MissingFieldProtection::Protected,
+            MissingFieldProtection::AlwaysProtected,
         )
     }
 
@@ -237,6 +247,7 @@ impl KdbxDocument {
         self.ensure_writable_format()?;
 
         let upstream_id = self.find_entry_id(id)?;
+        let missing_protected = self.missing_field_is_protected(missing_protection);
         let current_entry = self
             .database
             .entry(upstream_id)
@@ -249,10 +260,7 @@ impl KdbxDocument {
             return Ok(());
         }
 
-        let protect = existing.map_or(
-            matches!(missing_protection, MissingFieldProtection::Protected),
-            keepass::db::Value::is_protected,
-        );
+        let protect = existing.map_or(missing_protected, keepass::db::Value::is_protected);
         let mut entry = self
             .database
             .entry_mut(upstream_id)
@@ -265,6 +273,23 @@ impl KdbxDocument {
         }
 
         Ok(())
+    }
+
+    fn missing_field_is_protected(&self, policy: MissingFieldProtection) -> bool {
+        let memory_protection = self.database.meta.memory_protection.as_ref();
+
+        match policy {
+            MissingFieldProtection::DatabaseTitlePolicy => {
+                memory_protection.is_some_and(|policy| policy.protect_title)
+            }
+            MissingFieldProtection::DatabaseUsernamePolicy => {
+                memory_protection.is_some_and(|policy| policy.protect_username)
+            }
+            MissingFieldProtection::DatabaseUrlPolicy => {
+                memory_protection.is_some_and(|policy| policy.protect_url)
+            }
+            MissingFieldProtection::AlwaysProtected => true,
+        }
     }
 
     fn find_entry_id(&self, id: &EntryId) -> Result<keepass::db::EntryId, KdbxError> {
@@ -399,6 +424,14 @@ fn convert_database(database: &Database) -> Result<Vault, KdbxError> {
     Ok(Vault::new(convert_group(root)))
 }
 
+fn project_summary_text(value: Option<&keepass::db::Value<String>>) -> SummaryText {
+    match value {
+        None => SummaryText::Missing,
+        Some(value) if value.is_protected() => SummaryText::Protected,
+        Some(value) => SummaryText::Visible(value.get().to_owned()),
+    }
+}
+
 fn convert_group(group: keepass::db::GroupRef<'_>) -> Group {
     let groups = group.groups().map(convert_group).collect();
     let entries = group
@@ -406,15 +439,9 @@ fn convert_group(group: keepass::db::GroupRef<'_>) -> Group {
         .map(|entry| {
             EntrySummary::new(
                 EntryId::new(entry.id().to_string()),
-                entry.get_title().unwrap_or_default(),
-                entry
-                    .fields
-                    .get(fields::USERNAME)
-                    .map(|value| value.get().to_owned()),
-                entry
-                    .fields
-                    .get(fields::URL)
-                    .map(|value| value.get().to_owned()),
+                project_summary_text(entry.fields.get(fields::TITLE)),
+                project_summary_text(entry.fields.get(fields::USERNAME)),
+                project_summary_text(entry.fields.get(fields::URL)),
                 entry.tags.clone(),
                 entry.fields.contains_key(fields::PASSWORD),
                 entry.fields.contains_key(fields::NOTES),
@@ -441,8 +468,11 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use keepass::{Database, DatabaseKey, db::fields};
-    use vault_core::{EntryId, EntrySummary, Group, SecretString};
+    use keepass::{
+        Database, DatabaseKey,
+        db::{MemoryProtection, fields},
+    };
+    use vault_core::{EntryId, Group, SecretString, SummaryText};
 
     use super::{KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
 
@@ -549,7 +579,11 @@ mod tests {
                 .iter()
                 .map(|entry| EntrySnapshot {
                     id: entry.id().as_str().to_owned(),
-                    title: entry.title().to_owned(),
+                    title: entry
+                        .title()
+                        .visible()
+                        .expect("snapshot fixture title should be visible")
+                        .to_owned(),
                 })
                 .collect(),
         });
@@ -887,6 +921,174 @@ mod tests {
         assert!(
             missing_empty.database == before_database,
             "missing-to-empty metadata edit changed the database"
+        );
+    }
+
+    fn assert_missing_metadata_uses_database_policy(
+        field: &str,
+        value: &str,
+        setter: fn(&mut KdbxDocument, &EntryId, &str) -> Result<(), KdbxError>,
+        configure: fn(&mut MemoryProtection, bool),
+        verify_roundtrip: bool,
+    ) {
+        let mut protected = kdbx41_document();
+        let mut policy = MemoryProtection::default();
+        configure(&mut policy, true);
+        protected.database.meta.memory_protection = Some(policy);
+        let (projected_id, upstream_id) = first_entry_ids(&protected);
+        protected
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(field);
+        let original = protected
+            .database
+            .entry(upstream_id)
+            .expect("prepared entry should exist");
+        let original_history_len = history_len(&original);
+        let original_last_modification = original.times.last_modification;
+
+        setter(&mut protected, &projected_id, value)
+            .expect("policy-driven field creation should succeed");
+        let edited = protected
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should exist");
+        let created = edited
+            .fields
+            .get(field)
+            .expect("policy-driven field was not created");
+        assert!(created.is_protected());
+        assert!(created.get() == value, "created metadata value changed");
+        assert_eq!(
+            history_len(&edited),
+            original_history_len + 1,
+            "policy-driven creation did not append history"
+        );
+        assert!(
+            edited
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .is_some_and(|entry| !entry.fields.contains_key(field)),
+            "policy-driven history did not preserve field absence"
+        );
+        assert!(
+            edited.times.last_modification != original_last_modification,
+            "policy-driven creation did not update LastModificationTime"
+        );
+
+        if verify_roundtrip {
+            let mut saved = Vec::new();
+            protected
+                .save_to_writer(&mut saved, FIXTURE_PASSWORD)
+                .expect("policy-driven edit should serialize");
+            let reopened = KdbxDocument::open_reader(&mut Cursor::new(saved), FIXTURE_PASSWORD)
+                .expect("policy-driven edit should reopen");
+            assert!(
+                reopened.database.entry(upstream_id).is_some_and(|entry| {
+                    entry
+                        .fields
+                        .get(field)
+                        .is_some_and(keepass::db::Value::is_protected)
+                }),
+                "reopened policy-driven field lost protection"
+            );
+        }
+
+        let mut missing_empty = kdbx41_document();
+        let mut policy = MemoryProtection::default();
+        configure(&mut policy, true);
+        missing_empty.database.meta.memory_protection = Some(policy);
+        let (projected_id, upstream_id) = first_entry_ids(&missing_empty);
+        missing_empty
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(field);
+        let before_database = missing_empty.database.clone();
+        setter(&mut missing_empty, &projected_id, "")
+            .expect("policy-driven missing-to-empty edit should succeed");
+        assert!(
+            missing_empty.database == before_database,
+            "policy-driven missing-to-empty edit changed the database"
+        );
+
+        let mut unprotected = kdbx41_document();
+        let mut policy = MemoryProtection::default();
+        configure(&mut policy, false);
+        unprotected.database.meta.memory_protection = Some(policy);
+        let (projected_id, upstream_id) = first_entry_ids(&unprotected);
+        unprotected
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(field);
+        setter(&mut unprotected, &projected_id, value)
+            .expect("unprotected policy-driven field creation should succeed");
+        assert!(
+            unprotected
+                .database
+                .entry(upstream_id)
+                .is_some_and(|entry| {
+                    entry
+                        .fields
+                        .get(field)
+                        .is_some_and(|value| !value.is_protected())
+                }),
+            "false database policy unexpectedly protected a new field"
+        );
+
+        let mut existing = kdbx41_document();
+        let mut policy = MemoryProtection::default();
+        configure(&mut policy, true);
+        existing.database.meta.memory_protection = Some(policy);
+        let (projected_id, upstream_id) = first_entry_ids(&existing);
+        existing
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_unprotected(field, "public-existing-metadata");
+        setter(&mut existing, &projected_id, value).expect("existing metadata edit should succeed");
+        assert!(
+            existing.database.entry(upstream_id).is_some_and(|entry| {
+                entry
+                    .fields
+                    .get(field)
+                    .is_some_and(|value| !value.is_protected())
+            }),
+            "database policy overrode an existing field's protection"
+        );
+    }
+
+    fn assert_missing_metadata_without_policy_is_unprotected(
+        field: &str,
+        value: &str,
+        setter: fn(&mut KdbxDocument, &EntryId, &str) -> Result<(), KdbxError>,
+    ) {
+        let mut document = kdbx41_document();
+        document.database.meta.memory_protection = None;
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(field);
+
+        setter(&mut document, &projected_id, value)
+            .expect("missing metadata creation without policy should succeed");
+        assert!(
+            document.database.entry(upstream_id).is_some_and(|entry| {
+                entry
+                    .fields
+                    .get(field)
+                    .is_some_and(|value| !value.is_protected())
+            }),
+            "absent database policy did not use the unprotected fallback"
         );
     }
 
@@ -1553,7 +1755,12 @@ mod tests {
                 .root()
                 .entries()
                 .iter()
-                .map(EntrySummary::title)
+                .map(|entry| {
+                    entry
+                        .title()
+                        .visible()
+                        .expect("known fixture title should be visible")
+                })
                 .collect();
 
             assert_eq!(titles, *expected_titles, "unexpected titles in {file}");
@@ -1570,6 +1777,7 @@ mod tests {
 
     #[test]
     fn entry_summaries_preserve_metadata_presence_without_secret_plaintext() {
+        const TEST_TITLE: &str = "public-visible-title";
         const TEST_NOTES: &str = "public-test-notes";
 
         let mut document = kdbx41_document();
@@ -1579,6 +1787,7 @@ mod tests {
                 .database
                 .entry_mut(upstream_id)
                 .expect("target entry should exist");
+            entry.set_unprotected(fields::TITLE, TEST_TITLE);
             entry.fields.remove(fields::USERNAME);
             entry.set_unprotected(fields::URL, "");
             entry.set_protected(fields::NOTES, TEST_NOTES);
@@ -1594,20 +1803,59 @@ mod tests {
             .find(|entry| entry.id() == &projected_id)
             .expect("prepared entry should be present in the projection");
 
-        assert!(
-            summary.username().is_none(),
-            "absent username became present"
-        );
-        assert!(
-            summary.url() == Some(""),
-            "explicit empty URL was not preserved"
-        );
+        assert!(summary.title().visible() == Some(TEST_TITLE));
+        assert!(!summary.title().is_missing());
+        assert!(!summary.title().is_protected());
+        assert!(summary.username().is_missing());
+        assert!(summary.username().visible().is_none());
+        assert!(!summary.username().is_protected());
+        assert!(!summary.url().is_missing());
+        assert!(!summary.url().is_protected());
+        assert!(summary.url().visible() == Some(""));
         assert!(
             summary.has_password(),
             "password presence was not projected"
         );
         assert!(summary.has_notes(), "notes presence was not projected");
         assert_eq!(summary.tags().len(), 3, "fixture tags were not projected");
+    }
+
+    #[test]
+    fn protected_standard_metadata_projects_without_plaintext() {
+        const TEST_TITLE: &str = "public-protected-title";
+        const TEST_USERNAME: &str = "public-protected-username";
+        const TEST_URL: &str = "https://protected.example.test";
+
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        {
+            let mut entry = document
+                .database
+                .entry_mut(upstream_id)
+                .expect("target entry should exist");
+            entry.set_protected(fields::TITLE, TEST_TITLE);
+            entry.set_protected(fields::USERNAME, TEST_USERNAME);
+            entry.set_protected(fields::URL, TEST_URL);
+        }
+
+        let vault = document
+            .projection()
+            .expect("prepared document should project");
+        let summary = vault
+            .root()
+            .entries()
+            .iter()
+            .find(|entry| entry.id() == &projected_id)
+            .expect("prepared entry should be present in the projection");
+
+        for projected in [summary.title(), summary.username(), summary.url()] {
+            assert!(projected.is_protected());
+            assert!(projected.visible().is_none());
+            assert!(!projected.is_missing());
+        }
+        assert!(matches!(summary.title(), SummaryText::Protected));
+        assert!(matches!(summary.username(), SummaryText::Protected));
+        assert!(matches!(summary.url(), SummaryText::Protected));
     }
 
     #[test]
@@ -1668,7 +1916,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_notes_explicitly_and_preserves_missing() {
+    fn reads_notes_explicitly_and_preserves_missing_and_empty() {
         const TEST_NOTES: &str = "public-test-notes";
 
         let mut document = kdbx41_document();
@@ -1701,6 +1949,20 @@ mod tests {
                 .expect("missing notes lookup should succeed")
                 .is_none(),
             "missing notes did not remain absent"
+        );
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(fields::NOTES, "");
+        let empty = document
+            .entry_notes(&projected_id)
+            .expect("empty notes lookup should succeed")
+            .expect("explicit empty notes should remain present");
+        assert!(
+            empty.expose_secret().is_empty(),
+            "explicit empty notes changed value"
         );
     }
 
@@ -2184,6 +2446,58 @@ mod tests {
     }
 
     #[test]
+    fn missing_title_uses_database_memory_protection_policy() {
+        assert_missing_metadata_uses_database_policy(
+            fields::TITLE,
+            "public-policy-title",
+            KdbxDocument::set_entry_title,
+            |policy, protected| policy.protect_title = protected,
+            false,
+        );
+    }
+
+    #[test]
+    fn missing_username_uses_database_memory_protection_policy_and_roundtrips() {
+        assert_missing_metadata_uses_database_policy(
+            fields::USERNAME,
+            "public-policy-username",
+            KdbxDocument::set_entry_username,
+            |policy, protected| policy.protect_username = protected,
+            true,
+        );
+    }
+
+    #[test]
+    fn missing_url_uses_database_memory_protection_policy() {
+        assert_missing_metadata_uses_database_policy(
+            fields::URL,
+            "https://policy.example.test",
+            KdbxDocument::set_entry_url,
+            |policy, protected| policy.protect_url = protected,
+            false,
+        );
+    }
+
+    #[test]
+    fn absent_memory_protection_uses_standard_metadata_fallbacks() {
+        assert_missing_metadata_without_policy_is_unprotected(
+            fields::TITLE,
+            "public-fallback-title",
+            KdbxDocument::set_entry_title,
+        );
+        assert_missing_metadata_without_policy_is_unprotected(
+            fields::USERNAME,
+            "public-fallback-username",
+            KdbxDocument::set_entry_username,
+        );
+        assert_missing_metadata_without_policy_is_unprotected(
+            fields::URL,
+            "https://fallback.example.test",
+            KdbxDocument::set_entry_url,
+        );
+    }
+
+    #[test]
     fn password_mutation_preserves_protected_state_history_and_roundtrip() {
         let mut document = kdbx41_document();
         let (projected_id, upstream_id) = first_entry_ids(&document);
@@ -2333,6 +2647,14 @@ mod tests {
     #[test]
     fn missing_password_defaults_to_protected_and_empty_is_a_no_op() {
         let mut document = kdbx41_document();
+        let mut policy = document
+            .database
+            .meta
+            .memory_protection
+            .clone()
+            .unwrap_or_default();
+        policy.protect_password = false;
+        document.database.meta.memory_protection = Some(policy);
         let (projected_id, upstream_id) = first_entry_ids(&document);
         document
             .database

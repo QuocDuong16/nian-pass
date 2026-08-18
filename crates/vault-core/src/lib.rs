@@ -1,9 +1,10 @@
 //! KDBX-independent domain types used by Nian Pass clients.
 //!
 //! M2 retains a deliberately secret-free presentation projection and adds an
-//! explicit secret-bearing value type. Group names, entry metadata, and identifiers
-//! remain privacy-sensitive. `Vault`, `Group`, `EntrySummary`, `GroupId`, `EntryId`,
-//! and `SecretString` do not implement `Debug`, which prevents accidental dumps.
+//! explicit secret-bearing value type. Group names, visible entry metadata, and
+//! identifiers remain privacy-sensitive. `Vault`, `Group`, `EntrySummary`,
+//! `SummaryText`, `GroupId`, `EntryId`, and `SecretString` do not implement `Debug`,
+//! which prevents accidental dumps.
 
 use zeroize::Zeroizing;
 
@@ -195,18 +196,58 @@ impl EntryId {
     }
 }
 
+/// A standard text field projected without materializing protected plaintext.
+///
+/// Missing fields, visible fields (including explicit empty strings), and
+/// protected fields remain distinct. A protected value records only its state;
+/// the underlying plaintext is deliberately absent from this type.
+#[derive(Clone, Eq, PartialEq)]
+pub enum SummaryText {
+    /// The source field does not exist.
+    Missing,
+    /// The source field is unprotected and safe to include in the projection.
+    Visible(String),
+    /// The source field exists and is protected; its plaintext is not projected.
+    Protected,
+}
+
+impl SummaryText {
+    /// Returns visible text, preserving an explicitly empty visible string.
+    #[must_use]
+    pub fn visible(&self) -> Option<&str> {
+        match self {
+            Self::Visible(value) => Some(value),
+            Self::Missing | Self::Protected => None,
+        }
+    }
+
+    /// Returns whether the source field was missing.
+    #[must_use]
+    pub const fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+
+    /// Returns whether the source field was protected.
+    #[must_use]
+    pub const fn is_protected(&self) -> bool {
+        matches!(self, Self::Protected)
+    }
+}
+
 /// A deliberately secret-free entry projection for list and navigation views.
 ///
 /// Password and notes presence is represented by booleans; their plaintext is
 /// never copied here. TOTP seeds, custom-field values, and attachments are also
-/// excluded. Title, username, URL, tags, and the identifier remain
-/// privacy-sensitive metadata. This is not a save model.
+/// excluded. Protected Title, UserName, and URL fields are represented only by
+/// [`SummaryText::Protected`], without copying their plaintext. Visible standard
+/// fields, tags, and the identifier remain privacy-sensitive metadata. This is
+/// not a save model.
 #[derive(Clone, Eq, PartialEq)]
 pub struct EntrySummary {
     id: EntryId,
-    title: String,
-    username: Option<String>,
-    url: Option<String>,
+    title: SummaryText,
+    username: SummaryText,
+    url: SummaryText,
     tags: Vec<String>,
     has_password: bool,
     has_notes: bool,
@@ -217,16 +258,16 @@ impl EntrySummary {
     #[must_use]
     pub fn new(
         id: EntryId,
-        title: impl Into<String>,
-        username: Option<String>,
-        url: Option<String>,
+        title: SummaryText,
+        username: SummaryText,
+        url: SummaryText,
         tags: Vec<String>,
         has_password: bool,
         has_notes: bool,
     ) -> Self {
         Self {
             id,
-            title: title.into(),
+            title,
             username,
             url,
             tags,
@@ -243,20 +284,20 @@ impl EntrySummary {
 
     /// Returns the entry title.
     #[must_use]
-    pub fn title(&self) -> &str {
+    pub const fn title(&self) -> &SummaryText {
         &self.title
     }
 
-    /// Returns the username metadata, preserving absent versus explicit empty.
+    /// Returns projected username metadata without protected plaintext.
     #[must_use]
-    pub fn username(&self) -> Option<&str> {
-        self.username.as_deref()
+    pub const fn username(&self) -> &SummaryText {
+        &self.username
     }
 
-    /// Returns the URL metadata, preserving absent versus explicit empty.
+    /// Returns projected URL metadata without protected plaintext.
     #[must_use]
-    pub fn url(&self) -> Option<&str> {
-        self.url.as_deref()
+    pub const fn url(&self) -> &SummaryText {
+        &self.url
     }
 
     /// Returns the entry tags in their stored order.
@@ -280,14 +321,14 @@ impl EntrySummary {
 
 #[cfg(test)]
 mod tests {
-    use super::{EntryId, EntrySummary, Group, GroupId, SecretString, Vault};
+    use super::{EntryId, EntrySummary, Group, GroupId, SecretString, SummaryText, Vault};
 
     fn entry(id: &str, title: &str) -> EntrySummary {
         EntrySummary::new(
             EntryId::new(id),
-            title,
-            None,
-            None,
+            SummaryText::Visible(title.to_owned()),
+            SummaryText::Missing,
+            SummaryText::Missing,
             Vec::new(),
             false,
             false,
@@ -336,21 +377,37 @@ mod tests {
     fn entry_summary_exposes_metadata_and_presence_only() {
         let entry = EntrySummary::new(
             EntryId::new("entry-id"),
-            "Example",
-            Some("person@example.test".to_owned()),
-            Some("https://example.test".to_owned()),
+            SummaryText::Visible("Example".to_owned()),
+            SummaryText::Visible("person@example.test".to_owned()),
+            SummaryText::Visible("https://example.test".to_owned()),
             vec!["personal".to_owned()],
             true,
             true,
         );
 
         assert_eq!(entry.id().as_str(), "entry-id");
-        assert_eq!(entry.title(), "Example");
-        assert_eq!(entry.username(), Some("person@example.test"));
-        assert_eq!(entry.url(), Some("https://example.test"));
+        assert!(entry.title().visible() == Some("Example"));
+        assert!(entry.username().visible() == Some("person@example.test"));
+        assert!(entry.url().visible() == Some("https://example.test"));
         assert!(entry.tags() == ["personal"]);
         assert!(entry.has_password());
         assert!(entry.has_notes());
+    }
+
+    #[test]
+    fn summary_text_distinguishes_missing_visible_empty_and_protected() {
+        let missing = SummaryText::Missing;
+        let empty = SummaryText::Visible(String::new());
+        let visible = SummaryText::Visible("public-metadata".to_owned());
+        let protected = SummaryText::Protected;
+
+        assert!(missing.is_missing());
+        assert!(missing.visible().is_none());
+        assert!(!empty.is_missing());
+        assert!(empty.visible() == Some(""));
+        assert!(visible.visible() == Some("public-metadata"));
+        assert!(protected.is_protected());
+        assert!(protected.visible().is_none());
     }
 
     #[test]

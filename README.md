@@ -26,7 +26,8 @@ explicit zeroizing `SecretString` for narrow password and notes reads; a
 `keepass-rs` adapter with preservation-aware title, username, URL, and password
 mutations; and a small read-only CLI. Group names, entry metadata, identifiers,
 and file paths remain privacy-sensitive even when they are not cryptographic
-secrets.
+secrets. Protected Title, UserName, and URL fields are represented without
+plaintext in bulk projections.
 
 Read support is verified only for the combinations backed by trusted fixtures.
 See [KDBX compatibility](docs/kdbx-compatibility.md) for the evidence matrix and
@@ -51,8 +52,9 @@ cargo run -p nian-pass-cli -- list path/to/database.kdbx
 Both commands prompt for the master password interactively. There is no
 password command-line option. `list` prints group names and entry titles only
 because the user explicitly requested that output; applications must not treat
-that output as safe for logs or telemetry. `info` reports the exact KDBX major
-and minor version from the opened file plus group and entry counts.
+that output as safe for logs or telemetry. A protected title is shown only as
+the fixed `[protected]` marker. `info` reports the exact KDBX major and minor
+version from the opened file plus group and entry counts.
 
 ## Development
 

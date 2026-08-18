@@ -1,8 +1,10 @@
 use std::{borrow::Cow, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand};
-use vault_core::Group;
+use vault_core::{Group, SummaryText};
 use zeroize::Zeroizing;
+
+const PROTECTED_TITLE_MARKER: &str = "[protected]";
 
 #[derive(Parser)]
 #[command(
@@ -62,12 +64,20 @@ fn print_group(group: &Group, depth: usize) {
     println!("{indent}{group_name}/");
 
     for entry in group.entries() {
-        let title = terminal_safe(entry.title(), "(untitled entry)");
+        let title = projected_title(entry.title());
         println!("{indent}  {title}");
     }
 
     for child in group.groups() {
         print_group(child, depth + 1);
+    }
+}
+
+fn projected_title(title: &SummaryText) -> Cow<'_, str> {
+    match title {
+        SummaryText::Missing => Cow::Borrowed("(untitled entry)"),
+        SummaryText::Visible(value) => terminal_safe(value, "(untitled entry)"),
+        SummaryText::Protected => Cow::Borrowed(PROTECTED_TITLE_MARKER),
     }
 }
 
@@ -107,8 +117,9 @@ enum CliError {
 mod tests {
     use std::path::Path;
 
-    use super::{Cli, Command, terminal_safe};
+    use super::{Cli, Command, PROTECTED_TITLE_MARKER, projected_title, terminal_safe};
     use clap::Parser;
+    use vault_core::SummaryText;
 
     #[test]
     fn parses_info_without_a_password_argument() {
@@ -142,5 +153,22 @@ mod tests {
             "line\u{fffd}\u{fffd}[31mred"
         );
         assert_eq!(terminal_safe("", "fallback"), "fallback");
+    }
+
+    #[test]
+    fn list_uses_a_fixed_marker_for_protected_titles() {
+        assert_eq!(
+            projected_title(&SummaryText::Protected),
+            PROTECTED_TITLE_MARKER
+        );
+        assert_eq!(projected_title(&SummaryText::Missing), "(untitled entry)");
+        assert_eq!(
+            projected_title(&SummaryText::Visible(String::new())),
+            "(untitled entry)"
+        );
+        assert_eq!(
+            projected_title(&SummaryText::Visible("visible title".to_owned())),
+            "visible title"
+        );
     }
 }

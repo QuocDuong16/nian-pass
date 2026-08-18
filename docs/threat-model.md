@@ -40,7 +40,8 @@ logs, telemetry, crash reports, or remote diagnostics by default.
 The explicit `list` CLI command may print group names and entry titles because
 the user directly requested that output. This is command output, not
 application logging or telemetry. Terminal control characters are sanitized
-before display.
+before display, and a protected Title is rendered only as the fixed
+`[protected]` marker rather than being revealed.
 
 Encrypted database files, attachments, and key files are also security assets.
 Their ciphertext, size, location, and modification times can expose useful
@@ -62,6 +63,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Concurrent writes and unresolved conflicts
 - Writer serialization bugs
 - Silent protected/unprotected field-state changes during mutation
+- Protected KDBX metadata downgraded into ordinary clonable application strings
 - Silent KDBX version downgrade or upgrade
 - Silent KDF, cipher, or compression changes
 - Data loss caused by reconstructing a database from an incomplete projection
@@ -89,10 +91,12 @@ information to an attacker even when their plaintext remains unavailable.
 The CLI reads the master password from an interactive terminal without echo and
 does not accept a password argument. Its input buffer is cleared on drop, and
 the adapter returns generic credential and format errors without embedding the
-password. The bulk domain projection exposes privacy-sensitive title, username,
-URL, tags, and identifiers plus password/notes presence flags, but excludes
-password and notes plaintext, TOTP seeds, attachment contents, history, and
-custom-field values.
+password. The bulk domain projection exposes privacy-sensitive visible title,
+username, URL, tags, and identifiers plus password/notes presence flags, but
+excludes protected Title/UserName/URL plaintext, password and notes plaintext,
+TOTP seeds, attachment contents, history, and custom-field values. Protected
+standard metadata maps to an opaque `SummaryText::Protected` state, and the
+adapter checks protection before copying any visible text into the projection.
 
 Password and notes reads require an exact `EntryId` and return one owned
 `SecretString`. Its backing `String` is zeroized on drop through `zeroize`; the
@@ -115,9 +119,11 @@ M2 confines experimental mutation to an opaque `KdbxDocument` retaining the
 complete `keepass-rs` representation. It never serializes from the incomplete
 `Vault` projection, never stores the master password, and looks entries up by
 UUID. Title, username, URL, and password edits preserve existing field
-protection, while missing password fields default to protected. Same-value and
-missing-plus-empty requests avoid history, timestamp, and representation
-changes. Typed errors for unknown entries, unsupported write formats,
+protection. For missing non-empty Title, UserName, and URL fields, database
+memory-protection policy selects the new field state; absent policy metadata
+falls back to unprotected. Missing non-empty password fields remain protected
+regardless of database policy. Same-value and missing-plus-empty requests avoid
+history, timestamp, and representation changes. Typed errors for unknown entries, unsupported write formats,
 destination I/O failure, and serialization failure do not contain identifiers,
 metadata, or secrets. KDBX 3.1 and 4.0 writes are rejected. The public save API
 accepts only a caller-owned writer and cannot perform an in-place path write.

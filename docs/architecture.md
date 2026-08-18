@@ -32,10 +32,13 @@ without exposing a `keepass-rs` enum.
 
 The M2 domain model separates bulk metadata from explicit secret access:
 
-- `EntrySummary` contains an identifier, title, optional username and URL,
-  tags, and password/notes presence flags. Absence remains distinct from an
-  explicitly empty username or URL. It never contains password or notes
-  plaintext, TOTP data, attachments, or custom-field values.
+- `EntrySummary` contains an identifier, `SummaryText` projections for Title,
+  UserName, and URL, tags, and password/notes presence flags. `SummaryText`
+  distinguishes `Missing`, `Visible(String)` (including an explicit empty
+  string), and `Protected`. The `Protected` state records presence and
+  protection without containing the field plaintext. `EntrySummary` never
+  contains protected standard-field plaintext, password or notes plaintext,
+  TOTP data, attachments, or custom-field values.
 - `SecretString` owns one explicitly requested password or notes value in a
   zeroizing buffer. It has no `Debug`, `Display`, `Clone`, serialization, deref,
   or implicit string-borrowing implementation; plaintext access requires
@@ -68,11 +71,14 @@ M2 exposes only title, username, URL, and password mutation by stable `EntryId`.
 A private adapter helper applies one common policy: compare plaintext before
 tracking, preserve an existing field's protected/unprotected mode, append one
 history item and update `LastModificationTime` only for a real change, and make
-same-value or missing-plus-empty requests complete no-ops. Missing Title,
-UserName, and URL fields are created unprotected; a missing Password is created
-protected. These defaults match KeePass memory-protection defaults, and the
-password default is security-critical. URLs are stored verbatim without browser
-normalization.
+same-value or missing-plus-empty requests complete no-ops. Missing non-empty
+Title, UserName, and URL fields follow the database's respective
+`protect_title`, `protect_username`, and `protect_url` memory-protection policy.
+Absent memory-protection metadata falls back to the standard unprotected
+defaults for those three fields. A missing non-empty Password is always created
+protected, including when `protect_password` is false. Database policy applies
+only to missing-field creation; an existing field's protection state always
+wins. URLs are stored verbatim without browser normalization.
 
 The document never stores the master password; credentials are supplied again
 when saving. Its writer-first API cannot open or overwrite a path.
@@ -96,6 +102,7 @@ KDF, cipher, or compression migration.
 11. **A mutation must not change unrelated field semantics, including protected/unprotected state, unless explicitly requested.**
 12. **Secret-bearing fields must be fetched explicitly and must not be included in bulk vault projections.**
 13. **Public mutation APIs must preserve an existing KDBX field's protection mode unless an API explicitly represents a protection-mode change.**
+14. **Bulk projections must not materialize plaintext from fields marked protected in the underlying vault.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.
