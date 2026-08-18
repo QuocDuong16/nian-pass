@@ -1,0 +1,17 @@
+[package]
+name = "kdbx"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "KDBX adapter for Nian Pass"
+
+[dependencies]
+keepass.workspace = true
+thiserror.workspace = true
+vault-core.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

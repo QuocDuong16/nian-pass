@@ -1,0 +1,29 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rust:
+    runs-on: docker
+    timeout-minutes: 20
+    container:
+      image: rust:1.97.1-bookworm
+
+    steps:
+      - name: Check out repository
+        uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust quality components
+        run: rustup component add rustfmt clippy
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace

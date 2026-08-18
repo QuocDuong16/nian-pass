@@ -1,0 +1,12 @@
+[package]
+name = "vault-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "KDBX-independent domain model for Nian Pass"
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
