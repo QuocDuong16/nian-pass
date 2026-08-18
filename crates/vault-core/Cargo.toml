@@ -8,5 +8,8 @@ description = "KDBX-independent domain model for Nian Pass"
 [lib]
 path = "src/lib.rs"
 
+[dependencies]
+zeroize.workspace = true
+
 [lints]
 workspace = true

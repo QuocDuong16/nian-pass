@@ -859,6 +859,9 @@ dependencies = [
 [[package]]
 name = "vault-core"
 version = "0.1.0"
+dependencies = [
+ "zeroize",
+]
 
 [[package]]
 name = "wasm-bindgen"

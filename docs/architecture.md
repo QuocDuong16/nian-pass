@@ -1,9 +1,9 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M1.5 retains the M1 write architecture and adds external
-interoperability evidence without an in-place filesystem save or
-synchronization layer.
+the source of truth. M2 adds secure, application-facing read/edit APIs to the
+M1.5 preservation architecture without an in-place filesystem save,
+presentation layer, or synchronization layer.
 
 ## Dependency direction
 
@@ -30,18 +30,29 @@ projection and a dependency-neutral `KdbxVersion`. The version preserves the
 exact major/minor header value, so the CLI can report `3.1`, `4.0`, or `4.1`
 without exposing a `keepass-rs` enum.
 
-The M0.5 domain model is intentionally a credential-free, read-only projection.
-It contains group names, entry titles, and identifiers, but not passwords,
-notes, TOTP seeds, attachments, history, or custom fields. The included values
-are non-secret vault metadata, but they remain privacy-sensitive and must not be
-logged or sent to telemetry by default. It is not a serialization model. A
-future write design must preserve semantics that Nian Pass does not edit or
-understand; reconstructing a database from this projection is forbidden.
+The M2 domain model separates bulk metadata from explicit secret access:
 
-For edits, `KdbxDocument` privately owns the complete parsed
-`keepass::Database`. Callers may request a fresh `Vault` projection, but title
-mutation and serialization operate on the retained complete database, never on
-that projection:
+- `EntrySummary` contains an identifier, title, optional username and URL,
+  tags, and password/notes presence flags. Absence remains distinct from an
+  explicitly empty username or URL. It never contains password or notes
+  plaintext, TOTP data, attachments, or custom-field values.
+- `SecretString` owns one explicitly requested password or notes value in a
+  zeroizing buffer. It has no `Debug`, `Display`, `Clone`, serialization, deref,
+  or implicit string-borrowing implementation; plaintext access requires
+  `expose_secret()`.
+- `Vault` and `Group` remain secret-free list/navigation projections. Their
+  metadata is privacy-sensitive and must not be logged or sent to telemetry by
+  default.
+
+The projection is not a serialization model. Reconstructing a KDBX database
+from it is forbidden because doing so would discard semantics Nian Pass does
+not expose or understand.
+
+`KdbxDocument` privately owns the complete decrypted KDBX state represented by
+`keepass::Database`. `keepass-rs` remains only the parser/writer implementation
+behind the adapter. Callers may request a fresh `Vault` projection or one
+explicit password/notes value, but mutations and serialization operate on the
+retained complete database, never on the projection:
 
 ```text
 vault-core presentation
@@ -53,13 +64,18 @@ vault-core presentation
       keepass-rs
 ```
 
-M1 exposes one mutation: rename an entry title by stable `EntryId`. It uses the
-pinned upstream change-tracking API only when the visible value changes. A real
-rename preserves the title field's protected/unprotected mode, stores the prior
-entry state in history, and updates `LastModificationTime`; a same-value request
-does none of those things. The document never stores the master password;
-credentials are supplied again when saving. Its writer-first API cannot open or
-overwrite a path.
+M2 exposes only title, username, URL, and password mutation by stable `EntryId`.
+A private adapter helper applies one common policy: compare plaintext before
+tracking, preserve an existing field's protected/unprotected mode, append one
+history item and update `LastModificationTime` only for a real change, and make
+same-value or missing-plus-empty requests complete no-ops. Missing Title,
+UserName, and URL fields are created unprotected; a missing Password is created
+protected. These defaults match KeePass memory-protection defaults, and the
+password default is security-critical. URLs are stored verbatim without browser
+normalization.
+
+The document never stores the master password; credentials are supplied again
+when saving. Its writer-first API cannot open or overwrite a path.
 
 The pinned writer only accepts exact KDBX 4.1. The adapter therefore returns
 `UnsupportedWriteFormat` for KDBX 3.1 and 4.0 and performs no silent format,
@@ -78,14 +94,16 @@ KDF, cipher, or compression migration.
 9. **A KDBX file must never be reconstructed from an incomplete presentation projection.**
 10. **Unsupported semantics must be preserved by retaining the complete parsed database representation whenever the underlying library supports it.**
 11. **A mutation must not change unrelated field semantics, including protected/unprotected state, unless explicitly requested.**
+12. **Secret-bearing fields must be fetched explicitly and must not be included in bulk vault projections.**
+13. **Public mutation APIs must preserve an existing KDBX field's protection mode unless an API explicitly represents a protection-mode change.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.
 
 ## Current compatibility boundary
 
-M0.5 opens local files through `keepass-rs` and maps credential-free vault
-metadata into `vault-core`. Trusted fixtures verify specific KDBX 3.1, 4.0,
+M2 opens local files through `keepass-rs` and maps secret-free vault metadata
+into `vault-core`. Trusted fixtures verify specific KDBX 3.1, 4.0,
 and 4.1 combinations; the exact evidence and untested dimensions are recorded
 in [the compatibility matrix](kdbx-compatibility.md). Format-level verification
 is not evidence of complete feature compatibility for that format.
@@ -102,4 +120,6 @@ KeePassXC is test tooling only. It is not a library, runtime, or deployment
 dependency of Nian Pass. The external harness writes only inside an isolated
 temporary directory through the existing caller-owned writer API; no public
 save-to-path API is introduced. Atomic filesystem replacement remains a later
-milestone.
+milestone. M2 self-roundtrip tests extend the evidence to username, URL, and
+password mutation, including protection/history preservation; the external
+suite still proves only its existing title-mutation pipeline.

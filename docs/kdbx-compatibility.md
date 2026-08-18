@@ -56,15 +56,15 @@ mean every feature in that database version is supported or tested.
 | Nested groups | Verified | KDBX 3.1 fixture: `General` contains `Subgroup` |
 | Empty groups | Verified | KDBX 3.1 fixture: empty `Recycle Bin` group |
 | Multiple entries | Verified | KDBX 3.1, KDBX 4.0 Argon2d, and KDBX 4.1 fixture counts |
-| Entry title projection | Verified | Exact root titles asserted across all four fixtures |
-| Empty fields | Partially verified | Empty entry titles are asserted in KDBX 3.1 and KDBX 4.0; other empty fields are outside the current projection |
+| Entry summary projection | Verified | Exact root titles are asserted across all four fixtures; M2 also projects optional username/URL, tags, and password/notes presence without secret plaintext |
+| Empty fields | Partially verified | Empty entry titles are asserted in KDBX 3.1 and KDBX 4.0; M2 preserves absent versus explicit-empty username/URL and secret reads preserve absent versus explicit-empty password |
 | Unicode | Partially externally verified | A title containing Vietnamese, Japanese, emoji, and a combining character is written by Nian Pass, read by KeePassXC, resaved, and reopened unchanged; the source fixture has no externally created Unicode case |
 | Custom fields | Not yet tested | Not exposed by the minimal domain projection |
 | Entry history | Partially externally verified | Nian Pass and KeePassXC title mutations each append exactly one prior-state history item and preserve it through the external round-trip; the fixture has no pre-existing external history |
 | Entry modification timestamp | Partially externally verified | Both tracked title mutations update `LastModificationTime`; KeePassXC `edit` also updates `LastAccessTime`, and other time fields are asserted unchanged |
 | Attachments | Not yet tested | Not exposed by the minimal domain projection |
 | Tags | Externally verified for fixture | The externally created three-element tag vector, including order, survives Nian Pass save and KeePassXC resave |
-| Large notes | Not yet tested | Notes are not exposed by the minimal domain projection |
+| Notes | Partially verified | One exact synthetic notes value can be fetched explicitly by entry UUID through `SecretString`; notes editing and large-note behavior are not tested |
 | Deleted objects | Not yet tested | No Nian Pass assertion |
 | Custom icons | Not yet tested | No Nian Pass assertion |
 | Protected values | Externally verified for fixture | Both existing password fields remain protected through Nian Pass save and KeePassXC resave; plaintext values are never logged |
@@ -122,6 +122,11 @@ remain accurately unverified.
 | KeePassXC normalization allowlist | Externally observed | Only internal metadata `_LAST_MODIFIED`, version-dependent `KPXC_RANDOM_SLUG`, and the explicitly edited entry's title, history, `LastModificationTime`, and `LastAccessTime` may change |
 | Title mutation protection-mode preservation | Self-roundtrip verified | Protected titles remain protected in memory, history, and after reopen; unprotected titles remain unprotected |
 | Same-value title mutation | Verified no-op | Complete parsed database, history, and `LastModificationTime` remain unchanged; a missing title set to empty remains absent |
+| Username mutation protection-mode preservation | Self-roundtrip verified | Existing protected/unprotected mode, prior history state, and absent/empty semantics are asserted; a changed unprotected value survives save/reopen |
+| URL mutation protection-mode preservation | Self-roundtrip verified | Existing protected/unprotected mode, prior history state, absent/empty semantics, and a Unicode/query-string value are asserted without URL normalization; a changed value survives save/reopen |
+| Password mutation protection-mode preservation | Self-roundtrip verified | Existing protected password plus prior protected history survive save/reopen; a synthetic unprotected condition remains unprotected in memory |
+| Missing password creation | Verified in memory | Non-empty creates a protected Password field with history/timestamp tracking; missing plus empty remains a complete no-op |
+| Same-value username, URL, and password mutations | Verified no-op | Complete parsed database, history, timestamps, protection, and absence remain unchanged |
 | KeePassXC-specific nullable group flags and AutoType obfuscation XML encodings | Supporting regression verified | Output XML asserts literal `null` and integer `0`, matching pinned upstream KeePassXC 2.7+ regressions |
 | KDBX 4.0 writing | Unsupported | Typed `UnsupportedWriteFormat`; pinned writer only emits exact 4.1 |
 | KDBX 3.1 writing | Unsupported | Typed `UnsupportedWriteFormat`; no silent KDBX 4.1 upgrade |

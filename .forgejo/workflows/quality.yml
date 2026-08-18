@@ -17,11 +17,26 @@ jobs:
         run: |
           set -Eeuo pipefail
           node_version="24.19.0"
-          node_archive="node-v${node_version}-linux-x64.tar.xz"
+          # Forgejo's Docker runners may use either supported 64-bit architecture.
+          case "$(uname -m)" in
+            x86_64)
+              node_arch="x64"
+              node_checksum="14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+              ;;
+            aarch64)
+              node_arch="arm64"
+              node_checksum="01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc"
+              ;;
+            *)
+              echo "Unsupported runner architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+          node_archive="node-v${node_version}-linux-${node_arch}.tar.xz"
           curl --fail --silent --show-error --location \
             --output "/tmp/${node_archive}" \
             "https://nodejs.org/dist/v${node_version}/${node_archive}"
-          echo "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647  /tmp/${node_archive}" \
+          echo "${node_checksum}  /tmp/${node_archive}" \
             | sha256sum --check -
           tar --extract --xz --file "/tmp/${node_archive}" \
             --directory /usr/local --strip-components=1
@@ -56,11 +71,26 @@ jobs:
         run: |
           set -Eeuo pipefail
           node_version="24.19.0"
-          node_archive="node-v${node_version}-linux-x64.tar.xz"
+          # Forgejo's Docker runners may use either supported 64-bit architecture.
+          case "$(uname -m)" in
+            x86_64)
+              node_arch="x64"
+              node_checksum="14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+              ;;
+            aarch64)
+              node_arch="arm64"
+              node_checksum="01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc"
+              ;;
+            *)
+              echo "Unsupported runner architecture: $(uname -m)" >&2
+              exit 1
+              ;;
+          esac
+          node_archive="node-v${node_version}-linux-${node_arch}.tar.xz"
           curl --fail --silent --show-error --location \
             --output "/tmp/${node_archive}" \
             "https://nodejs.org/dist/v${node_version}/${node_archive}"
-          echo "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647  /tmp/${node_archive}" \
+          echo "${node_checksum}  /tmp/${node_archive}" \
             | sha256sum --check -
           tar --extract --xz --file "/tmp/${node_archive}" \
             --directory /usr/local --strip-components=1

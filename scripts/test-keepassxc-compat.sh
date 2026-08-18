@@ -2,6 +2,10 @@
 
 set -eu
 
+# KeePassXC output is parsed and the fixture exercises non-ASCII titles.
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
 require_keepassxc=0
 
 if [ "${1:-}" = "--require" ]; then

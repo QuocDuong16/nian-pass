@@ -1,10 +1,62 @@
 //! KDBX-independent domain types used by Nian Pass clients.
 //!
-//! M1 retains a deliberately credential-free presentation projection. Group names,
-//! entry titles, and identifiers are not secret material, but they remain
-//! privacy-sensitive. `Vault`, `Group`, `Entry`, `GroupId`, and `EntryId` do not
-//! implement `Debug`, which prevents accidental bulk dumps. If secret fields
-//! are added later, their types must redact debug output.
+//! M2 retains a deliberately secret-free presentation projection and adds an
+//! explicit secret-bearing value type. Group names, entry metadata, and identifiers
+//! remain privacy-sensitive. `Vault`, `Group`, `EntrySummary`, `GroupId`, `EntryId`,
+//! and `SecretString` do not implement `Debug`, which prevents accidental dumps.
+
+use zeroize::Zeroizing;
+
+/// An owned secret whose backing string is zeroized when dropped.
+///
+/// Plaintext access is deliberately explicit. This type does not implement
+/// `Debug`, `Display`, `Clone`, serialization, or implicit string-borrowing
+/// traits. Zeroization reduces accidental residual memory, but cannot guarantee
+/// removal of copies made by the operating system, runtime, compiler, or
+/// dependencies.
+///
+/// ```compile_fail
+/// use vault_core::SecretString;
+/// let secret = SecretString::new("public-test-password".to_owned());
+/// let duplicate = secret.clone();
+/// ```
+///
+/// ```compile_fail
+/// use vault_core::SecretString;
+/// let secret = SecretString::new("public-test-password".to_owned());
+/// let rendered = format!("{secret}");
+/// ```
+///
+/// ```compile_fail
+/// use vault_core::SecretString;
+/// let secret = SecretString::new("public-test-password".to_owned());
+/// let rendered = format!("{secret:?}");
+/// ```
+///
+/// ```compile_fail
+/// use vault_core::SecretString;
+/// let secret = SecretString::new("public-test-password".to_owned());
+/// let implicit: &str = &secret;
+/// ```
+pub struct SecretString {
+    inner: Zeroizing<String>,
+}
+
+impl SecretString {
+    /// Takes ownership of a plaintext secret.
+    #[must_use]
+    pub fn new(value: String) -> Self {
+        Self {
+            inner: Zeroizing::new(value),
+        }
+    }
+
+    /// Explicitly exposes the secret plaintext for the shortest practical use.
+    #[must_use]
+    pub fn expose_secret(&self) -> &str {
+        self.inner.as_str()
+    }
+}
 
 /// A read-only view containing privacy-sensitive, non-secret vault metadata.
 #[derive(Clone, Eq, PartialEq)]
@@ -62,7 +114,7 @@ pub struct Group {
     id: GroupId,
     name: String,
     groups: Vec<Group>,
-    entries: Vec<Entry>,
+    entries: Vec<EntrySummary>,
 }
 
 impl Group {
@@ -72,7 +124,7 @@ impl Group {
         id: GroupId,
         name: impl Into<String>,
         groups: Vec<Group>,
-        entries: Vec<Entry>,
+        entries: Vec<EntrySummary>,
     ) -> Self {
         Self {
             id,
@@ -102,7 +154,7 @@ impl Group {
 
     /// Returns direct child entries.
     #[must_use]
-    pub fn entries(&self) -> &[Entry] {
+    pub fn entries(&self) -> &[EntrySummary] {
         &self.entries
     }
 
@@ -143,24 +195,43 @@ impl EntryId {
     }
 }
 
-/// A deliberately credential-free entry projection for M0.5.
+/// A deliberately secret-free entry projection for list and navigation views.
 ///
-/// Passwords, notes, TOTP seeds, custom fields, and attachments are not copied
-/// into this type. This model is not a save model and must not be used to
-/// reconstruct a KDBX database.
+/// Password and notes presence is represented by booleans; their plaintext is
+/// never copied here. TOTP seeds, custom-field values, and attachments are also
+/// excluded. Title, username, URL, tags, and the identifier remain
+/// privacy-sensitive metadata. This is not a save model.
 #[derive(Clone, Eq, PartialEq)]
-pub struct Entry {
+pub struct EntrySummary {
     id: EntryId,
     title: String,
+    username: Option<String>,
+    url: Option<String>,
+    tags: Vec<String>,
+    has_password: bool,
+    has_notes: bool,
 }
 
-impl Entry {
-    /// Creates an entry projection.
+impl EntrySummary {
+    /// Creates a secret-free entry summary.
     #[must_use]
-    pub fn new(id: EntryId, title: impl Into<String>) -> Self {
+    pub fn new(
+        id: EntryId,
+        title: impl Into<String>,
+        username: Option<String>,
+        url: Option<String>,
+        tags: Vec<String>,
+        has_password: bool,
+        has_notes: bool,
+    ) -> Self {
         Self {
             id,
             title: title.into(),
+            username,
+            url,
+            tags,
+            has_password,
+            has_notes,
         }
     }
 
@@ -175,11 +246,53 @@ impl Entry {
     pub fn title(&self) -> &str {
         &self.title
     }
+
+    /// Returns the username metadata, preserving absent versus explicit empty.
+    #[must_use]
+    pub fn username(&self) -> Option<&str> {
+        self.username.as_deref()
+    }
+
+    /// Returns the URL metadata, preserving absent versus explicit empty.
+    #[must_use]
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+
+    /// Returns the entry tags in their stored order.
+    #[must_use]
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+
+    /// Returns whether a Password field exists, without exposing its value.
+    #[must_use]
+    pub const fn has_password(&self) -> bool {
+        self.has_password
+    }
+
+    /// Returns whether a Notes field exists, without exposing its value.
+    #[must_use]
+    pub const fn has_notes(&self) -> bool {
+        self.has_notes
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, EntryId, Group, GroupId, Vault};
+    use super::{EntryId, EntrySummary, Group, GroupId, SecretString, Vault};
+
+    fn entry(id: &str, title: &str) -> EntrySummary {
+        EntrySummary::new(
+            EntryId::new(id),
+            title,
+            None,
+            None,
+            Vec::new(),
+            false,
+            false,
+        )
+    }
 
     fn sample_vault() -> Vault {
         Vault::new(Group::new(
@@ -192,12 +305,9 @@ mod tests {
                     GroupId::new("archive"),
                     "Archive",
                     Vec::new(),
-                    vec![Entry::new(EntryId::new("old"), "Old account")],
+                    vec![entry("old", "Old account")],
                 )],
-                vec![
-                    Entry::new(EntryId::new("github"), "GitHub"),
-                    Entry::new(EntryId::new("google"), "Google"),
-                ],
+                vec![entry("github", "GitHub"), entry("google", "Google")],
             )],
             Vec::new(),
         ))
@@ -223,10 +333,33 @@ mod tests {
     }
 
     #[test]
-    fn exposes_only_basic_entry_behavior() {
-        let entry = Entry::new(EntryId::new("entry-id"), "Example");
+    fn entry_summary_exposes_metadata_and_presence_only() {
+        let entry = EntrySummary::new(
+            EntryId::new("entry-id"),
+            "Example",
+            Some("person@example.test".to_owned()),
+            Some("https://example.test".to_owned()),
+            vec!["personal".to_owned()],
+            true,
+            true,
+        );
 
         assert_eq!(entry.id().as_str(), "entry-id");
         assert_eq!(entry.title(), "Example");
+        assert_eq!(entry.username(), Some("person@example.test"));
+        assert_eq!(entry.url(), Some("https://example.test"));
+        assert!(entry.tags() == ["personal"]);
+        assert!(entry.has_password());
+        assert!(entry.has_notes());
+    }
+
+    #[test]
+    fn secret_string_requires_explicit_plaintext_exposure() {
+        let secret = SecretString::new("public-test-password".to_owned());
+
+        assert!(
+            secret.expose_secret() == "public-test-password",
+            "synthetic secret was not retained"
+        );
     }
 }

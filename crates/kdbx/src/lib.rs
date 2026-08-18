@@ -17,7 +17,13 @@ use keepass::{
     db::{DatabaseOpenError, DatabaseSaveError, fields},
 };
 use thiserror::Error;
-use vault_core::{Entry, EntryId, Group, GroupId, Vault};
+use vault_core::{EntryId, EntrySummary, Group, GroupId, SecretString, Vault};
+
+#[derive(Clone, Copy)]
+enum MissingFieldProtection {
+    Protected,
+    Unprotected,
+}
 
 /// Exact KDBX format version reported by the database header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,7 +56,7 @@ impl OpenedVault {
         self.version
     }
 
-    /// Borrows the credential-free vault projection.
+    /// Borrows the secret-free vault projection.
     #[must_use]
     pub const fn vault(&self) -> &Vault {
         &self.vault
@@ -78,7 +84,7 @@ pub struct KdbxDocument {
 impl KdbxDocument {
     /// Opens a KDBX document from a file using a master password.
     ///
-    /// M1 supports password credentials only. The document does not retain the
+    /// M2 supports password credentials only. The document does not retain the
     /// password, and the credential API is expected to grow to support keyfiles
     /// in a later milestone.
     pub fn open(path: impl AsRef<Path>, master_password: &str) -> Result<Self, KdbxError> {
@@ -101,11 +107,29 @@ impl KdbxDocument {
         self.version
     }
 
-    /// Builds a credential-free presentation projection of the current state.
+    /// Builds a secret-free presentation projection of the current state.
     ///
     /// This is a one-way view for callers and is not a serialization model.
     pub fn projection(&self) -> Result<Vault, KdbxError> {
         convert_database(&self.database)
+    }
+
+    /// Fetches one entry password by stable identifier.
+    ///
+    /// A missing field remains distinct from an explicitly empty field. The
+    /// returned owned copy is wrapped immediately in [`SecretString`]. No entry
+    /// metadata or secret plaintext is included in errors.
+    pub fn entry_password(&self, id: &EntryId) -> Result<Option<SecretString>, KdbxError> {
+        self.entry_secret(id, fields::PASSWORD)
+    }
+
+    /// Fetches one entry's notes by stable identifier as a secret-bearing value.
+    ///
+    /// Notes may contain recovery codes or other credentials and are therefore
+    /// excluded from the bulk projection. Missing and explicitly empty fields
+    /// remain distinct.
+    pub fn entry_notes(&self, id: &EntryId) -> Result<Option<SecretString>, KdbxError> {
+        self.entry_secret(id, fields::NOTES)
     }
 
     /// Renames an entry by its stable identifier while retaining the complete
@@ -117,37 +141,52 @@ impl KdbxDocument {
     /// its current value is a no-op. No identifier or title is included in
     /// errors.
     pub fn set_entry_title(&mut self, id: &EntryId, title: &str) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
+        self.set_standard_field(
+            id,
+            fields::TITLE,
+            title,
+            MissingFieldProtection::Unprotected,
+        )
+    }
 
-        let (upstream_id, title_is_protected, title_is_unchanged) = self
-            .database
-            .iter_all_entries()
-            .find(|entry| entry.id().to_string() == id.as_str())
-            .map(|entry| {
-                let existing_title = entry.fields.get(fields::TITLE);
-                (
-                    entry.id(),
-                    existing_title.is_some_and(|value| value.is_protected()),
-                    entry.get_title().unwrap_or_default() == title,
-                )
-            })
-            .ok_or(KdbxError::EntryNotFound)?;
+    /// Changes one entry username while preserving its existing protection mode.
+    ///
+    /// A missing username is created unprotected only for a non-empty value.
+    /// Setting the current value, or setting a missing username to empty, is a
+    /// complete no-op.
+    pub fn set_entry_username(&mut self, id: &EntryId, username: &str) -> Result<(), KdbxError> {
+        self.set_standard_field(
+            id,
+            fields::USERNAME,
+            username,
+            MissingFieldProtection::Unprotected,
+        )
+    }
 
-        if title_is_unchanged {
-            return Ok(());
-        }
+    /// Changes one entry URL without parsing or normalizing it.
+    ///
+    /// Existing protection mode is preserved. A missing URL is created
+    /// unprotected only for a non-empty value; missing plus empty is a no-op.
+    pub fn set_entry_url(&mut self, id: &EntryId, url: &str) -> Result<(), KdbxError> {
+        self.set_standard_field(id, fields::URL, url, MissingFieldProtection::Unprotected)
+    }
 
-        let mut entry = self
-            .database
-            .entry_mut(upstream_id)
-            .ok_or(KdbxError::EntryNotFound)?;
-        let mut tracked = entry.track_changes();
-        if title_is_protected {
-            tracked.set_protected(fields::TITLE, title);
-        } else {
-            tracked.set_unprotected(fields::TITLE, title);
-        }
-        Ok(())
+    /// Changes one entry password while preserving its existing protection mode.
+    ///
+    /// A newly created Password field is always protected. A missing password
+    /// set to an empty secret remains absent. Plaintext is exposed only for the
+    /// duration needed to copy it into the retained KDBX representation.
+    pub fn set_entry_password(
+        &mut self,
+        id: &EntryId,
+        password: &SecretString,
+    ) -> Result<(), KdbxError> {
+        self.set_standard_field(
+            id,
+            fields::PASSWORD,
+            password.expose_secret(),
+            MissingFieldProtection::Protected,
+        )
     }
 
     /// Serializes this document to a caller-owned writer using a master
@@ -173,6 +212,67 @@ impl KdbxDocument {
         } else {
             Err(KdbxError::UnsupportedWriteFormat)
         }
+    }
+
+    fn entry_secret(&self, id: &EntryId, field: &str) -> Result<Option<SecretString>, KdbxError> {
+        let upstream_id = self.find_entry_id(id)?;
+        let entry = self
+            .database
+            .entry(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+
+        Ok(entry
+            .fields
+            .get(field)
+            .map(|value| SecretString::new(value.get().to_owned())))
+    }
+
+    fn set_standard_field(
+        &mut self,
+        id: &EntryId,
+        field: &str,
+        new_value: &str,
+        missing_protection: MissingFieldProtection,
+    ) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let upstream_id = self.find_entry_id(id)?;
+        let current_entry = self
+            .database
+            .entry(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+        let existing = current_entry.fields.get(field);
+
+        if existing.is_some_and(|value| value.get() == new_value)
+            || (existing.is_none() && new_value.is_empty())
+        {
+            return Ok(());
+        }
+
+        let protect = existing.map_or(
+            matches!(missing_protection, MissingFieldProtection::Protected),
+            keepass::db::Value::is_protected,
+        );
+        let mut entry = self
+            .database
+            .entry_mut(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+        let mut tracked = entry.track_changes();
+        if protect {
+            tracked.set_protected(field, new_value);
+        } else {
+            tracked.set_unprotected(field, new_value);
+        }
+
+        Ok(())
+    }
+
+    fn find_entry_id(&self, id: &EntryId) -> Result<keepass::db::EntryId, KdbxError> {
+        self.database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == id.as_str())
+            .map(|entry| entry.id())
+            .ok_or(KdbxError::EntryNotFound)
     }
 }
 
@@ -217,7 +317,7 @@ pub enum KdbxError {
     Serialization,
 }
 
-/// Opens a KDBX database with a master password and returns a credential-free
+/// Opens a KDBX database with a master password and returns a secret-free
 /// domain projection containing privacy-sensitive vault metadata.
 ///
 /// The password is never logged or included in an error. The caller retains
@@ -304,9 +404,20 @@ fn convert_group(group: keepass::db::GroupRef<'_>) -> Group {
     let entries = group
         .entries()
         .map(|entry| {
-            Entry::new(
+            EntrySummary::new(
                 EntryId::new(entry.id().to_string()),
                 entry.get_title().unwrap_or_default(),
+                entry
+                    .fields
+                    .get(fields::USERNAME)
+                    .map(|value| value.get().to_owned()),
+                entry
+                    .fields
+                    .get(fields::URL)
+                    .map(|value| value.get().to_owned()),
+                entry.tags.clone(),
+                entry.fields.contains_key(fields::PASSWORD),
+                entry.fields.contains_key(fields::NOTES),
             )
         })
         .collect();
@@ -331,7 +442,7 @@ mod tests {
     };
 
     use keepass::{Database, DatabaseKey, db::fields};
-    use vault_core::{EntryId, Group};
+    use vault_core::{EntryId, EntrySummary, Group, SecretString};
 
     use super::{KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
 
@@ -342,6 +453,8 @@ mod tests {
     const NIAN_PASS_EXTERNAL_TITLE: &str = "Nian Pass — Tiếng Việt 日本語 👩‍💻 e\u{301}";
     const KEEPASSXC_ENTRY_TITLE: &str = "ayyyyo";
     const KEEPASSXC_EXTERNAL_TITLE: &str = "KeePassXC resaved title";
+    const TEST_SECRET_BEFORE: &str = "public-test-password-before";
+    const TEST_SECRET_AFTER: &str = "public-test-password-after";
 
     struct SemanticSnapshot {
         version: KdbxVersion,
@@ -547,8 +660,238 @@ mod tests {
             .join(file)
     }
 
+    fn kdbx41_document() -> KdbxDocument {
+        KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted KDBX 4.1 fixture should open")
+    }
+
+    fn first_entry_ids(document: &KdbxDocument) -> (EntryId, keepass::db::EntryId) {
+        let projected_id = document
+            .projection()
+            .expect("trusted fixture should project")
+            .root()
+            .entries()
+            .first()
+            .expect("fixture should have a root entry")
+            .id()
+            .clone();
+        let upstream_id = document
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == projected_id.as_str())
+            .map(|entry| entry.id())
+            .expect("projected entry should exist in the complete database");
+
+        (projected_id, upstream_id)
+    }
+
+    fn history_len(entry: &keepass::db::Entry) -> usize {
+        entry
+            .history
+            .as_ref()
+            .map_or(0, |history| history.get_entries().len())
+    }
+
+    fn assert_metadata_mutation_matrix(
+        field: &str,
+        before: &str,
+        after: &str,
+        setter: fn(&mut KdbxDocument, &EntryId, &str) -> Result<(), KdbxError>,
+    ) {
+        let mut unprotected = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&unprotected);
+        unprotected
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_unprotected(field, before);
+        let original = unprotected
+            .database
+            .entry(upstream_id)
+            .expect("prepared entry should exist");
+        let original_history_len = history_len(&original);
+        let original_last_modification = original.times.last_modification;
+
+        setter(&mut unprotected, &projected_id, after)
+            .expect("unprotected metadata edit should succeed");
+        let edited = unprotected
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should exist");
+        let edited_value = edited
+            .fields
+            .get(field)
+            .expect("edited field should remain present");
+        assert!(edited_value.get() == after, "metadata edit did not apply");
+        assert!(
+            !edited_value.is_protected(),
+            "unprotected metadata unexpectedly became protected"
+        );
+        assert_eq!(
+            history_len(&edited),
+            original_history_len + 1,
+            "metadata edit did not append exactly one history item"
+        );
+        let historical_value = edited
+            .history
+            .as_ref()
+            .and_then(|history| history.get_entries().first())
+            .and_then(|entry| entry.fields.get(field))
+            .expect("metadata history should retain the previous field");
+        assert!(
+            historical_value.get() == before && !historical_value.is_protected(),
+            "metadata history did not preserve the prior value and protection"
+        );
+        assert!(
+            edited.times.last_modification != original_last_modification,
+            "metadata edit did not update LastModificationTime"
+        );
+
+        let expected_database = unprotected.database.clone();
+        let mut saved = Vec::new();
+        unprotected
+            .save_to_writer(&mut saved, FIXTURE_PASSWORD)
+            .expect("metadata edit should serialize");
+        let reopened = KdbxDocument::open_reader(&mut Cursor::new(saved), FIXTURE_PASSWORD)
+            .expect("metadata edit should reopen");
+        assert!(
+            reopened.database == expected_database,
+            "metadata round-trip changed parsed database semantics"
+        );
+
+        let mut protected = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&protected);
+        protected
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(field, before);
+        let original = protected
+            .database
+            .entry(upstream_id)
+            .expect("prepared entry should exist");
+        let original_history_len = history_len(&original);
+        let original_last_modification = original.times.last_modification;
+
+        setter(&mut protected, &projected_id, after)
+            .expect("protected metadata edit should succeed");
+        let edited = protected
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should exist");
+        let edited_value = edited
+            .fields
+            .get(field)
+            .expect("edited field should remain present");
+        assert!(
+            edited_value.get() == after,
+            "protected metadata edit failed"
+        );
+        assert!(
+            edited_value.is_protected(),
+            "protected metadata lost its protection"
+        );
+        assert_eq!(
+            history_len(&edited),
+            original_history_len + 1,
+            "protected metadata edit did not append history"
+        );
+        let historical_value = edited
+            .history
+            .as_ref()
+            .and_then(|history| history.get_entries().first())
+            .and_then(|entry| entry.fields.get(field))
+            .expect("protected metadata history should retain the prior field");
+        assert!(
+            historical_value.get() == before && historical_value.is_protected(),
+            "protected metadata history lost prior semantics"
+        );
+        assert!(
+            edited.times.last_modification != original_last_modification,
+            "protected metadata edit did not update LastModificationTime"
+        );
+
+        let mut same = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&same);
+        same.database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(field, before);
+        let before_database = same.database.clone();
+        setter(&mut same, &projected_id, before).expect("same-value edit should succeed");
+        assert!(
+            same.database == before_database,
+            "same-value metadata edit changed the database"
+        );
+
+        let mut missing = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&missing);
+        missing
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(field);
+        let original = missing
+            .database
+            .entry(upstream_id)
+            .expect("prepared entry should exist");
+        let original_history_len = history_len(&original);
+        let original_last_modification = original.times.last_modification;
+        setter(&mut missing, &projected_id, after)
+            .expect("missing metadata field should be created");
+        let edited = missing
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should exist");
+        let edited_value = edited
+            .fields
+            .get(field)
+            .expect("missing metadata field was not created");
+        assert!(
+            edited_value.get() == after && !edited_value.is_protected(),
+            "new metadata field did not use the unprotected default"
+        );
+        assert_eq!(
+            history_len(&edited),
+            original_history_len + 1,
+            "new metadata field did not append history"
+        );
+        assert!(
+            edited
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .is_some_and(|entry| !entry.fields.contains_key(field)),
+            "metadata history did not preserve field absence"
+        );
+        assert!(
+            edited.times.last_modification != original_last_modification,
+            "new metadata field did not update LastModificationTime"
+        );
+
+        let mut missing_empty = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&missing_empty);
+        missing_empty
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(field);
+        let before_database = missing_empty.database.clone();
+        setter(&mut missing_empty, &projected_id, "")
+            .expect("missing-to-empty metadata edit should succeed");
+        assert!(
+            missing_empty.database == before_database,
+            "missing-to-empty metadata edit changed the database"
+        );
+    }
+
     fn keepassxc_version() -> Option<String> {
-        match Command::new("keepassxc-cli").arg("--version").output() {
+        match keepassxc_command().arg("--version").output() {
             Ok(output) if output.status.success() => {
                 let version = String::from_utf8(output.stdout)
                     .expect("KeePassXC version output should be UTF-8");
@@ -563,8 +906,14 @@ mod tests {
         }
     }
 
+    fn keepassxc_command() -> Command {
+        let mut command = Command::new("keepassxc-cli");
+        command.env("LANG", "C.UTF-8").env("LC_ALL", "C.UTF-8");
+        command
+    }
+
     fn run_keepassxc(stage: &str, arguments: Vec<OsString>) -> Output {
-        let mut child = Command::new("keepassxc-cli")
+        let mut child = keepassxc_command()
             .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1204,7 +1553,7 @@ mod tests {
                 .root()
                 .entries()
                 .iter()
-                .map(vault_core::Entry::title)
+                .map(EntrySummary::title)
                 .collect();
 
             assert_eq!(titles, *expected_titles, "unexpected titles in {file}");
@@ -1217,6 +1566,142 @@ mod tests {
                     .all(|entry| !entry.id().as_str().is_empty())
             );
         }
+    }
+
+    #[test]
+    fn entry_summaries_preserve_metadata_presence_without_secret_plaintext() {
+        const TEST_NOTES: &str = "public-test-notes";
+
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        {
+            let mut entry = document
+                .database
+                .entry_mut(upstream_id)
+                .expect("target entry should exist");
+            entry.fields.remove(fields::USERNAME);
+            entry.set_unprotected(fields::URL, "");
+            entry.set_protected(fields::NOTES, TEST_NOTES);
+        }
+
+        let vault = document
+            .projection()
+            .expect("prepared document should project");
+        let summary = vault
+            .root()
+            .entries()
+            .iter()
+            .find(|entry| entry.id() == &projected_id)
+            .expect("prepared entry should be present in the projection");
+
+        assert!(
+            summary.username().is_none(),
+            "absent username became present"
+        );
+        assert!(
+            summary.url() == Some(""),
+            "explicit empty URL was not preserved"
+        );
+        assert!(
+            summary.has_password(),
+            "password presence was not projected"
+        );
+        assert!(summary.has_notes(), "notes presence was not projected");
+        assert_eq!(summary.tags().len(), 3, "fixture tags were not projected");
+    }
+
+    #[test]
+    fn reads_one_password_explicitly_and_preserves_missing_and_empty() {
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        let raw_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("fixture target should exist");
+        let expected = raw_entry
+            .fields
+            .get(fields::PASSWORD)
+            .expect("fixture target should have a password")
+            .get();
+        let secret = document
+            .entry_password(&projected_id)
+            .expect("password lookup should succeed")
+            .expect("fixture password should exist");
+        assert!(
+            secret.expose_secret() == expected,
+            "synthetic fixture password was not returned"
+        );
+        drop(secret);
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(fields::PASSWORD);
+        assert!(
+            document
+                .entry_password(&projected_id)
+                .expect("missing password lookup should succeed")
+                .is_none(),
+            "missing password did not remain absent"
+        );
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(fields::PASSWORD, "");
+        let empty = document
+            .entry_password(&projected_id)
+            .expect("empty password lookup should succeed")
+            .expect("explicit empty password should remain present");
+        assert!(
+            empty.expose_secret().is_empty(),
+            "explicit empty password changed value"
+        );
+
+        assert!(matches!(
+            document.entry_password(&EntryId::new("00000000-0000-0000-0000-000000000000")),
+            Err(KdbxError::EntryNotFound)
+        ));
+    }
+
+    #[test]
+    fn reads_notes_explicitly_and_preserves_missing() {
+        const TEST_NOTES: &str = "public-test-notes";
+
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(fields::NOTES, TEST_NOTES);
+
+        let notes = document
+            .entry_notes(&projected_id)
+            .expect("notes lookup should succeed")
+            .expect("prepared notes should exist");
+        assert!(
+            notes.expose_secret() == TEST_NOTES,
+            "synthetic notes were not returned"
+        );
+        drop(notes);
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(fields::NOTES);
+        assert!(
+            document
+                .entry_notes(&projected_id)
+                .expect("missing notes lookup should succeed")
+                .is_none(),
+            "missing notes did not remain absent"
+        );
     }
 
     #[test]
@@ -1669,6 +2154,275 @@ mod tests {
     }
 
     #[test]
+    fn username_mutation_preserves_protection_history_and_absence_semantics() {
+        assert_metadata_mutation_matrix(
+            fields::USERNAME,
+            "public-test-username-before",
+            "public-test-username-after",
+            KdbxDocument::set_entry_username,
+        );
+    }
+
+    #[test]
+    fn title_mutation_uses_the_common_protection_and_missing_field_policy() {
+        assert_metadata_mutation_matrix(
+            fields::TITLE,
+            "public-test-title-before",
+            "public-test-title-after",
+            KdbxDocument::set_entry_title,
+        );
+    }
+
+    #[test]
+    fn url_mutation_preserves_protection_history_unicode_and_absence_semantics() {
+        assert_metadata_mutation_matrix(
+            fields::URL,
+            "https://example.test/before",
+            "https://example.test/đường-dẫn?q=日本語",
+            KdbxDocument::set_entry_url,
+        );
+    }
+
+    #[test]
+    fn password_mutation_preserves_protected_state_history_and_roundtrip() {
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(fields::PASSWORD, TEST_SECRET_BEFORE);
+        let original = document
+            .database
+            .entry(upstream_id)
+            .expect("prepared entry should exist");
+        let original_history_len = history_len(&original);
+        let original_last_modification = original.times.last_modification;
+        let replacement = SecretString::new(TEST_SECRET_AFTER.to_owned());
+
+        document
+            .set_entry_password(&projected_id, &replacement)
+            .expect("protected password edit should succeed");
+        let edited = document
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should exist");
+        let edited_password = edited
+            .fields
+            .get(fields::PASSWORD)
+            .expect("edited password should remain present");
+        assert!(
+            edited_password.get() == TEST_SECRET_AFTER,
+            "synthetic password edit did not apply"
+        );
+        assert!(
+            edited_password.is_protected(),
+            "protected password lost its protection"
+        );
+        assert_eq!(
+            history_len(&edited),
+            original_history_len + 1,
+            "password edit did not append exactly one history item"
+        );
+        let historical_password = edited
+            .history
+            .as_ref()
+            .and_then(|history| history.get_entries().first())
+            .and_then(|entry| entry.fields.get(fields::PASSWORD))
+            .expect("password history should retain the prior value");
+        assert!(
+            historical_password.get() == TEST_SECRET_BEFORE,
+            "password history did not preserve the expected synthetic value"
+        );
+        assert!(
+            historical_password.is_protected(),
+            "password history lost the prior protection mode"
+        );
+        assert!(
+            edited.times.last_modification != original_last_modification,
+            "password edit did not update LastModificationTime"
+        );
+
+        let expected_database = document.database.clone();
+        let mut saved = Vec::new();
+        document
+            .save_to_writer(&mut saved, FIXTURE_PASSWORD)
+            .expect("password edit should serialize");
+        let reopened = KdbxDocument::open_reader(&mut Cursor::new(saved), FIXTURE_PASSWORD)
+            .expect("password edit should reopen");
+        let reopened_password = reopened
+            .entry_password(&projected_id)
+            .expect("reopened password lookup should succeed")
+            .expect("reopened password should exist");
+        assert!(
+            reopened_password.expose_secret() == TEST_SECRET_AFTER,
+            "reopened synthetic password changed"
+        );
+        assert!(
+            reopened.database.entry(upstream_id).is_some_and(|entry| {
+                entry
+                    .fields
+                    .get(fields::PASSWORD)
+                    .is_some_and(keepass::db::Value::is_protected)
+            }),
+            "reopened password lost protection"
+        );
+        assert!(
+            reopened.database == expected_database,
+            "password round-trip changed parsed database semantics"
+        );
+    }
+
+    #[test]
+    fn password_mutation_preserves_unprotected_state() {
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_unprotected(fields::PASSWORD, TEST_SECRET_BEFORE);
+        let original = document
+            .database
+            .entry(upstream_id)
+            .expect("prepared entry should exist");
+        let original_history_len = history_len(&original);
+        let original_last_modification = original.times.last_modification;
+        let replacement = SecretString::new(TEST_SECRET_AFTER.to_owned());
+
+        document
+            .set_entry_password(&projected_id, &replacement)
+            .expect("unprotected password edit should succeed");
+        let edited = document
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should exist");
+        let edited_password = edited
+            .fields
+            .get(fields::PASSWORD)
+            .expect("edited password should remain present");
+        assert!(
+            edited_password.get() == TEST_SECRET_AFTER,
+            "synthetic password edit did not apply"
+        );
+        assert!(
+            !edited_password.is_protected(),
+            "unprotected password unexpectedly became protected"
+        );
+        assert_eq!(
+            history_len(&edited),
+            original_history_len + 1,
+            "unprotected password edit did not append history"
+        );
+        let historical_password = edited
+            .history
+            .as_ref()
+            .and_then(|history| history.get_entries().first())
+            .and_then(|entry| entry.fields.get(fields::PASSWORD))
+            .expect("password history should retain the prior value");
+        assert!(
+            historical_password.get() == TEST_SECRET_BEFORE && !historical_password.is_protected(),
+            "password history did not preserve unprotected prior semantics"
+        );
+        assert!(
+            edited.times.last_modification != original_last_modification,
+            "password edit did not update LastModificationTime"
+        );
+    }
+
+    #[test]
+    fn missing_password_defaults_to_protected_and_empty_is_a_no_op() {
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(fields::PASSWORD);
+        let original = document
+            .database
+            .entry(upstream_id)
+            .expect("prepared entry should exist");
+        let original_history_len = history_len(&original);
+        let original_last_modification = original.times.last_modification;
+        let replacement = SecretString::new(TEST_SECRET_AFTER.to_owned());
+
+        document
+            .set_entry_password(&projected_id, &replacement)
+            .expect("missing password should be created");
+        let edited = document
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should exist");
+        let password = edited
+            .fields
+            .get(fields::PASSWORD)
+            .expect("new password should exist");
+        assert!(
+            password.get() == TEST_SECRET_AFTER,
+            "new synthetic password changed value"
+        );
+        assert!(password.is_protected(), "new password was not protected");
+        assert_eq!(
+            history_len(&edited),
+            original_history_len + 1,
+            "new password did not append history"
+        );
+        assert!(
+            edited
+                .history
+                .as_ref()
+                .and_then(|history| history.get_entries().first())
+                .is_some_and(|entry| !entry.fields.contains_key(fields::PASSWORD)),
+            "password history did not preserve field absence"
+        );
+        assert!(
+            edited.times.last_modification != original_last_modification,
+            "new password did not update LastModificationTime"
+        );
+
+        let mut missing_empty = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&missing_empty);
+        missing_empty
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(fields::PASSWORD);
+        let before_database = missing_empty.database.clone();
+        let empty = SecretString::new(String::new());
+        missing_empty
+            .set_entry_password(&projected_id, &empty)
+            .expect("missing-to-empty password edit should succeed");
+        assert!(
+            missing_empty.database == before_database,
+            "missing-to-empty password edit changed the database"
+        );
+    }
+
+    #[test]
+    fn same_password_is_a_complete_no_op() {
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(fields::PASSWORD, TEST_SECRET_BEFORE);
+        let before_database = document.database.clone();
+        let same = SecretString::new(TEST_SECRET_BEFORE.to_owned());
+
+        document
+            .set_entry_password(&projected_id, &same)
+            .expect("same-password edit should succeed");
+        assert!(
+            document.database == before_database,
+            "same-password edit changed the database"
+        );
+    }
+
+    #[test]
     fn rejects_unknown_entry_identifier() {
         let mut document = KdbxDocument::open(
             fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
@@ -1682,6 +2436,25 @@ mod tests {
         );
 
         assert!(matches!(result, Err(KdbxError::EntryNotFound)));
+
+        let unknown = EntryId::new("00000000-0000-0000-0000-000000000000");
+        assert!(matches!(
+            document.set_entry_username(&unknown, "unused test username"),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(matches!(
+            document.set_entry_url(&unknown, "https://unused.example.test"),
+            Err(KdbxError::EntryNotFound)
+        ));
+        let password = SecretString::new("unused-public-test-password".to_owned());
+        assert!(matches!(
+            document.set_entry_password(&unknown, &password),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(matches!(
+            document.entry_notes(&unknown),
+            Err(KdbxError::EntryNotFound)
+        ));
     }
 
     #[test]
@@ -1703,11 +2476,28 @@ mod tests {
                 .id()
                 .clone();
             let mutation_result = document.set_entry_title(&target_id, "unpersisted test title");
+            let username_result =
+                document.set_entry_username(&target_id, "unpersisted test username");
+            let url_result = document.set_entry_url(&target_id, "https://unpersisted.example.test");
+            let password = SecretString::new("unpersisted-public-test-password".to_owned());
+            let password_result = document.set_entry_password(&target_id, &password);
             let save_result = document.save_to_writer(&mut Vec::new(), FIXTURE_PASSWORD);
 
             assert!(
                 matches!(mutation_result, Err(KdbxError::UnsupportedWriteFormat)),
                 "unproven format accepted a mutation"
+            );
+            assert!(
+                matches!(username_result, Err(KdbxError::UnsupportedWriteFormat)),
+                "unproven format accepted a username mutation"
+            );
+            assert!(
+                matches!(url_result, Err(KdbxError::UnsupportedWriteFormat)),
+                "unproven format accepted a URL mutation"
+            );
+            assert!(
+                matches!(password_result, Err(KdbxError::UnsupportedWriteFormat)),
+                "unproven format accepted a password mutation"
             );
             assert!(
                 matches!(save_result, Err(KdbxError::UnsupportedWriteFormat)),

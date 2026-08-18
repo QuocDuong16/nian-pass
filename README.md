@@ -19,23 +19,27 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M1.5 — External KeePassXC Write Compatibility
+M2 — Secure Vault Read/Edit APIs
 
-The workspace contains a KDBX-independent domain projection, a `keepass-rs`
-adapter, and a small read-only CLI for credential-free vault metadata.
-Group names, entry titles, identifiers, and file paths remain privacy-sensitive
-even though they are not secret cryptographic material.
+The workspace contains a KDBX-independent, secret-free metadata projection; an
+explicit zeroizing `SecretString` for narrow password and notes reads; a
+`keepass-rs` adapter with preservation-aware title, username, URL, and password
+mutations; and a small read-only CLI. Group names, entry metadata, identifiers,
+and file paths remain privacy-sensitive even when they are not cryptographic
+secrets.
 
 Read support is verified only for the combinations backed by trusted fixtures.
 See [KDBX compatibility](docs/kdbx-compatibility.md) for the evidence matrix and
 known gaps. The experimental KDBX 4.1-only library foundation retains the
-complete parsed database, renames one entry title by UUID, serializes to a
-caller-owned writer, and verifies both a Nian Pass self-roundtrip and the exact
-external KeePassXC combination recorded in the compatibility matrix.
+complete parsed database, fetches password or notes only for an explicit entry
+UUID, changes only the requested standard field, serializes to a caller-owned
+writer, and verifies both Nian Pass self-roundtrips and the exact external
+KeePassXC title-mutation pipeline recorded in the compatibility matrix.
 
 There is no CLI mutation command, no in-place or production filesystem save,
-and no broad CRUD API. KDBX 3.1 and 4.0 writing are deliberately rejected
-rather than upgraded or rewritten.
+and no broad CRUD API. Notes editing, TOTP, arbitrary custom-field access,
+create/delete/move, UI, sync, and server features remain out of scope. KDBX 3.1
+and 4.0 writing are deliberately rejected rather than upgraded or rewritten.
 
 ## CLI
 

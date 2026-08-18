@@ -1,8 +1,8 @@
 # Threat Model
 
-This is the threat model for the M1.5 experimental write foundation. It records
-boundaries and assumptions; it is not a claim that Nian Pass is ready to
-protect production credentials.
+This is the threat model for the M2 secure vault read/edit API foundation. It
+records boundaries and assumptions; it is not a claim that Nian Pass is ready
+to protect production credentials.
 
 ## Secret material
 
@@ -11,7 +11,9 @@ Secret material includes at least:
 - Master passwords
 - Database decryption keys, including derived keys
 - Entry passwords
+- Entry notes, which may contain recovery codes, API keys, or private text
 - TOTP seeds
+- Future protected or secret-bearing custom-field values
 - Key-file contents
 - Recovery secrets
 
@@ -82,29 +84,43 @@ information to an attacker even when their plaintext remains unavailable.
 - Backups and remote storage may observe encrypted database bytes and metadata
   such as size and modification time.
 
-## M1.5 controls and gaps
+## M2 controls and gaps
 
 The CLI reads the master password from an interactive terminal without echo and
 does not accept a password argument. Its input buffer is cleared on drop, and
 the adapter returns generic credential and format errors without embedding the
-password. The domain projection excludes passwords, TOTP seeds, notes,
-attachment contents, history, and custom fields. Group names, entry titles, and
-identifiers in the projection are explicitly treated as privacy-sensitive
-metadata.
+password. The bulk domain projection exposes privacy-sensitive title, username,
+URL, tags, and identifiers plus password/notes presence flags, but excludes
+password and notes plaintext, TOTP seeds, attachment contents, history, and
+custom-field values.
 
-M1 does not yet address clipboard access, locked-memory allocation, process
+Password and notes reads require an exact `EntryId` and return one owned
+`SecretString`. Its backing `String` is zeroized on drop through `zeroize`; the
+type intentionally has no `Debug`, `Display`, `Clone`, serialization, deref, or
+implicit string-borrowing implementation. Callers must explicitly invoke
+`expose_secret()` for the shortest practical lifetime. The adapter makes one
+owned copy from the decrypted dependency representation into `SecretString` and
+does not place secrets in errors or logs.
+
+Zeroization reduces accidental residual memory but cannot guarantee removal of
+copies made by the operating system, swap, allocator, runtime, compiler, or
+dependencies. A compromised process while the vault is unlocked can still read
+decrypted dependency state and any explicitly exposed secret.
+
+M2 does not yet address clipboard access, locked-memory allocation, process
 hardening, secure file replacement, conflict handling, sync, or dependency
 attestation. The project must not claim resistance to those threats yet.
 
-M1 confines experimental mutation to an opaque `KdbxDocument` retaining the
+M2 confines experimental mutation to an opaque `KdbxDocument` retaining the
 complete `keepass-rs` representation. It never serializes from the incomplete
-`Vault` projection, never stores the master password, looks entries up by UUID,
-preserves an existing title field's protected/unprotected mode, and avoids
-history or timestamp changes for same-value requests. It reports typed errors
-for unknown entries, unsupported write formats, destination I/O failure, and
-serialization failure. KDBX 3.1 and 4.0 writes are rejected. The public save
-API accepts only a caller-owned writer and cannot perform an in-place path
-write.
+`Vault` projection, never stores the master password, and looks entries up by
+UUID. Title, username, URL, and password edits preserve existing field
+protection, while missing password fields default to protected. Same-value and
+missing-plus-empty requests avoid history, timestamp, and representation
+changes. Typed errors for unknown entries, unsupported write formats,
+destination I/O failure, and serialization failure do not contain identifiers,
+metadata, or secrets. KDBX 3.1 and 4.0 writes are rejected. The public save API
+accepts only a caller-owned writer and cannot perform an in-place path write.
 
 Tests serialize to memory, reopen the result, verify preservation invariants,
 exercise wrong credentials and writer failure, and confirm the source fixture
