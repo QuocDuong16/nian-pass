@@ -1,16 +1,21 @@
 //! KDBX adapter boundary for Nian Pass.
 //!
 //! Types from `keepass` are intentionally confined to this crate's private
-//! implementation. Callers receive only `vault_core` domain values.
+//! implementation. Callers receive only adapter-owned types and `vault_core`
+//! domain values.
 
 use std::{
     fmt,
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
-use keepass::{Database, DatabaseKey, config::DatabaseVersion, db::DatabaseOpenError};
+use keepass::{
+    Database, DatabaseKey,
+    config::DatabaseVersion,
+    db::{DatabaseOpenError, DatabaseSaveError, fields},
+};
 use thiserror::Error;
 use vault_core::{Entry, EntryId, Group, GroupId, Vault};
 
@@ -58,7 +63,102 @@ impl OpenedVault {
     }
 }
 
-/// Errors returned while opening and projecting a KDBX database.
+/// An opened KDBX database that retains the complete representation parsed by
+/// `keepass-rs` for narrowly scoped, preservation-oriented edits.
+///
+/// The underlying dependency type is intentionally private. This document is
+/// the serialization source of truth; its [`Vault`] projection must never be
+/// used to reconstruct a database. Credentials are supplied separately for
+/// each open and save operation and are not retained by the document.
+pub struct KdbxDocument {
+    version: KdbxVersion,
+    database: Database,
+}
+
+impl KdbxDocument {
+    /// Opens a KDBX document from a file using a master password.
+    ///
+    /// M1 supports password credentials only. The document does not retain the
+    /// password, and the credential API is expected to grow to support keyfiles
+    /// in a later milestone.
+    pub fn open(path: impl AsRef<Path>, master_password: &str) -> Result<Self, KdbxError> {
+        let mut file = File::open(path.as_ref()).map_err(KdbxError::Io)?;
+        Self::open_reader(&mut file, master_password)
+    }
+
+    /// Opens a KDBX document from a seekable reader using a master password.
+    pub fn open_reader(
+        source: &mut (impl Read + Seek),
+        master_password: &str,
+    ) -> Result<Self, KdbxError> {
+        let (version, database) = parse_database(source, master_password)?;
+        Ok(Self { version, database })
+    }
+
+    /// Returns the exact KDBX major and minor version read from the source.
+    #[must_use]
+    pub const fn version(&self) -> KdbxVersion {
+        self.version
+    }
+
+    /// Builds a credential-free presentation projection of the current state.
+    ///
+    /// This is a one-way view for callers and is not a serialization model.
+    pub fn projection(&self) -> Result<Vault, KdbxError> {
+        convert_database(&self.database)
+    }
+
+    /// Renames an entry by its stable identifier while retaining the complete
+    /// parsed database state.
+    ///
+    /// `keepass-rs` change tracking records the previous entry in history and
+    /// updates its last-modification timestamp. No identifier or title is
+    /// included in errors.
+    pub fn set_entry_title(&mut self, id: &EntryId, title: &str) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let upstream_id = self
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == id.as_str())
+            .map(|entry| entry.id())
+            .ok_or(KdbxError::EntryNotFound)?;
+
+        let mut entry = self
+            .database
+            .entry_mut(upstream_id)
+            .ok_or(KdbxError::EntryNotFound)?;
+        entry.track_changes().set_unprotected(fields::TITLE, title);
+        Ok(())
+    }
+
+    /// Serializes this document to a caller-owned writer using a master
+    /// password.
+    ///
+    /// Only KDBX 4.1 is enabled because that is the exact write format supported
+    /// by the pinned `keepass-rs` writer. This API does not open, truncate, or
+    /// replace a filesystem path and does not verify the resulting bytes.
+    pub fn save_to_writer(
+        &self,
+        destination: &mut impl Write,
+        master_password: &str,
+    ) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+
+        let key = DatabaseKey::new().with_password(master_password);
+        self.database.save(destination, key).map_err(map_save_error)
+    }
+
+    fn ensure_writable_format(&self) -> Result<(), KdbxError> {
+        if self.version == (KdbxVersion::Kdbx4 { minor: 1 }) {
+            Ok(())
+        } else {
+            Err(KdbxError::UnsupportedWriteFormat)
+        }
+    }
+}
+
+/// Errors returned while opening, projecting, mutating, or serializing KDBX.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum KdbxError {
@@ -81,6 +181,18 @@ pub enum KdbxError {
     /// A valid parsed database could not be represented by the domain model.
     #[error("the KDBX database could not be converted into the vault model: {0}")]
     Conversion(&'static str),
+
+    /// Writing this exact KDBX version is not supported safely.
+    #[error("writing this KDBX format is not supported")]
+    UnsupportedWriteFormat,
+
+    /// No entry matched the supplied stable identifier.
+    #[error("entry was not found")]
+    EntryNotFound,
+
+    /// The complete KDBX document could not be serialized.
+    #[error("the KDBX database could not be serialized")]
+    Serialization,
 }
 
 /// Opens a KDBX database with a master password and returns a credential-free
@@ -89,14 +201,27 @@ pub enum KdbxError {
 /// The password is never logged or included in an error. The caller retains
 /// ownership of the password buffer and is responsible for clearing it.
 pub fn open(path: impl AsRef<Path>, master_password: &str) -> Result<OpenedVault, KdbxError> {
-    let mut file = File::open(path.as_ref()).map_err(KdbxError::Io)?;
-    open_reader(&mut file, master_password)
+    let document = KdbxDocument::open(path, master_password)?;
+    let version = document.version();
+    let vault = document.projection()?;
+    Ok(OpenedVault { version, vault })
 }
 
+#[cfg(test)]
 fn open_reader(
     source: &mut (impl Read + Seek),
     master_password: &str,
 ) -> Result<OpenedVault, KdbxError> {
+    let document = KdbxDocument::open_reader(source, master_password)?;
+    let version = document.version();
+    let vault = document.projection()?;
+    Ok(OpenedVault { version, vault })
+}
+
+fn parse_database(
+    source: &mut (impl Read + Seek),
+    master_password: &str,
+) -> Result<(KdbxVersion, Database), KdbxError> {
     let version = Database::get_version(source).map_err(map_open_error)?;
     let kdbx_version = match &version {
         DatabaseVersion::KDB3(minor) => KdbxVersion::Kdbx3 { minor: *minor },
@@ -109,11 +234,14 @@ fn open_reader(
     let database =
         Database::open(source, key).map_err(|error| map_database_open_error(&version, error))?;
 
-    let vault = convert_database(&database)?;
-    Ok(OpenedVault {
-        version: kdbx_version,
-        vault,
-    })
+    Ok((kdbx_version, database))
+}
+
+fn map_save_error(error: DatabaseSaveError) -> KdbxError {
+    match error {
+        DatabaseSaveError::UnsupportedVersion => KdbxError::UnsupportedWriteFormat,
+        _ => KdbxError::Serialization,
+    }
 }
 
 fn map_database_open_error(version: &DatabaseVersion, error: DatabaseOpenError) -> KdbxError {
@@ -172,15 +300,133 @@ fn convert_group(group: keepass::db::GroupRef<'_>) -> Group {
 mod tests {
     use std::{
         fs,
-        io::Cursor,
+        io::{Cursor, Write},
         path::{Path, PathBuf},
     };
 
-    use super::{KdbxError, KdbxVersion, open, open_reader};
+    use keepass::{Database, DatabaseKey};
+    use vault_core::{EntryId, Group};
+
+    use super::{KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
 
     // Synthetic public test credential from the upstream fixture suite.
     const FIXTURE_PASSWORD: &str = "demopass";
     const WRONG_FIXTURE_PASSWORD: &str = "wrong-public-test-password";
+
+    struct SemanticSnapshot {
+        version: KdbxVersion,
+        group_count: usize,
+        entry_count: usize,
+        groups: Vec<GroupSnapshot>,
+    }
+
+    struct GroupSnapshot {
+        id: String,
+        name: String,
+        entries: Vec<EntrySnapshot>,
+    }
+
+    struct EntrySnapshot {
+        id: String,
+        title: String,
+    }
+
+    impl SemanticSnapshot {
+        fn capture(document: &KdbxDocument) -> Self {
+            let vault = document
+                .projection()
+                .expect("trusted fixture should project");
+            let mut groups = Vec::new();
+            capture_group(vault.root(), &mut groups);
+
+            Self {
+                version: document.version(),
+                group_count: vault.group_count(),
+                entry_count: vault.entry_count(),
+                groups,
+            }
+        }
+
+        fn assert_preserved_except_title(
+            &self,
+            after: &Self,
+            changed_id: &EntryId,
+            expected_title: &str,
+        ) {
+            assert!(self.version == after.version, "KDBX version changed");
+            assert_eq!(self.group_count, after.group_count, "group count changed");
+            assert_eq!(self.entry_count, after.entry_count, "entry count changed");
+            assert_eq!(
+                self.groups.len(),
+                after.groups.len(),
+                "group traversal changed"
+            );
+
+            for (before_group, after_group) in self.groups.iter().zip(&after.groups) {
+                assert!(
+                    before_group.id == after_group.id,
+                    "group identifier changed"
+                );
+                assert!(before_group.name == after_group.name, "group name changed");
+                assert_eq!(
+                    before_group.entries.len(),
+                    after_group.entries.len(),
+                    "group entry membership changed"
+                );
+
+                for (before_entry, after_entry) in
+                    before_group.entries.iter().zip(&after_group.entries)
+                {
+                    assert!(
+                        before_entry.id == after_entry.id,
+                        "entry identifier changed"
+                    );
+                    if before_entry.id == changed_id.as_str() {
+                        assert!(
+                            after_entry.title == expected_title,
+                            "requested entry title was not persisted"
+                        );
+                    } else {
+                        assert!(
+                            before_entry.title == after_entry.title,
+                            "an unrelated entry title changed"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn capture_group(group: &Group, destination: &mut Vec<GroupSnapshot>) {
+        destination.push(GroupSnapshot {
+            id: group.id().as_str().to_owned(),
+            name: group.name().to_owned(),
+            entries: group
+                .entries()
+                .iter()
+                .map(|entry| EntrySnapshot {
+                    id: entry.id().as_str().to_owned(),
+                    title: entry.title().to_owned(),
+                })
+                .collect(),
+        });
+
+        for child in group.groups() {
+            capture_group(child, destination);
+        }
+    }
+
+    struct AlwaysFailWriter;
+
+    impl Write for AlwaysFailWriter {
+        fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("intentional test writer failure"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     struct Fixture {
         file: &'static str,
@@ -424,5 +670,228 @@ mod tests {
                     .all(|entry| !entry.id().as_str().is_empty())
             );
         }
+    }
+
+    #[test]
+    fn kdbx41_title_edit_self_roundtrip_preserves_parsed_semantics() {
+        const FILE: &str = "keepassxc-2.7.12-kdbx41.kdbx";
+        const NEW_TITLE: &str = "nian-pass-self-roundtrip-title";
+
+        let path = fixture_path(FILE);
+        let original_bytes = fs::read(&path).expect("fixture should be readable");
+        let mut document = KdbxDocument::open_reader(
+            &mut Cursor::new(original_bytes.as_slice()),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted KDBX 4.1 fixture should open as a document");
+        let before = SemanticSnapshot::capture(&document);
+        let target_id = document
+            .projection()
+            .expect("trusted fixture should project")
+            .root()
+            .entries()
+            .first()
+            .expect("fixture should have a root entry")
+            .id()
+            .clone();
+
+        let upstream_id = document
+            .database
+            .iter_all_entries()
+            .find(|entry| entry.id().to_string() == target_id.as_str())
+            .map(|entry| entry.id())
+            .expect("projected entry should exist in the complete database");
+        let original_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("target entry should exist");
+        let original_title = original_entry
+            .get_title()
+            .expect("target entry should have a title")
+            .to_owned();
+        let original_history_len = original_entry
+            .history
+            .as_ref()
+            .map_or(0, |history| history.get_entries().len());
+        let original_last_modification = original_entry.times.last_modification;
+
+        document
+            .set_entry_title(&target_id, NEW_TITLE)
+            .expect("title edit should succeed");
+
+        let edited_entry = document
+            .database
+            .entry(upstream_id)
+            .expect("edited entry should still exist");
+        assert!(
+            edited_entry.get_title() == Some(NEW_TITLE),
+            "in-memory title edit did not apply"
+        );
+        assert_eq!(
+            edited_entry
+                .history
+                .as_ref()
+                .map_or(0, |history| history.get_entries().len()),
+            original_history_len + 1,
+            "tracked edit did not append exactly one history item"
+        );
+        let latest_history = edited_entry
+            .history
+            .as_ref()
+            .and_then(|history| history.get_entries().first())
+            .expect("tracked edit should retain the prior entry state");
+        assert!(
+            latest_history.get_title() == Some(original_title.as_str()),
+            "history did not retain the prior title"
+        );
+        assert!(
+            edited_entry.times.last_modification != original_last_modification,
+            "tracked edit did not update LastModificationTime"
+        );
+
+        let expected_database = document.database.clone();
+        let mut saved = Vec::new();
+        document
+            .save_to_writer(&mut saved, FIXTURE_PASSWORD)
+            .expect("KDBX 4.1 document should serialize");
+
+        let reopened = KdbxDocument::open_reader(&mut Cursor::new(&saved), FIXTURE_PASSWORD)
+            .expect("serialized document should reopen");
+        let after = SemanticSnapshot::capture(&reopened);
+
+        before.assert_preserved_except_title(&after, &target_id, NEW_TITLE);
+        assert!(
+            reopened.database == expected_database,
+            "serialized output changed the complete parsed database representation"
+        );
+        assert!(
+            document.database.config.kdf_config == reopened.database.config.kdf_config,
+            "KDF configuration changed"
+        );
+        assert!(
+            document.database.config.outer_cipher_config
+                == reopened.database.config.outer_cipher_config,
+            "outer cipher changed"
+        );
+        assert!(
+            document.database.config.compression_config
+                == reopened.database.config.compression_config,
+            "compression configuration changed"
+        );
+        assert!(
+            document.database.config.inner_cipher_config
+                == reopened.database.config.inner_cipher_config,
+            "inner cipher changed"
+        );
+        assert!(
+            matches!(
+                KdbxDocument::open_reader(&mut Cursor::new(&saved), WRONG_FIXTURE_PASSWORD),
+                Err(KdbxError::InvalidCredentials)
+            ),
+            "wrong credentials unexpectedly reopened serialized output"
+        );
+        assert!(
+            fs::read(path).expect("fixture should remain readable") == original_bytes,
+            "round-trip test modified its source fixture"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_entry_identifier() {
+        let mut document = KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted fixture should open");
+
+        let result = document.set_entry_title(
+            &EntryId::new("00000000-0000-0000-0000-000000000000"),
+            "unused test title",
+        );
+
+        assert!(matches!(result, Err(KdbxError::EntryNotFound)));
+    }
+
+    #[test]
+    fn rejects_writing_unproven_kdbx_versions() {
+        for file in [
+            "keepass-upstream-kdbx31-aeskdf-aes.kdbx",
+            "keepassxc-upstream-kdbx40-argon2d-aes.kdbx",
+            "keepassxc-upstream-kdbx40-argon2id-chacha20.kdbx",
+        ] {
+            let mut document = KdbxDocument::open(fixture_path(file), FIXTURE_PASSWORD)
+                .expect("trusted read fixture should open");
+            let target_id = document
+                .projection()
+                .expect("trusted fixture should project")
+                .root()
+                .entries()
+                .first()
+                .expect("fixture should have a root entry")
+                .id()
+                .clone();
+            let mutation_result = document.set_entry_title(&target_id, "unpersisted test title");
+            let save_result = document.save_to_writer(&mut Vec::new(), FIXTURE_PASSWORD);
+
+            assert!(
+                matches!(mutation_result, Err(KdbxError::UnsupportedWriteFormat)),
+                "unproven format accepted a mutation"
+            );
+            assert!(
+                matches!(save_result, Err(KdbxError::UnsupportedWriteFormat)),
+                "unproven write format was not rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn serialization_failure_returns_a_typed_error() {
+        let document = KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted fixture should open");
+
+        let result = document.save_to_writer(&mut AlwaysFailWriter, FIXTURE_PASSWORD);
+
+        assert!(matches!(result, Err(KdbxError::Serialization)));
+    }
+
+    #[test]
+    fn kdbx41_output_uses_upstream_keepassxc_regression_encodings() {
+        let document = KdbxDocument::open(
+            fixture_path("keepassxc-2.7.12-kdbx41.kdbx"),
+            FIXTURE_PASSWORD,
+        )
+        .expect("trusted fixture should open");
+        let mut saved = Vec::new();
+        document
+            .save_to_writer(&mut saved, FIXTURE_PASSWORD)
+            .expect("KDBX 4.1 document should serialize");
+
+        let xml = Database::get_xml(
+            &mut Cursor::new(saved),
+            DatabaseKey::new().with_password(FIXTURE_PASSWORD),
+        )
+        .expect("serialized XML should decrypt");
+        let xml = String::from_utf8(xml).expect("KDBX XML should be UTF-8");
+
+        assert!(
+            xml.contains("<EnableSearching>null</EnableSearching>"),
+            "EnableSearching did not use the KeePassXC-compatible null encoding"
+        );
+        assert!(
+            xml.contains("<EnableAutoType>null</EnableAutoType>"),
+            "EnableAutoType did not use the KeePassXC-compatible null encoding"
+        );
+        assert!(
+            xml.contains("<DataTransferObfuscation>0</DataTransferObfuscation>"),
+            "DataTransferObfuscation did not use an integer encoding"
+        );
+        assert!(
+            !xml.contains("<DataTransferObfuscation>False</DataTransferObfuscation>")
+                && !xml.contains("<DataTransferObfuscation>True</DataTransferObfuscation>"),
+            "DataTransferObfuscation used a KeePassXC-incompatible boolean encoding"
+        );
     }
 }

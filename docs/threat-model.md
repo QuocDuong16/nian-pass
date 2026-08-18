@@ -1,8 +1,8 @@
 # Threat Model
 
-This is the threat model for the M0.5 read-only foundation. It
-records boundaries and assumptions; it is not a claim that Nian Pass is ready
-to protect production credentials.
+This is the threat model for the M1 experimental write foundation. It records
+boundaries and assumptions; it is not a claim that Nian Pass is ready to
+protect production credentials.
 
 ## Secret material
 
@@ -55,7 +55,13 @@ information to an attacker even when their plaintext remains unavailable.
 - Malicious browser extensions
 - Accidental sensitive logging or diagnostic output
 - Database corruption and partial writes
+- Power loss or disk exhaustion during save
+- Filesystem and cloud-storage replacement semantics
 - Concurrent writes and unresolved conflicts
+- Writer serialization bugs
+- Silent KDBX version downgrade or upgrade
+- Silent KDF, cipher, or compression changes
+- Data loss caused by reconstructing a database from an incomplete projection
 - Compromised supply-chain dependencies
 
 ## Security assumptions
@@ -71,7 +77,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Backups and remote storage may observe encrypted database bytes and metadata
   such as size and modification time.
 
-## M0.5 controls and gaps
+## M1 controls and gaps
 
 The CLI reads the master password from an interactive terminal without echo and
 does not accept a password argument. Its input buffer is cleared on drop, and
@@ -81,6 +87,25 @@ attachment contents, history, and custom fields. Group names, entry titles, and
 identifiers in the projection are explicitly treated as privacy-sensitive
 metadata.
 
-M0.5 does not yet address clipboard access, locked-memory allocation, process
-hardening, secure file writes, conflict handling, sync, or dependency
+M1 does not yet address clipboard access, locked-memory allocation, process
+hardening, secure file replacement, conflict handling, sync, or dependency
 attestation. The project must not claim resistance to those threats yet.
+
+M1 confines experimental mutation to an opaque `KdbxDocument` retaining the
+complete `keepass-rs` representation. It never serializes from the incomplete
+`Vault` projection, never stores the master password, looks entries up by UUID,
+and reports typed errors for unknown entries, unsupported write formats, and
+serialization failure. KDBX 3.1 and 4.0 writes are rejected. The public save API
+accepts only a caller-owned writer and cannot perform an in-place path write.
+
+Tests serialize to memory, reopen the result, verify preservation invariants,
+exercise wrong credentials and writer failure, and confirm the source fixture
+bytes remain unchanged. CI verifies every committed fixture against
+`fixtures/kdbx/SHA256SUMS` before running tests.
+
+These controls do not make production save safe. M1 has no durable temporary
+file, `fsync`, backup, atomic replacement, concurrent-writer detection, or
+external KeePassXC output verification. See [write safety](write-safety.md) for
+the required future filesystem algorithm. `keepass-rs` cannot preserve fields
+it does not parse, so the self-roundtrip is not a claim of universal lossless
+KDBX preservation.

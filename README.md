@@ -19,17 +19,22 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M0.5 — KDBX Read Compatibility
+M1 — KDBX Write Foundation
 
-The workspace currently contains a KDBX-independent domain model, a read-only
-`keepass-rs` adapter, and a small CLI for credential-free vault metadata.
+The workspace contains a KDBX-independent domain projection, a `keepass-rs`
+adapter, and a small read-only CLI for credential-free vault metadata.
 Group names, entry titles, identifiers, and file paths remain privacy-sensitive
-even though they are not secret cryptographic material. Saving, writing,
-modification, merge, and sync are intentionally not implemented.
+even though they are not secret cryptographic material.
 
 Read support is verified only for the combinations backed by trusted fixtures.
 See [KDBX compatibility](docs/kdbx-compatibility.md) for the evidence matrix and
-known gaps. This is not a claim of full KDBX or KeePassXC compatibility.
+known gaps. M1 also introduces an experimental KDBX 4.1-only library foundation
+that retains the complete parsed database, renames one entry title by UUID,
+serializes to a caller-owned writer, and verifies a Nian Pass self-roundtrip.
+
+There is no CLI mutation command, no in-place or production filesystem save,
+and no external KeePassXC verification of Nian Pass output yet. KDBX 3.1 and
+4.0 writing are deliberately rejected rather than upgraded or rewritten.
 
 ## CLI
 
@@ -47,6 +52,7 @@ and minor version from the opened file plus group and entry counts.
 ## Development
 
 ```bash
+sha256sum --check fixtures/kdbx/SHA256SUMS
 cargo fmt --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace
@@ -56,4 +62,6 @@ See [the architecture](docs/architecture.md) and
 [threat model](docs/threat-model.md) for the current boundaries and known gaps.
 
 Nian Pass remains experimental and is not production-ready. There is no
-write/save path and no round-trip preservation guarantee.
+in-place save, atomic filesystem replacement, sync, or externally verified
+KeePassXC write compatibility. See [write safety](docs/write-safety.md) for the
+future production save policy.

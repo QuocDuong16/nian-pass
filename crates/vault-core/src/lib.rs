@@ -1,10 +1,10 @@
 //! KDBX-independent domain types used by Nian Pass clients.
 //!
-//! M0.5 deliberately exposes only credential-free vault metadata. Group names,
+//! M1 retains a deliberately credential-free presentation projection. Group names,
 //! entry titles, and identifiers are not secret material, but they remain
-//! privacy-sensitive. `Vault`, `Group`, and `Entry` do not implement `Debug`,
-//! which prevents accidental bulk dumps. If secret fields are added later,
-//! their types must redact debug output.
+//! privacy-sensitive. `Vault`, `Group`, `Entry`, `GroupId`, and `EntryId` do not
+//! implement `Debug`, which prevents accidental bulk dumps. If secret fields
+//! are added later, their types must redact debug output.
 
 /// A read-only view containing privacy-sensitive, non-secret vault metadata.
 #[derive(Clone, Eq, PartialEq)]
@@ -39,7 +39,7 @@ impl Vault {
 }
 
 /// Stable group identifier copied across an adapter boundary.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct GroupId(String);
 
 impl GroupId {
@@ -126,7 +126,7 @@ impl Group {
 }
 
 /// Stable entry identifier copied across an adapter boundary.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct EntryId(String);
 
 impl EntryId {

@@ -5,8 +5,9 @@ Nian Pass. It records evidence from checked-in, synthetic public fixtures. A
 format, KDF, or cipher being accepted by the `keepass-rs` dependency is not
 enough for a Nian Pass `Verified` claim without a repository fixture and test.
 
-Nian Pass is read-only. This matrix does not cover writing, saving, modifying,
-merging, or round-trip preservation.
+Read evidence and write evidence are tracked separately. A verified read does
+not imply safe writing, and a Nian Pass self-roundtrip does not prove an
+external KeePass implementation accepts the output.
 
 ## Status meanings
 
@@ -56,7 +57,8 @@ mean every feature in that database version is supported or tested.
 | Empty fields | Partially verified | Empty entry titles are asserted in KDBX 3.1 and KDBX 4.0; other empty fields are outside the current projection |
 | Unicode | Not yet tested | No checked-in fixture/test asserts Unicode group names or titles |
 | Custom fields | Not yet tested | Not exposed by the minimal domain projection |
-| Entry history | Not yet tested | Not exposed by the minimal domain projection |
+| Entry history | Partially verified | M1 KDBX 4.1 title mutation appends and reopens one prior-state history item; broader history behavior is untested |
+| Entry modification timestamp | Partially verified | M1 KDBX 4.1 tracked title mutation changes and reopens `LastModificationTime`; broader timestamp semantics are untested |
 | Attachments | Not yet tested | Not exposed by the minimal domain projection |
 | Tags | Not yet tested | Not exposed by the minimal domain projection |
 | Large notes | Not yet tested | Notes are not exposed by the minimal domain projection |
@@ -84,6 +86,44 @@ corruption is regression-tested as `InvalidKdbx`.
 An invalid or unknown future major-version header currently maps to
 `InvalidKdbx`; future-format detection is not yet precise enough to claim
 `UnsupportedFormat` for that case.
+
+## Write compatibility
+
+M1 enables only the pinned `keepass-rs` `save_kdbx4` feature. In version
+`0.13.21`, the writer accepts exact KDBX 4.1 and rejects KDBX 4.0, KDBX 3.x,
+KDBX 2.x, and KDB. Nian Pass keeps that narrow boundary and does not silently
+upgrade a database to a different version.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| KDBX 4.1 open → rename one title → save → Nian Pass reopen | Self-roundtrip verified | Trusted `keepassxc-2.7.12-kdbx41.kdbx` fixture; memory-only output |
+| Exact KDBX 4.1 version preservation | Self-roundtrip verified | Header version before and after is `4.1` |
+| KDF, outer cipher, inner cipher, and compression preservation | Self-roundtrip verified | Parsed configurations are equal before save and after reopen |
+| Group/entry counts, hierarchy order, names, UUIDs, and untouched titles | Self-roundtrip verified | Private semantic snapshot assertions |
+| Complete `keepass::Database` parsed representation | Self-roundtrip verified | Expected post-mutation database equals reopened database without debug-dumping contents |
+| Entry history and `LastModificationTime` for title rename | Self-roundtrip verified | Upstream tracked mutation appends one prior-state history item, updates the timestamp, and both survive reopen |
+| KeePassXC-specific nullable group flags and AutoType obfuscation XML encodings | Supporting regression verified | Output XML asserts literal `null` and integer `0`, matching pinned upstream KeePassXC 2.7+ regressions |
+| KeePassXC opens Nian Pass output | Not yet externally verified | No released KeePassXC process has opened and resaved Nian Pass output in this repository suite |
+| KDBX 4.0 writing | Unsupported | Typed `UnsupportedWriteFormat`; pinned writer only emits exact 4.1 |
+| KDBX 3.1 writing | Unsupported | Typed `UnsupportedWriteFormat`; no silent KDBX 4.1 upgrade |
+| In-place or atomic filesystem save | Not implemented | M1 exposes only a caller-owned writer; see `write-safety.md` |
+| Keyfile-based writing | Not implemented | M1 credential API is password-only |
+
+The complete parsed-representation equality check covers semantics represented
+by `keepass-rs`, including the fixture's metadata beyond the public
+`vault-core` projection. It cannot prove preservation of unknown XML/header
+fields that the dependency discards while parsing, and it is not a
+byte-for-byte ciphertext comparison because encryption seeds and IVs are
+regenerated on save.
+
+The pinned upstream commit
+`2f1dd5e0f1a23dc7420c3fa25f434fe362729b24` includes dedicated writer
+regressions derived from a real KeePassXC 2.7.12 KDBX 4.1 fixture. Those tests
+cover `EnableSearching`, `EnableAutoType`, and
+`DataTransferObfuscation`, plus broader generated KDBX 4.1 roundtrips. Nian Pass
+asserts the three KeePassXC-sensitive encodings on its own saved output, but
+upstream regression evidence remains supporting evidence rather than external
+compatibility certification.
 
 ## Fixture provenance
 

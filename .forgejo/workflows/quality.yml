@@ -19,6 +19,9 @@ jobs:
       - name: Install Rust quality components
         run: rustup component add rustfmt clippy
 
+      - name: Verify KDBX fixture integrity
+        run: sha256sum --check fixtures/kdbx/SHA256SUMS
+
       - name: Check formatting
         run: cargo fmt --check
 

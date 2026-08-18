@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use vault_core::Group;
 use zeroize::Zeroizing;
 
-#[derive(Debug, Parser)]
+#[derive(Parser)]
 #[command(
     name = "nian-pass",
     version,
@@ -15,7 +15,7 @@ struct Cli {
     command: Command,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Subcommand)]
 enum Command {
     /// Open a database and show counts without printing vault metadata.
     Info { file: PathBuf },

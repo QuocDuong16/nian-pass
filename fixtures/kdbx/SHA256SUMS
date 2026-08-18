@@ -1,0 +1,4 @@
+0909889e838988f57bea9ed33ecf244c1fb40c6efb2ba2224592659c749b884a  fixtures/kdbx/keepass-upstream-kdbx31-aeskdf-aes.kdbx
+b3c9b3f3df36f71421e4075f038d1cf7d72f14fdbb5abf10a0a4b5308c93adb9  fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx
+4c8c11173f1f5894d6ba606e2f58da07b50a66d79486bac2daa1f23b7e3ca3cf  fixtures/kdbx/keepassxc-upstream-kdbx40-argon2d-aes.kdbx
+a45a2833ead92db643de2bb87fffe108ddcc6bb59bf13dd7e18963cae7004673  fixtures/kdbx/keepassxc-upstream-kdbx40-argon2id-chacha20.kdbx
