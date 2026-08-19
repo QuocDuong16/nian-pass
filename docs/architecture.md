@@ -1,13 +1,18 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M2.5 adds narrow structural and custom-field operations to
-the M2 preservation architecture without an in-place filesystem save,
-presentation layer, or synchronization layer.
+the source of truth. M3 adds an unlocked local session and verified filesystem
+persistence around the M2.5 preservation architecture without adding a UI,
+background service, or synchronization layer.
 
 ## Dependency direction
 
 ```text
+future UI
+ └── vault-session
+      ├── kdbx
+      └── vault-core
+
 CLI
  ├── kdbx
  └── vault-core
@@ -24,6 +29,36 @@ vault-core
 that contains all `keepass-rs` types and converts them to the domain model. The
 CLI consumes only the adapter's public API and `vault-core` values. No
 `keepass-rs` type crosses the adapter's public boundary.
+
+`crates/vault-session` owns the canonical filesystem path, encrypted source
+fingerprint, saved revision, backup policy, conflict checks, and save
+transaction. It accepts `SecretString` credentials at open/save boundaries but
+does not retain them. It exposes `KdbxDocument` only through the adapter's
+narrow public API; no `keepass::Database`, entry, or group type escapes.
+
+```text
+.kdbx
+  ↓
+VaultSession
+  ↓
+KdbxDocument
+  ↓
+Vault projection
+```
+
+The save direction is preservation-first:
+
+```text
+KdbxDocument
+  ↓
+verified same-directory temp
+  ↓
+backup exact previous ciphertext
+  ↓
+atomic primary replacement
+  ↓
+verified final .kdbx
+```
 
 The adapter's read API returns an `OpenedVault` containing the `Vault`
 projection and a dependency-neutral `KdbxVersion`. The version preserves the
@@ -133,6 +168,21 @@ rename remains supported because it is an ordinary KeePass group metadata edit.
 The document never stores the master password; credentials are supplied again
 when saving. Its writer-first API cannot open or overwrite a path.
 
+M3 adds a process-local saturating `u64` revision to `KdbxDocument`. Every real
+successful logical mutation increments exactly once; same-value, same-parent,
+missing-field deletion, and failed operations do not increment. Recursive group
+deletion is clone-then-commit and counts as one revision. The revision starts at
+zero on open, is not serialized, and `save_to_writer()` never resets it.
+
+`VaultSession` captures `saved_revision` on stable open and after a verified
+primary replacement. `is_dirty()` compares the current document revision with
+that saved value. The session never autosaves on `Drop`; `lock(self)` only
+consumes and drops the decrypted representation.
+
+M3 accepts in-memory mutations for opened KDBX 3.1 and 4.0 documents so dirty
+state remains meaningful, but persistence still calls the pinned writer and
+returns `UnsupportedWriteFormat`. It never upgrades those files.
+
 The pinned writer only accepts exact KDBX 4.1. The adapter therefore returns
 `UnsupportedWriteFormat` for KDBX 3.1 and 4.0 and performs no silent format,
 KDF, cipher, or compression migration.
@@ -157,17 +207,21 @@ KDF, cipher, or compression migration.
 16. **Permanent deletion must create complete timestamped KDBX tombstones; recycle-bin policy must remain explicit and separate.**
 17. **Invalid, unknown, same-value, and same-parent requests must not partially mutate retained database state.**
 18. **Generic custom-field APIs must not bypass standard-field, TOTP, or passkey-specific semantics.**
+19. **Ordinary save must authenticate against the unchanged current source and must never act as master-password rotation.**
+20. **The primary path must never be truncated or removed before a complete verified replacement exists.**
+21. **External source fingerprint mismatch must preserve both the external file and dirty in-memory edits.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.
 
 ## Current compatibility boundary
 
-M2.5 opens local files through `keepass-rs` and maps secret-free vault metadata
-into `vault-core`. Trusted fixtures verify specific KDBX 3.1, 4.0,
-and 4.1 combinations; the exact evidence and untested dimensions are recorded
-in [the compatibility matrix](kdbx-compatibility.md). Format-level verification
-is not evidence of complete feature compatibility for that format.
+M3 opens existing non-symlink regular files through `VaultSession`, while
+`keepass-rs` still maps secret-free vault metadata into `vault-core`. Trusted
+fixtures verify specific KDBX 3.1, 4.0, and 4.1 combinations; the exact evidence
+and untested dimensions are recorded in [the compatibility
+matrix](kdbx-compatibility.md). Format-level verification is not evidence of
+complete feature compatibility for that format.
 
 M1 proves a KDBX 4.1 Nian Pass self-roundtrip for the trusted KeePassXC 2.7.12
 fixture. M1.5 separately uses a released `keepassxc-cli` as an independent
@@ -181,9 +235,9 @@ ciphertext stability.
 
 KeePassXC is test tooling only. It is not a library, runtime, or deployment
 dependency of Nian Pass. The external harness writes only inside an isolated
-temporary directory through the existing caller-owned writer API; no public
-save-to-path API is introduced. Atomic filesystem replacement remains a later
-milestone. M2.5 self-roundtrip tests extend the evidence to username, URL,
-password, structural operations, recursive tombstones, and protected custom
-fields. External creation evidence proves KeePassXC open/list only; the strict
-KeePassXC resave comparator remains the separate title-mutation pipeline.
+temporary directory. M3 adds the canonical local save-to-source API described
+in [write safety](write-safety.md). M2.5 self-roundtrip tests extend the evidence
+to username, URL, password, structural operations, recursive tombstones, and
+protected custom fields. External creation evidence proves KeePassXC open/list
+only; the strict KeePassXC resave comparator remains the separate title-mutation
+pipeline.

@@ -95,6 +95,7 @@ impl OpenedVault {
 pub struct KdbxDocument {
     version: KdbxVersion,
     database: Database,
+    revision: u64,
 }
 
 impl KdbxDocument {
@@ -114,13 +115,27 @@ impl KdbxDocument {
         master_password: &str,
     ) -> Result<Self, KdbxError> {
         let (version, database) = parse_database(source, master_password)?;
-        Ok(Self { version, database })
+        Ok(Self {
+            version,
+            database,
+            revision: 0,
+        })
     }
 
     /// Returns the exact KDBX major and minor version read from the source.
     #[must_use]
     pub const fn version(&self) -> KdbxVersion {
         self.version
+    }
+
+    /// Returns the process-local monotonic mutation revision.
+    ///
+    /// The revision starts at zero for every open, increments exactly once for
+    /// each successful real mutation, saturates instead of wrapping, and is
+    /// never serialized into KDBX output.
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Builds a secret-free presentation projection of the current state.
@@ -226,8 +241,6 @@ impl KdbxDocument {
         group: &GroupId,
         input: NewEntry<'_>,
     ) -> Result<EntryId, KdbxError> {
-        self.ensure_writable_format()?;
-
         let group_id = self.find_group_id(group)?;
         let protect_title =
             self.missing_field_is_protected(MissingFieldProtection::DatabaseTitlePolicy);
@@ -255,6 +268,7 @@ impl KdbxDocument {
             entry.set_protected(fields::PASSWORD, password.expose_secret());
         }
 
+        self.mark_changed();
         Ok(EntryId::new(entry_id.to_string()))
     }
 
@@ -265,14 +279,13 @@ impl KdbxDocument {
     /// entry UUID is recorded with an upstream-generated deletion timestamp so
     /// a future sync layer can distinguish deletion from absence.
     pub fn permanently_delete_entry(&mut self, id: &EntryId) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
-
         let upstream_id = self.find_entry_id(id)?;
         let mut entry = self
             .database
             .entry_mut(upstream_id)
             .ok_or(KdbxError::EntryNotFound)?;
         entry.track_changes().remove();
+        self.mark_changed();
         Ok(())
     }
 
@@ -282,8 +295,6 @@ impl KdbxDocument {
     /// parent through the upstream model, and updates only `LocationChanged` on
     /// the entry. Moving to the current parent is a complete no-op.
     pub fn move_entry(&mut self, entry: &EntryId, destination: &GroupId) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
-
         let entry_id = self.find_entry_id(entry)?;
         let destination_id = self.find_group_id(destination)?;
         let current_parent = self
@@ -296,14 +307,16 @@ impl KdbxDocument {
             return Ok(());
         }
 
-        let mut entry = self
-            .database
+        let mut candidate = self.database.clone();
+        let mut entry = candidate
             .entry_mut(entry_id)
             .ok_or(KdbxError::EntryNotFound)?;
         entry
             .move_to(destination_id)
             .map_err(|_| KdbxError::GroupNotFound)?;
         entry.times.location_changed = Some(Times::now());
+        self.database = candidate;
+        self.mark_changed();
         Ok(())
     }
 
@@ -312,16 +325,18 @@ impl KdbxDocument {
     /// The upstream constructor generates a UUID v4 and initializes the
     /// KeePass group defaults and timestamps. Empty group names are accepted.
     pub fn create_group(&mut self, parent: &GroupId, name: &str) -> Result<GroupId, KdbxError> {
-        self.ensure_writable_format()?;
-
         let parent_id = self.find_group_id(parent)?;
-        let mut parent = self
-            .database
-            .group_mut(parent_id)
-            .ok_or(KdbxError::GroupNotFound)?;
-        let mut group = parent.add_group();
-        group.name = name.to_owned();
-        Ok(GroupId::new(group.id().to_string()))
+        let created_id = {
+            let mut parent = self
+                .database
+                .group_mut(parent_id)
+                .ok_or(KdbxError::GroupNotFound)?;
+            let mut group = parent.add_group();
+            group.name = name.to_owned();
+            GroupId::new(group.id().to_string())
+        };
+        self.mark_changed();
+        Ok(created_id)
     }
 
     /// Renames a group by stable identifier.
@@ -329,8 +344,6 @@ impl KdbxDocument {
     /// Setting the existing name is a complete no-op. A real rename updates the
     /// group's last-modification timestamp without inventing entry history.
     pub fn rename_group(&mut self, id: &GroupId, name: &str) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
-
         let group_id = self.find_group_id(id)?;
         let current_name = self
             .database
@@ -349,6 +362,7 @@ impl KdbxDocument {
         group.track_changes().edit(|tracked| {
             tracked.name = name.to_owned();
         });
+        self.mark_changed();
         Ok(())
     }
 
@@ -362,8 +376,6 @@ impl KdbxDocument {
         group: &GroupId,
         destination_parent: &GroupId,
     ) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
-
         let group_id = self.find_group_id(group)?;
         let destination_id = self.find_group_id(destination_parent)?;
         let current_parent = self
@@ -379,14 +391,16 @@ impl KdbxDocument {
             return Ok(());
         }
 
-        let mut group = self
-            .database
+        let mut candidate = self.database.clone();
+        let mut group = candidate
             .group_mut(group_id)
             .ok_or(KdbxError::GroupNotFound)?;
         group
             .track_changes()
             .move_to(destination_id)
             .map_err(map_group_move_error)?;
+        self.database = candidate;
+        self.mark_changed();
         Ok(())
     }
 
@@ -398,30 +412,30 @@ impl KdbxDocument {
     /// before invoking the tracked upstream recursive remover. It deliberately
     /// does not implement the product-level recycle-bin workflow.
     pub fn permanently_delete_group(&mut self, id: &GroupId) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
-
         let group_id = self.find_group_id(id)?;
         if group_id == self.database.root().id() {
             return Err(KdbxError::CannotDeleteRootGroup);
         }
 
         let subtree = self.group_subtree_ids(group_id)?;
+        let mut candidate = self.database.clone();
         for descendant in &subtree {
-            self.database
+            candidate
                 .group_mut(*descendant)
                 .ok_or(KdbxError::GroupNotFound)?
                 .set_icon_none();
         }
-        clear_deleted_group_metadata_references(&mut self.database, &subtree);
+        clear_deleted_group_metadata_references(&mut candidate, &subtree);
 
-        let mut group = self
-            .database
+        let mut group = candidate
             .group_mut(group_id)
             .ok_or(KdbxError::GroupNotFound)?;
         group
             .track_changes()
             .remove()
             .map_err(|_| KdbxError::CannotDeleteRootGroup)?;
+        self.database = candidate;
+        self.mark_changed();
         Ok(())
     }
 
@@ -478,7 +492,6 @@ impl KdbxDocument {
         value: &SecretString,
         new_field_protection: FieldProtection,
     ) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
         reject_reserved_field(name)?;
 
         let upstream_id = self.find_entry_id(entry)?;
@@ -505,15 +518,20 @@ impl KdbxDocument {
         }
 
         let protection = existing_protection.unwrap_or(new_field_protection);
-        let mut entry = self
-            .database
-            .entry_mut(upstream_id)
-            .ok_or(KdbxError::EntryNotFound)?;
-        let mut tracked = entry.track_changes();
-        match protection {
-            FieldProtection::Protected => tracked.set_protected(name, value.expose_secret()),
-            FieldProtection::Unprotected => tracked.set_unprotected(name, value.expose_secret()),
+        {
+            let mut entry = self
+                .database
+                .entry_mut(upstream_id)
+                .ok_or(KdbxError::EntryNotFound)?;
+            let mut tracked = entry.track_changes();
+            match protection {
+                FieldProtection::Protected => tracked.set_protected(name, value.expose_secret()),
+                FieldProtection::Unprotected => {
+                    tracked.set_unprotected(name, value.expose_secret());
+                }
+            }
         }
+        self.mark_changed();
         Ok(())
     }
 
@@ -526,7 +544,6 @@ impl KdbxDocument {
         entry: &EntryId,
         name: &str,
     ) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
         reject_reserved_field(name)?;
 
         let upstream_id = self.find_entry_id(entry)?;
@@ -547,6 +564,7 @@ impl KdbxDocument {
         entry.track_changes().edit(|tracked| {
             tracked.as_mut().fields.remove(name);
         });
+        self.mark_changed();
         Ok(())
     }
 
@@ -565,6 +583,19 @@ impl KdbxDocument {
 
         let key = DatabaseKey::new().with_password(master_password);
         self.database.save(destination, key).map_err(map_save_error)
+    }
+
+    /// Verifies exact parsed KDBX semantic equivalence without exposing the
+    /// underlying `keepass-rs` database representation.
+    ///
+    /// Ciphertext is deliberately not compared because fresh salts, seeds,
+    /// nonces, and authentication data are expected after serialization.
+    pub fn verify_semantic_equivalence(&self, other: &Self) -> Result<(), KdbxError> {
+        if self.version == other.version && self.database == other.database {
+            Ok(())
+        } else {
+            Err(KdbxError::VerificationFailed)
+        }
     }
 
     fn ensure_writable_format(&self) -> Result<(), KdbxError> {
@@ -595,8 +626,6 @@ impl KdbxDocument {
         new_value: &str,
         missing_protection: MissingFieldProtection,
     ) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
-
         let upstream_id = self.find_entry_id(id)?;
         let missing_protected = self.missing_field_is_protected(missing_protection);
         let current_entry = self
@@ -612,18 +641,25 @@ impl KdbxDocument {
         }
 
         let protect = existing.map_or(missing_protected, keepass::db::Value::is_protected);
-        let mut entry = self
-            .database
-            .entry_mut(upstream_id)
-            .ok_or(KdbxError::EntryNotFound)?;
-        let mut tracked = entry.track_changes();
-        if protect {
-            tracked.set_protected(field, new_value);
-        } else {
-            tracked.set_unprotected(field, new_value);
+        {
+            let mut entry = self
+                .database
+                .entry_mut(upstream_id)
+                .ok_or(KdbxError::EntryNotFound)?;
+            let mut tracked = entry.track_changes();
+            if protect {
+                tracked.set_protected(field, new_value);
+            } else {
+                tracked.set_unprotected(field, new_value);
+            }
         }
 
+        self.mark_changed();
         Ok(())
+    }
+
+    fn mark_changed(&mut self) {
+        self.revision = self.revision.saturating_add(1);
     }
 
     fn missing_field_is_protected(&self, policy: MissingFieldProtection) -> bool {
@@ -796,6 +832,10 @@ pub enum KdbxError {
     /// The complete KDBX document could not be serialized.
     #[error("the KDBX database could not be serialized")]
     Serialization,
+
+    /// Parsed KDBX state differs after a preservation-sensitive round trip.
+    #[error("serialized vault did not preserve database semantics")]
+    VerificationFailed,
 }
 
 /// Opens a KDBX database with a master password and returns a secret-free
@@ -4340,7 +4380,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_writing_unproven_kdbx_versions() {
+    fn permits_dirty_in_memory_edits_but_rejects_writing_unproven_kdbx_versions() {
         for file in [
             "keepass-upstream-kdbx31-aeskdf-aes.kdbx",
             "keepassxc-upstream-kdbx40-argon2d-aes.kdbx",
@@ -4365,22 +4405,11 @@ mod tests {
             let password_result = document.set_entry_password(&target_id, &password);
             let save_result = document.save_to_writer(&mut Vec::new(), FIXTURE_PASSWORD);
 
-            assert!(
-                matches!(mutation_result, Err(KdbxError::UnsupportedWriteFormat)),
-                "unproven format accepted a mutation"
-            );
-            assert!(
-                matches!(username_result, Err(KdbxError::UnsupportedWriteFormat)),
-                "unproven format accepted a username mutation"
-            );
-            assert!(
-                matches!(url_result, Err(KdbxError::UnsupportedWriteFormat)),
-                "unproven format accepted a URL mutation"
-            );
-            assert!(
-                matches!(password_result, Err(KdbxError::UnsupportedWriteFormat)),
-                "unproven format accepted a password mutation"
-            );
+            assert!(mutation_result.is_ok(), "in-memory title edit failed");
+            assert!(username_result.is_ok(), "in-memory username edit failed");
+            assert!(url_result.is_ok(), "in-memory URL edit failed");
+            assert!(password_result.is_ok(), "in-memory password edit failed");
+            assert_eq!(document.revision(), 4);
             assert!(
                 matches!(save_result, Err(KdbxError::UnsupportedWriteFormat)),
                 "unproven write format was not rejected"
@@ -4389,7 +4418,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_every_structural_mutation_on_unproven_write_formats() {
+    fn structural_edits_can_be_dirty_while_unproven_write_remains_rejected() {
         let mut document = KdbxDocument::open(
             fixture_path("keepassxc-upstream-kdbx40-argon2d-aes.kdbx"),
             FIXTURE_PASSWORD,
@@ -4399,55 +4428,162 @@ mod tests {
         let (root_id, _) = root_group_ids(&document);
         let secret = SecretString::new("unpersisted-public-test-value".to_owned());
 
-        assert!(matches!(
-            document.create_entry(
+        document
+            .create_entry(
                 &root_id,
                 NewEntry {
                     title: "unpersisted",
                     username: "",
                     url: "",
                     password: None,
-                }
-            ),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
-        assert!(matches!(
-            document.permanently_delete_entry(&entry_id),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
-        assert!(matches!(
-            document.move_entry(&entry_id, &root_id),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
-        assert!(matches!(
-            document.create_group(&root_id, "unpersisted"),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
-        assert!(matches!(
-            document.rename_group(&root_id, "unpersisted"),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
-        assert!(matches!(
-            document.move_group(&root_id, &root_id),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
-        assert!(matches!(
-            document.permanently_delete_group(&root_id),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
-        assert!(matches!(
-            document.set_entry_custom_field(
+                },
+            )
+            .expect("in-memory entry creation should succeed");
+        document
+            .create_group(&root_id, "unpersisted")
+            .expect("in-memory group creation should succeed");
+        document
+            .set_entry_custom_field(
                 &entry_id,
                 "unpersisted",
                 &secret,
-                FieldProtection::Protected
-            ),
-            Err(KdbxError::UnsupportedWriteFormat)
-        ));
+                FieldProtection::Protected,
+            )
+            .expect("in-memory custom-field edit should succeed");
+
+        assert_eq!(document.revision(), 3);
         assert!(matches!(
-            document.delete_entry_custom_field(&entry_id, "unpersisted"),
+            document.save_to_writer(&mut Vec::new(), FIXTURE_PASSWORD),
             Err(KdbxError::UnsupportedWriteFormat)
         ));
+    }
+
+    #[test]
+    fn mutation_revision_counts_one_logical_change_and_ignores_noops_and_failures() {
+        let mut document = kdbx41_document();
+        assert_eq!(document.revision(), 0);
+        let (entry_id, _) = first_entry_ids(&document);
+        let (root_id, _) = root_group_ids(&document);
+        let (child_id, _) = first_child_group_ids(&document);
+
+        document
+            .set_entry_title(&entry_id, "revision title")
+            .expect("real title change should succeed");
+        assert_eq!(document.revision(), 1);
+        document
+            .set_entry_title(&entry_id, "revision title")
+            .expect("same title should be a no-op");
+        assert_eq!(document.revision(), 1);
+
+        let secret = SecretString::new("revision custom value".to_owned());
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "revision-field",
+                &secret,
+                FieldProtection::Protected,
+            )
+            .expect("custom field creation should succeed");
+        assert_eq!(document.revision(), 2);
+        document
+            .set_entry_custom_field(
+                &entry_id,
+                "revision-field",
+                &secret,
+                FieldProtection::Unprotected,
+            )
+            .expect("same custom value should be a no-op");
+        assert_eq!(document.revision(), 2);
+        document
+            .delete_entry_custom_field(&entry_id, "revision-field")
+            .expect("existing custom field deletion should succeed");
+        assert_eq!(document.revision(), 3);
+        document
+            .delete_entry_custom_field(&entry_id, "revision-field")
+            .expect("missing custom field deletion should be a no-op");
+        assert_eq!(document.revision(), 3);
+
+        let created_entry = document
+            .create_entry(
+                &root_id,
+                NewEntry {
+                    title: "revision entry",
+                    username: "",
+                    url: "",
+                    password: None,
+                },
+            )
+            .expect("entry creation should succeed");
+        assert_eq!(document.revision(), 4);
+        document
+            .set_entry_username(&created_entry, "")
+            .expect("missing username plus empty should be a no-op");
+        assert_eq!(document.revision(), 4);
+        document
+            .move_entry(&created_entry, &root_id)
+            .expect("same-parent entry move should be a no-op");
+        assert_eq!(document.revision(), 4);
+        document
+            .move_entry(&created_entry, &child_id)
+            .expect("real entry move should succeed");
+        assert_eq!(document.revision(), 5);
+        document
+            .permanently_delete_entry(&created_entry)
+            .expect("entry deletion should succeed");
+        assert_eq!(document.revision(), 6);
+
+        let created_group = document
+            .create_group(&root_id, "revision group")
+            .expect("group creation should succeed");
+        assert_eq!(document.revision(), 7);
+        document
+            .rename_group(&created_group, "revision group renamed")
+            .expect("real group rename should succeed");
+        assert_eq!(document.revision(), 8);
+        document
+            .rename_group(&created_group, "revision group renamed")
+            .expect("same-name group rename should be a no-op");
+        assert_eq!(document.revision(), 8);
+        document
+            .move_group(&created_group, &root_id)
+            .expect("same-parent group move should be a no-op");
+        assert_eq!(document.revision(), 8);
+        document
+            .move_group(&created_group, &child_id)
+            .expect("real group move should succeed");
+        assert_eq!(document.revision(), 9);
+        document
+            .permanently_delete_group(&created_group)
+            .expect("recursive group deletion should succeed");
+        assert_eq!(document.revision(), 10);
+
+        assert!(matches!(
+            document.set_entry_title(&unknown_entry_id(), "unused"),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert_eq!(document.revision(), 10);
+        let reserved = SecretString::new("unused".to_owned());
+        assert!(matches!(
+            document.set_entry_custom_field(
+                &entry_id,
+                fields::TITLE,
+                &reserved,
+                FieldProtection::Protected,
+            ),
+            Err(KdbxError::ReservedField)
+        ));
+        assert_eq!(document.revision(), 10);
+        assert!(matches!(
+            document.move_group(&root_id, &child_id),
+            Err(KdbxError::InvalidGroupMove)
+        ));
+        assert_eq!(document.revision(), 10);
+
+        document.revision = u64::MAX;
+        document
+            .set_entry_title(&entry_id, "revision title after saturation")
+            .expect("mutation at saturated revision should succeed");
+        assert_eq!(document.revision(), u64::MAX);
     }
 
     #[test]

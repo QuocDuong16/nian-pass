@@ -1,8 +1,8 @@
 # Threat Model
 
-This is the threat model for the M2.5 structural vault operation foundation. It
-records boundaries and assumptions; it is not a claim that Nian Pass is ready
-to protect production credentials.
+This is the threat model for the M3 local vault session and safe filesystem
+persistence foundation. It records boundaries and assumptions; it is not a
+claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
 
@@ -94,7 +94,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Backups and remote storage may observe encrypted database bytes and metadata
   such as size and modification time.
 
-## M2.5 controls and gaps
+## Retained M2.5 controls
 
 The CLI reads the master password from an interactive terminal without echo and
 does not accept a password argument. Its input buffer is cleared on drop, and
@@ -129,9 +129,9 @@ copies made by the operating system, swap, allocator, runtime, compiler, or
 dependencies. A compromised process while the vault is unlocked can still read
 decrypted dependency state and any explicitly exposed secret.
 
-M2.5 does not yet address clipboard access, locked-memory allocation, process
-hardening, secure file replacement, conflict handling, sync, or dependency
-attestation. The project must not claim resistance to those threats yet.
+M3 still does not address clipboard access, locked-memory allocation, process
+hardening, cloud conflict merge, sync, or dependency attestation. The project
+must not claim resistance to those threats yet.
 
 M2.5 confines experimental mutation to an opaque `KdbxDocument` retaining the
 complete `keepass-rs` representation. It never serializes from the incomplete
@@ -143,8 +143,9 @@ falls back to unprotected. Missing non-empty password fields remain protected
 regardless of database policy. Same-value and missing-plus-empty requests avoid
 history, timestamp, and representation changes. Typed errors for unknown entries, unsupported write formats,
 destination I/O failure, and serialization failure do not contain identifiers,
-metadata, or secrets. KDBX 3.1 and 4.0 writes are rejected. The public save API
-accepts only a caller-owned writer and cannot perform an in-place path write.
+metadata, or secrets. KDBX 3.1 and 4.0 writes are rejected. The lower-level
+adapter save API still accepts only a caller-owned writer; the M3 path-owning
+transaction is isolated in `vault-session`.
 
 All entry and group mutations use stable UUID identities. Entry and group moves
 validate their complete source and destination before mutation; group moves
@@ -166,12 +167,73 @@ exercise wrong credentials and writer failure, and confirm the source fixture
 bytes remain unchanged. CI verifies every committed fixture against
 `fixtures/kdbx/SHA256SUMS` before running tests.
 
-These controls do not make production save safe. M2.5 has no durable temporary
-file, `fsync`, backup, atomic replacement, concurrent-writer detection, or
-production conflict handling. See [write safety](write-safety.md) for the
-required future filesystem algorithm. `keepass-rs` cannot preserve fields it
-does not parse, so neither self-roundtrip nor external verification is a claim
-of universal lossless KDBX preservation.
+`keepass-rs` cannot preserve fields it does not parse, so neither self-roundtrip
+nor external verification is a claim of universal lossless KDBX preservation.
+
+## M3 filesystem threats and controls
+
+M3 explicitly considers process crash during save, power loss, disk full, temp
+serialization failure, a wrong password supplied to ordinary save, external
+editors changing the vault before or during save, stale-source overwrite,
+unsafe Windows delete-then-rename behavior, partial/corrupt backup writes,
+symlink/path substitution, and silently discarded dirty sessions.
+
+Controls are:
+
+- The primary is never opened with truncate and is never removed before a
+  complete verified same-directory replacement exists.
+- Complete encrypted bytes are streamed through SHA-256 during stable open and
+  before save. Save checks the primary before credential validation, again
+  after temp semantic verification, and once more after backup preparation.
+- Ordinary save authenticates its supplied `SecretString` against the unchanged
+  current source. A typo returns `CredentialMismatch` before temp or backup
+  creation and cannot become accidental master-password rotation.
+- Random opaque save and backup temps use exclusive creation in the target
+  directory. Buffered output is explicitly flushed and each prepared file is
+  synced before commit.
+- The serialized temp must reopen with the credential and match the in-memory
+  document's exact version and complete parsed `Database` semantics. The final
+  installed primary undergoes the same semantic check.
+- Exactly one previous-version backup is copied from source ciphertext through
+  its own verified temp and atomically replaced. Backup failure aborts before
+  primary replacement; recovery is never automatic.
+- All namespace replacement goes through one platform helper. There is no
+  delete-destination-then-rename or unsafe direct-write fallback. Unix syncs the
+  parent directory after backup and primary replacement.
+- If primary replacement succeeds but parent-directory sync fails, the final
+  target is inspected and the session baseline is reconciled before returning
+  `DurabilityUncertain`; this is not reported as a pre-commit failure.
+- Revision-based dirty tracking is automatic for all public document mutations.
+  No-op and failed operations stay clean, successful logical mutations increment
+  once, `save_to_writer` cannot clear dirty state, and drop never autosaves.
+- Final-component symlinks and all non-regular sources are rejected. A backup
+  symlink is also rejected immediately before replacement.
+
+Fault-injection tests cover every named pre-replacement phase, serialization
+failure, temp verification failure, backup failure, post-replacement handling,
+and directory-sync uncertainty. They assert exact source-byte preservation,
+dirty revision retention, and transaction-temp cleanup where applicable.
+
+## M3 residual risks
+
+SHA-256 checks provide optimistic conflict detection, not cooperative locking.
+An editor can still win the unavoidable interval between the final path check
+and atomic replacement. M3 does not add a `.lock` file because KeePassXC and
+cloud-folder agents would not honor it. It never auto-reloads or merges on a
+conflict.
+
+Directory `sync_all` and atomic rename behavior depend on the operating system
+and filesystem. Windows replacement is implemented without a delete gap but is
+not runtime-verified in M3, and Windows has no stable Rust parent-directory sync
+used here. Network shares, removable media, and cloud-synchronized folders may
+reject the primitive; M3 returns an error instead of downgrading safety.
+
+Locking or dropping the session releases the decrypted database representation,
+but ordinary `keepass-rs` strings are not comprehensively zeroized. M3 does not
+claim immediate physical erasure from allocator pages, swap, runtime copies, or
+dependency internals. A dirty session can still be discarded by an application
+that ignores `is_dirty()`; no autosave-on-drop is attempted because `Drop`
+cannot report persistence failure.
 
 M2.5 invokes a released KeePassXC CLI only from an explicit test harness. The
 harness uses one synthetic public fixture credential, supplies it through

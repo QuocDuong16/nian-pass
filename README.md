@@ -19,10 +19,19 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M2.5 — Entry CRUD, Groups & Protected Custom Fields
+M3 — Local Vault Session & Safe Filesystem Persistence
 
-The workspace contains a KDBX-independent, secret-free metadata projection; an
-explicit zeroizing `SecretString` for narrow password and notes reads; an
+The workspace now contains a local `VaultSession` that owns one canonical
+existing regular-file target, an unlocked `KdbxDocument`, a complete encrypted
+file SHA-256 baseline, and the last safely saved mutation revision. It detects
+external changes optimistically, rejects a wrong ordinary-save credential,
+serializes to a same-directory private temp, reopens and semantically verifies
+that temp, copies the exact previous source ciphertext into `vault.kdbx.bak`,
+atomically replaces the source, verifies the final target, and only then marks
+the session clean. A clean save performs no filesystem I/O.
+
+The workspace also retains a KDBX-independent, secret-free metadata projection;
+an explicit zeroizing `SecretString` for narrow password and notes reads; an
 opaque `keepass-rs` adapter with preservation-aware field and structural
 mutations; and a small read-only CLI. Entries can be created, moved, and
 permanently deleted by stable UUID. Groups can be created, renamed, moved, and
@@ -43,14 +52,14 @@ to a caller-owned writer, and verifies structural/custom-field self-roundtrips
 plus the exact external KeePassXC creation/open and title-mutation pipelines
 recorded in the compatibility matrix.
 
-There is no CLI mutation command, no in-place or production filesystem save,
-and no raw database escape hatch. Product-level recycle-bin behavior, notes
-editing, TOTP, attachments, icons, expiry editing, history restore, duplicate,
-bulk operations, search, UI, sync, and server features remain out of scope.
+There is no CLI mutation command and no raw database escape hatch. Product-level
+recycle-bin behavior, notes editing, TOTP, attachments, icons, expiry editing,
+history restore, duplicate, bulk operations, search, UI, sync, and server
+features remain out of scope.
 KDBX 3.1 and 4.0 writing are deliberately rejected rather than upgraded or
 rewritten.
 
-The deletion APIs are explicitly named `permanently_delete_entry` and
+The deletion APIs remain explicitly named `permanently_delete_entry` and
 `permanently_delete_group`: they remove objects from the KDBX tree and create
 deleted-object tombstones; they do not implement KeePassXC's user-facing
 recycle-bin policy. Entry creation omits empty Title, UserName, and URL fields,
@@ -90,6 +99,10 @@ See [the architecture](docs/architecture.md) and
 [threat model](docs/threat-model.md) for the current boundaries and known gaps.
 
 Nian Pass remains experimental and is not production-ready. There is no
-in-place save, atomic filesystem replacement, sync, or write support outside
-the exact KDBX 4.1 combinations in the compatibility matrix. See
-[write safety](docs/write-safety.md) for the future production save policy.
+UI, cloud sync or merge, file watcher, autosave timer, keyfile support, master-
+password rotation, biometric unlock, or guaranteed zeroization of all decrypted
+allocations owned by `keepass-rs`. The CLI remains read-only. Local persistence
+uses optimistic conflict detection rather than cooperative or distributed
+locking, and Windows behavior is implemented but not runtime-verified in this
+milestone. See [write safety](docs/write-safety.md) for exact guarantees and
+limitations.

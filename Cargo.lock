@@ -864,6 +864,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vault-session"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "kdbx",
+ "sha2",
+ "thiserror",
+ "vault-core",
+]
+
+[[package]]
 name = "wasm-bindgen"
 version = "0.2.127"
 source = "registry+https://github.com/rust-lang/crates.io-index"
