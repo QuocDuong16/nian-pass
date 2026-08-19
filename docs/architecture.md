@@ -58,14 +58,24 @@ recognizes equivalent and one-sided generations, indexes groups, entries,
 icons, and tombstones, then analyzes divergent KDBX 4.1 documents. Entry fields
 (including protected state), location, attachments, history, and metadata are
 merged independently when BASE proves that edits do not overlap. Groups use
-the same property/location rule. Tombstones turn absence into an intentional
-deletion; absence without a tombstone is rejected rather than guessed.
+the same property/location rule. The root UUID and location are immutable, but
+its ordinary group metadata and child ordering participate in the same
+three-way analysis instead of being skipped. Tombstones turn absence into an
+intentional deletion; absence without a tombstone is rejected rather than
+guessed.
 
 Delete-versus-modify, different same-field edits, different moves, UUID
 collisions, deleted-subtree changes, hierarchy cycles, and unsupported
 auxiliary-state synthesis return structured conflicts and no partial document.
-Maps are indexed by UUID, concurrent additions are installed in UUID order,
-history union removes exact duplicates, and synthesized times use only source
+Maps are indexed by UUID. LOCAL child order is retained and REMOTE-only
+additions are appended in UUID order. Ordering analysis compares the relative
+sequence of surviving BASE children, so an unrelated add, removal, or move
+cannot hide a sibling reorder; a REMOTE reorder that the LOCAL-based candidate
+does not already represent is a group-metadata conflict. Attachment-free
+history union retains LOCAL order, appends semantically unique REMOTE records
+in REMOTE order, and removes semantic duplicates. Historical attachment state
+is never raw-cloned across database generations: a required cross-generation
+history import with attachments fails closed. Synthesized times use only source
 timestamps. No wall clock, mtime, ciphertext ordering, or last-writer-wins
 policy resolves ambiguity.
 
@@ -73,7 +83,11 @@ Semantic equality compares attachment names, values, protection state, and icon
 UUID/content while normalizing `keepass-rs` attachment indexes and derived
 reverse-reference caches. Those process-local implementation details are
 reconstructed by the writer and are not used as sync identity; represented
-orphan binary values remain part of the comparison.
+orphan binary values remain part of the comparison. Historical entry parent is
+a parser-derived reference to the current entry's group and is not serialized;
+historical `PreviousParentGroup` is serialized and therefore participates in
+semantic equality. Every conflict-free synthesized candidate runs the complete
+sync invariant validator after tombstone merge and before it can be returned.
 
 ```text
 .kdbx

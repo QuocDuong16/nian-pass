@@ -31,6 +31,12 @@ delete-versus-modify, different moves, UUID collisions, subtree deletion
 conflicts, invalid hierarchy, and unsupported synthesis return structured
 value-free conflicts. There is no intentional timestamp/file-level
 last-writer-wins fallback and conflicted analysis returns no partial document.
+Root identity/location remain fixed while root metadata and ordering participate
+in merge. Surviving BASE-relative child order is checked separately from
+membership, so reorder plus add/remove/move cannot silently become LOCAL-wins.
+Attachment-free history can be unioned deterministically; attachment-bearing
+history that would cross database generations fails closed. A synthesized
+candidate must pass the complete sync invariant validator before return.
 
 M3.5 has no provider, network transport, base cache, background task, UI, or
 automatic save behavior. A future application remains responsible for opening

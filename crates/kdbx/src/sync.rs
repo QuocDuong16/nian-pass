@@ -232,19 +232,7 @@ impl KdbxDocument {
             conflicts: Vec::new(),
         };
         builder.merge()?;
-
-        if builder.conflicts.is_empty() {
-            Ok(KdbxDivergentMergeOutcome::Merged(Box::new(Self {
-                version: local.version,
-                database: builder.candidate,
-                revision: 0,
-                revision_permanently_dirty: false,
-            })))
-        } else {
-            Ok(KdbxDivergentMergeOutcome::Conflicted(SyncConflictSet {
-                conflicts: builder.conflicts,
-            }))
-        }
+        builder.into_outcome(local.version)
     }
 }
 
@@ -331,6 +319,26 @@ fn database_valid_for_sync(database: &Database) -> bool {
 }
 
 impl MergeBuilder<'_> {
+    fn into_outcome(
+        self,
+        version: crate::KdbxVersion,
+    ) -> Result<KdbxDivergentMergeOutcome, KdbxError> {
+        if !self.conflicts.is_empty() {
+            return Ok(KdbxDivergentMergeOutcome::Conflicted(SyncConflictSet {
+                conflicts: self.conflicts,
+            }));
+        }
+        if !database_valid_for_sync(&self.candidate) {
+            return Err(KdbxError::SyncInvariant);
+        }
+        Ok(KdbxDivergentMergeOutcome::Merged(Box::new(KdbxDocument {
+            version,
+            database: self.candidate,
+            revision: 0,
+            revision_permanently_dirty: false,
+        })))
+    }
+
     fn merge(&mut self) -> Result<(), KdbxError> {
         self.validate_roots();
         self.validate_input_identities();
@@ -467,14 +475,10 @@ impl MergeBuilder<'_> {
         let local = group_index(self.local);
         let remote = group_index(self.remote);
         let ids = all_keys3(&base, &local, &remote);
-        let root = self.base.root().id();
         let mut remote_additions = Vec::new();
         let mut remote_deletions = Vec::new();
 
         for id in &ids {
-            if *id == root {
-                continue;
-            }
             match (base.get(id), local.get(id), remote.get(id)) {
                 (Some(base_group), Some(local_group), Some(remote_group)) => {
                     self.merge_existing_group(*id, base_group, local_group, remote_group)?;
@@ -730,14 +734,7 @@ impl MergeBuilder<'_> {
             &remote.attachments,
             |_| self.entry_conflict(id, SyncConflictKind::Binary, None),
         );
-        merged.history = merge_history(
-            base.entry.history.as_ref(),
-            local.entry.history.as_ref(),
-            remote.entry.history.as_ref(),
-            self.remote,
-            id,
-            &mut self.conflicts,
-        );
+        merged.history = merge_history(self.base, self.local, self.remote, id, &mut self.conflicts);
 
         let merged_icon = choose_three_way(
             &base.entry.icon().cloned(),
@@ -796,9 +793,6 @@ impl MergeBuilder<'_> {
             for (name, value) in attachments {
                 target.add_attachment(name, value);
             }
-        }
-        if parent != base.parent {
-            normalize_history_parents(&mut self.candidate, id, &mut self.conflicts)?;
         }
         Ok(())
     }
@@ -1162,8 +1156,13 @@ fn history_entry_semantically_eq(
     left: keepass::db::EntryRef<'_>,
     right: keepass::db::EntryRef<'_>,
 ) -> bool {
+    // Historical entries have no serialized structural parent. keepass-rs
+    // assigns the current entry's parent while parsing `<History>`. In
+    // contrast, `PreviousParentGroup` is serialized on each historical entry
+    // and therefore is part of represented semantics.
     left.id() == right.id()
-        && left.parent().id() == right.parent().id()
+        && left.previous_parent().map(|group| group.id())
+            == right.previous_parent().map(|group| group.id())
         && left.fields == right.fields
         && left.autotype == right.autotype
         && left.tags == right.tags
@@ -1373,21 +1372,62 @@ fn merge_group_properties(
         });
     }
 
-    // Child order is visible KDBX semantics. Local ordering is retained; a
-    // remote-only reordering of pre-existing children cannot currently be
-    // installed through keepass-rs without accessing private internals.
-    if local.child_groups == base.child_groups
-        && remote.child_groups != base.child_groups
-        && set_eq(&remote.child_groups, &base.child_groups)
-    {
+    // Child order is visible KDBX semantics. The candidate retains LOCAL
+    // order. A REMOTE reorder of surviving BASE children is safe only when
+    // LOCAL already carries the same relative order; membership changes are
+    // analyzed independently and therefore cannot hide a reorder.
+    if remote_reorder_would_be_lost(
+        &base.child_groups,
+        &local.child_groups,
+        &remote.child_groups,
+    ) {
         group_metadata_conflict(conflicts, id);
     }
-    if local.child_entries == base.child_entries
-        && remote.child_entries != base.child_entries
-        && set_eq(&remote.child_entries, &base.child_entries)
-    {
+    if remote_reorder_would_be_lost(
+        &base.child_entries,
+        &local.child_entries,
+        &remote.child_entries,
+    ) {
         group_metadata_conflict(conflicts, id);
     }
+}
+
+fn remote_reorder_would_be_lost<T>(base: &[T], local: &[T], remote: &[T]) -> bool
+where
+    T: Copy + Eq + std::hash::Hash,
+{
+    if !order_changed_relative_to_base(base, remote) {
+        return false;
+    }
+
+    let common = base
+        .iter()
+        .copied()
+        .filter(|id| local.contains(id) && remote.contains(id))
+        .collect::<HashSet<_>>();
+    let local_common = relative_order(local, &common);
+    let remote_common = relative_order(remote, &common);
+
+    !order_changed_relative_to_base(base, local) || local_common != remote_common
+}
+
+fn order_changed_relative_to_base<T>(base: &[T], branch: &[T]) -> bool
+where
+    T: Copy + Eq + std::hash::Hash,
+{
+    let surviving = branch.iter().copied().collect::<HashSet<_>>();
+    relative_order(branch, &base.iter().copied().collect()) != relative_order(base, &surviving)
+}
+
+fn relative_order<T>(order: &[T], universe: &HashSet<T>) -> Vec<T>
+where
+    T: Copy + Eq + std::hash::Hash,
+{
+    order
+        .iter()
+        .copied()
+        .filter(|id| universe.contains(id))
+        .collect()
 }
 
 fn merge_times<F>(base: &Times, local: &Times, remote: &Times, merged: &mut Times, mut conflict: F)
@@ -1463,33 +1503,67 @@ fn merge_meta(
 }
 
 fn merge_history(
-    base: Option<&History>,
-    local: Option<&History>,
-    remote: Option<&History>,
+    base_database: &Database,
+    local_database: &Database,
     remote_database: &Database,
     id: UpstreamEntryId,
     conflicts: &mut Vec<SyncConflict>,
 ) -> Option<History> {
-    if local == remote {
+    let local_entry = local_database.entry(id);
+    let remote_entry = remote_database.entry(id);
+    let local = local_entry
+        .as_ref()
+        .and_then(|entry| entry.history.as_ref());
+    let remote = remote_entry
+        .as_ref()
+        .and_then(|entry| entry.history.as_ref());
+
+    if histories_semantically_eq(local_database, remote_database, id) {
         return local.cloned();
     }
-    if local == base {
+    if histories_semantically_eq(local_database, base_database, id) {
         if history_has_attachments(remote_database, id) {
             history_conflict(conflicts, id);
             return local.cloned();
         }
         return remote.cloned();
     }
-    if remote == base {
+    if histories_semantically_eq(remote_database, base_database, id) {
+        return local.cloned();
+    }
+
+    if history_has_attachments(local_database, id) || history_has_attachments(remote_database, id) {
+        history_conflict(conflicts, id);
         return local.cloned();
     }
 
     let mut entries = local.map_or_else(Vec::new, |history| history.get_entries().clone());
-    if let Some(remote) = remote {
-        for entry in remote.get_entries() {
-            if !entries.contains(entry) {
-                entries.push(entry.clone());
-            }
+    let local_count = history_len(local_database, id);
+    let remote_count = history_len(remote_database, id);
+    for remote_index in 0..remote_count {
+        let duplicate_local = (0..local_count).any(|local_index| {
+            historical_entries_semantically_eq(
+                local_database,
+                local_index,
+                remote_database,
+                remote_index,
+                id,
+            )
+        });
+        let duplicate_remote = (0..remote_index).any(|prior_index| {
+            historical_entries_semantically_eq(
+                remote_database,
+                prior_index,
+                remote_database,
+                remote_index,
+                id,
+            )
+        });
+        if !duplicate_local
+            && !duplicate_remote
+            && let Some(entry) = remote.and_then(|history| history.get_entries().get(remote_index))
+        {
+            entries.push(entry.clone());
         }
     }
     let mut history = History::default();
@@ -1497,6 +1571,46 @@ fn merge_history(
         history.add_entry(entry);
     }
     Some(history)
+}
+
+fn histories_semantically_eq(left: &Database, right: &Database, id: UpstreamEntryId) -> bool {
+    let left_len = history_len(left, id);
+    let right_len = history_len(right, id);
+    left_len == right_len
+        && (0..left_len)
+            .all(|index| historical_entries_semantically_eq(left, index, right, index, id))
+}
+
+fn historical_entries_semantically_eq(
+    left: &Database,
+    left_index: usize,
+    right: &Database,
+    right_index: usize,
+    id: UpstreamEntryId,
+) -> bool {
+    let Some(left_entry) = left.entry(id) else {
+        return false;
+    };
+    let Some(left) = left_entry.historical(left_index) else {
+        return false;
+    };
+    let Some(right_entry) = right.entry(id) else {
+        return false;
+    };
+    let Some(right) = right_entry.historical(right_index) else {
+        return false;
+    };
+    history_entry_semantically_eq(left, right)
+}
+
+fn history_len(database: &Database, id: UpstreamEntryId) -> usize {
+    let Some(entry) = database.entry(id) else {
+        return 0;
+    };
+    entry
+        .history
+        .as_ref()
+        .map_or(0, |history| history.get_entries().len())
 }
 
 fn apply_group_icon(
@@ -1547,10 +1661,6 @@ fn local_deleted(database: &Database, id: uuid::Uuid) -> bool {
     database.deleted_objects.contains_key(&id)
 }
 
-fn set_eq<T: Eq + std::hash::Hash>(left: &[T], right: &[T]) -> bool {
-    left.iter().collect::<HashSet<_>>() == right.iter().collect::<HashSet<_>>()
-}
-
 fn entry_metadata_conflict(conflicts: &mut Vec<SyncConflict>, id: UpstreamEntryId) {
     conflicts.push(SyncConflict {
         object: SyncConflictObject::Entry(EntryId::new(id.to_string())),
@@ -1592,61 +1702,15 @@ fn history_conflict(conflicts: &mut Vec<SyncConflict>, id: UpstreamEntryId) {
     });
 }
 
-fn normalize_history_parents(
-    database: &mut Database,
-    id: UpstreamEntryId,
-    conflicts: &mut Vec<SyncConflict>,
-) -> Result<(), KdbxError> {
-    let current = database.entry(id).ok_or(KdbxError::SyncInvariant)?;
-    let Some(source_history) = current.history.clone() else {
-        return Ok(());
-    };
-    if current.attachments_named().next().is_some() || history_has_attachments(database, id) {
-        history_conflict(conflicts, id);
-        return Ok(());
-    }
-
-    let current_template = current.deref().clone();
-    let current_icon = current.icon().cloned();
-    let mut normalized = History::default();
-    for source in source_history.get_entries().iter().rev() {
-        if source.icon().cloned() != current_icon {
-            conflicts.push(SyncConflict {
-                object: SyncConflictObject::Entry(EntryId::new(id.to_string())),
-                kind: SyncConflictKind::CustomIcon,
-                field: None,
-            });
-            return Ok(());
-        }
-        let mut entry = current_template.clone();
-        entry.fields = source.fields.clone();
-        entry.autotype = source.autotype.clone();
-        entry.tags = source.tags.clone();
-        entry.times = source.times.clone();
-        entry.custom_data = source.custom_data.clone();
-        entry.foreground_color = source.foreground_color.clone();
-        entry.background_color = source.background_color.clone();
-        entry.override_url = source.override_url.clone();
-        entry.quality_check = source.quality_check;
-        entry.history = None;
-        normalized.add_entry(entry);
-    }
-    database
-        .entry_mut(id)
-        .ok_or(KdbxError::SyncInvariant)?
-        .history = Some(normalized);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::{io::Cursor, ops::Deref, path::Path};
 
-    use keepass::db::{EntryId as UpstreamEntryId, Value};
+    use keepass::db::{EntryId as UpstreamEntryId, Value, fields};
     use uuid::Uuid;
-    use vault_core::GroupId;
+    use vault_core::{GroupId, SecretString};
 
-    use super::KdbxDocument;
+    use super::{KdbxDocument, KdbxError, MergeBuilder};
 
     #[test]
     fn merged_move_roundtrips_complete_database_semantics() {
@@ -1730,17 +1794,266 @@ mod tests {
                 entry.previous_parent().map(|g| g.id()) == other.previous_parent().map(|g| g.id()),
                 "entry previous parent differs"
             );
-            assert!(entry.history == other.history, "entry history differs");
-            assert!(entry.deref() == other.deref(), "entry differs");
+            let history_len = entry
+                .history
+                .as_ref()
+                .map_or(0, |history| history.get_entries().len());
+            assert_eq!(
+                history_len,
+                super::history_len(&reopened.database, entry.id())
+            );
+            for index in 0..history_len {
+                assert!(
+                    super::historical_entries_semantically_eq(
+                        &merged.database,
+                        index,
+                        &reopened.database,
+                        index,
+                        entry.id(),
+                    ),
+                    "historical entry differs"
+                );
+            }
         }
         for group in merged.database.iter_all_groups() {
             let other = reopened.database.group(group.id()).expect("group exists");
             assert!(group.deref() == other.deref(), "group differs");
         }
-        assert!(
-            merged.database == reopened.database,
-            "auxiliary state differs"
+        assert!(super::database_semantically_eq(
+            &merged.database,
+            &reopened.database
+        ));
+    }
+
+    #[test]
+    fn base_relative_order_detects_reorder_despite_membership_changes() {
+        assert!(super::remote_reorder_would_be_lost(
+            &[1_u8, 2],
+            &[1, 2, 3],
+            &[2, 1]
+        ));
+        assert!(!super::remote_reorder_would_be_lost(
+            &[1_u8, 2],
+            &[1, 2, 3],
+            &[1, 2, 4]
+        ));
+        assert!(!super::order_changed_relative_to_base(
+            &[1_u8, 2, 3],
+            &[1, 3]
+        ));
+    }
+
+    #[test]
+    fn root_tombstone_is_invalid_sync_input() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx");
+        let mut document = KdbxDocument::open(path, "demopass").expect("fixture");
+        let root = document.database.root().id();
+        document.database.deleted_objects.insert(root.uuid(), None);
+        assert!(document.validate_for_sync().is_err());
+    }
+
+    #[test]
+    fn malformed_final_candidate_cannot_escape_as_merged() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx");
+        let base = KdbxDocument::open(&path, "demopass").expect("fixture");
+        let local = KdbxDocument::open(&path, "demopass").expect("fixture");
+        let remote = KdbxDocument::open(path, "demopass").expect("fixture");
+        let mut candidate = local.database.clone();
+        let root = candidate.root().id();
+        candidate.deleted_objects.insert(root.uuid(), None);
+        let builder = MergeBuilder {
+            base: &base.database,
+            local: &local.database,
+            remote: &remote.database,
+            candidate,
+            conflicts: Vec::new(),
+        };
+        assert!(matches!(
+            builder.into_outcome(local.version),
+            Err(KdbxError::SyncInvariant)
+        ));
+    }
+
+    #[test]
+    fn historical_previous_parent_is_serialized_and_compared() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx");
+        let mut first = KdbxDocument::open(&path, "demopass").expect("fixture");
+        let mut second = KdbxDocument::open(path, "demopass").expect("fixture");
+        let entry = first.database.root().entries().next().expect("entry").id();
+        let root = first.database.root().id();
+        let child = first.database.root().groups().next().expect("group").id();
+        let public_entry = vault_core::EntryId::new(entry.to_string());
+        let public_root = GroupId::new(root.to_string());
+        let public_child = GroupId::new(child.to_string());
+
+        first
+            .move_entry(&public_entry, &public_child)
+            .expect("move should succeed");
+        first
+            .set_entry_title(&public_entry, "historical previous parent")
+            .expect("edit should record history");
+        let first_entry = first.database.entry(entry).expect("entry");
+        assert_eq!(
+            first_entry
+                .historical(0)
+                .expect("history")
+                .previous_parent()
+                .map(|group| group.id()),
+            Some(root)
         );
+
+        second
+            .move_entry(&public_entry, &public_child)
+            .expect("first move should succeed");
+        second
+            .move_entry(&public_entry, &public_root)
+            .expect("second move should succeed");
+        second
+            .set_entry_title(&public_entry, "historical previous parent")
+            .expect("edit should record history");
+        second
+            .move_entry(&public_entry, &public_child)
+            .expect("final move should succeed");
+        assert!(!super::history_entry_semantically_eq(
+            first
+                .database
+                .entry(entry)
+                .expect("entry")
+                .historical(0)
+                .expect("history"),
+            second
+                .database
+                .entry(entry)
+                .expect("entry")
+                .historical(0)
+                .expect("history"),
+        ));
+
+        let mut output = Vec::new();
+        first.save_to_writer(&mut output, "demopass").expect("save");
+        let reopened =
+            KdbxDocument::open_reader(&mut Cursor::new(output), "demopass").expect("reopen");
+        let reopened_entry = reopened.database.entry(entry).expect("entry");
+        let reopened_history = reopened_entry.historical(0).expect("history");
+        assert_eq!(
+            reopened_history.previous_parent().map(|group| group.id()),
+            Some(root)
+        );
+        first
+            .verify_semantic_equivalence(&reopened)
+            .expect("previous parent should roundtrip semantically");
+    }
+
+    #[test]
+    fn divergent_history_with_attachments_fails_closed() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx");
+        let mut prepared = KdbxDocument::open(path, "demopass").expect("fixture");
+        let id = prepared
+            .database
+            .root()
+            .entries()
+            .next()
+            .expect("entry")
+            .id();
+        {
+            let mut entry = prepared.database.entry_mut(id).expect("entry");
+            entry.add_attachment("historical.bin", Value::protected(vec![9, 8, 7]));
+            let mut tracked = entry.track_changes();
+            tracked.set_unprotected(fields::USERNAME, "prepared history");
+        }
+        let mut input = Vec::new();
+        prepared
+            .save_to_writer(&mut input, "demopass")
+            .expect("save prepared");
+        let base = KdbxDocument::open_reader(&mut Cursor::new(&input), "demopass").expect("base");
+        let mut local =
+            KdbxDocument::open_reader(&mut Cursor::new(&input), "demopass").expect("local");
+        let mut remote =
+            KdbxDocument::open_reader(&mut Cursor::new(input), "demopass").expect("remote");
+        let public_id = vault_core::EntryId::new(id.to_string());
+        local
+            .set_entry_username(&public_id, "local first")
+            .expect("local edit");
+        local
+            .set_entry_username(&public_id, "local second")
+            .expect("local edit");
+        remote
+            .set_entry_title(&public_id, "remote first")
+            .expect("remote edit");
+        remote
+            .set_entry_title(&public_id, "remote second")
+            .expect("remote edit");
+
+        let super::KdbxDivergentMergeOutcome::Conflicted(conflicts) =
+            KdbxDocument::merge_divergent(&base, &local, &remote).expect("analysis")
+        else {
+            panic!("cross-generation historical attachments must conflict")
+        };
+        assert!(
+            conflicts
+                .iter()
+                .any(|conflict| conflict.kind() == super::SyncConflictKind::History)
+        );
+    }
+
+    #[test]
+    fn attachment_free_history_union_is_complete_deterministic_and_roundtrips() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx");
+        let base = KdbxDocument::open(&path, "demopass").expect("fixture");
+        let mut local = KdbxDocument::open(&path, "demopass").expect("fixture");
+        let mut remote = KdbxDocument::open(path, "demopass").expect("fixture");
+        let id = base.database.root().entries().next().expect("entry").id();
+        let public_id = vault_core::EntryId::new(id.to_string());
+        local
+            .set_entry_username(&public_id, "local history one")
+            .expect("local edit");
+        local
+            .set_entry_username(&public_id, "local history two")
+            .expect("local edit");
+        remote
+            .set_entry_password(
+                &public_id,
+                &SecretString::new("remote history one".to_owned()),
+            )
+            .expect("remote edit");
+        remote
+            .set_entry_password(
+                &public_id,
+                &SecretString::new("remote history two".to_owned()),
+            )
+            .expect("remote edit");
+
+        let merge_once = || {
+            let super::KdbxDivergentMergeOutcome::Merged(merged) =
+                KdbxDocument::merge_divergent(&base, &local, &remote).expect("analysis")
+            else {
+                panic!("attachment-free histories should merge")
+            };
+            merged
+        };
+        let first = merge_once();
+        let second = merge_once();
+        assert_eq!(
+            super::history_len(&first.database, id),
+            super::history_len(&base.database, id) + 3
+        );
+        first
+            .verify_semantic_equivalence(&second)
+            .expect("repeated merge should be deterministic");
+        let mut output = Vec::new();
+        first
+            .save_to_writer(&mut output, "demopass")
+            .expect("save merged");
+        let reopened =
+            KdbxDocument::open_reader(&mut Cursor::new(output), "demopass").expect("reopen");
+        first
+            .verify_semantic_equivalence(&reopened)
+            .expect("history union should roundtrip");
     }
 
     #[test]

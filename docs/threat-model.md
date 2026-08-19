@@ -88,6 +88,10 @@ information to an attacker even when their plaintext remains unavailable.
 - Concurrent password edits resolved by timestamps
 - Concurrent group moves producing cycles or an invalid root
 - Attachment, history, custom-icon, or metadata loss during synthesis
+- Root metadata silently ignored during divergent synthesis
+- Sibling reorder silently discarded when the other branch changes membership
+- Cross-generation historical attachment references bound to the wrong binary
+- An invalid synthesized candidate escaping partial hierarchy checks
 - Secret plaintext or custom-field values exposed by conflict diagnostics
 
 ## Security assumptions
@@ -256,15 +260,21 @@ Controls are:
   resurrection.
 - Different changes to independent fields or to location versus content can be
   combined. Different edits to one field and different moves conflict.
-- Group-subtree deletion checks descendants, and final hierarchy validation
-  rejects cycles or root corruption.
+- Group-subtree deletion checks descendants. Root identity/location remain
+  immutable while root metadata and child order participate in merge analysis.
+- Child ordering compares surviving BASE-relative UUID sequences. Ambiguous
+  reorder synthesis is a group-metadata conflict even when another branch also
+  adds, removes, or moves a child.
 - Attachments, history, icons, metadata, and KDBX configuration participate in
   analysis. A state the pinned dependency cannot synthesize safely fails closed
-  as a structured conflict.
+  as a structured conflict. In particular, attachment-bearing historical
+  entries are not cloned across database generations without proven rebinding.
 - Conflict descriptors carry UUIDs and optional field categories/names, never
   competing password, note, custom-field, attachment, or icon values.
-- Inputs are immutable. A merged document is returned only after the complete
-  candidate passes conflict and hierarchy analysis.
+- Inputs are immutable. After tombstones are merged, a merged document is
+  returned only after the complete candidate passes the full UUID namespace,
+  live/tombstone, reference, root, reachability, parent/child, icon, and cycle
+  validator.
 
 The engine has no conflict-resolution UI. It does not partially apply a
 conflict, upload, save, choose a side, or mutate an input. Provider/transport

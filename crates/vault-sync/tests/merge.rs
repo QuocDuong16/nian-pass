@@ -116,7 +116,13 @@ fn first_child_group(document: &KdbxDocument) -> GroupId {
 
 fn merged(outcome: MergeOutcome) -> KdbxDocument {
     match outcome {
-        MergeOutcome::Merged(document) => document.into_document(),
+        MergeOutcome::Merged(document) => {
+            let document = document.into_document();
+            document
+                .validate_for_sync()
+                .expect("merged candidate should satisfy every sync invariant");
+            document
+        }
         _ => panic!("expected an automatically merged document"),
     }
 }
@@ -215,6 +221,172 @@ fn identical_changes_are_equivalent() {
         merge(&base, &local, &remote).expect("merge should analyze"),
         MergeOutcome::Equivalent
     ));
+}
+
+#[test]
+fn root_rename_and_independent_entry_edit_merge_and_roundtrip() {
+    let (base, mut local, mut remote) = fixture_triplet();
+    let root = root_group(&base);
+    let entry = first_entry(&base);
+    local
+        .set_entry_username(&entry, "local-root-independent")
+        .expect("entry mutation should succeed");
+    remote
+        .rename_group(&root, "Remote root name")
+        .expect("root rename should succeed");
+
+    let merged = merged(merge(&base, &local, &remote).expect("merge should analyze"));
+    let projection = merged.projection().expect("merged document should project");
+    assert_eq!(projection.root().name(), "Remote root name");
+    assert_eq!(
+        projection
+            .find_entry(&entry)
+            .expect("entry should remain")
+            .username()
+            .visible(),
+        Some("local-root-independent")
+    );
+    roundtrip(&merged);
+}
+
+#[test]
+fn divergent_root_renames_conflict_without_selecting_local() {
+    let (base, mut local, mut remote) = fixture_triplet();
+    let root = root_group(&base);
+    local
+        .rename_group(&root, "Local root name")
+        .expect("local root rename should succeed");
+    remote
+        .rename_group(&root, "Remote root name")
+        .expect("remote root rename should succeed");
+
+    let MergeOutcome::Conflicted(conflicts) =
+        merge(&base, &local, &remote).expect("merge should analyze")
+    else {
+        panic!("divergent root metadata must conflict");
+    };
+    assert!(conflicts.iter().any(|conflict| {
+        conflict.kind() == MergeConflictKind::Metadata
+            && matches!(
+                conflict.object(),
+                vault_sync::MergeConflictObject::Group(id) if id == &root
+            )
+    }));
+}
+
+#[test]
+fn identical_root_rename_is_equivalent() {
+    let (base, mut local, mut remote) = fixture_triplet();
+    let root = root_group(&base);
+    local
+        .rename_group(&root, "Shared root name")
+        .expect("local root rename should succeed");
+    remote
+        .rename_group(&root, "Shared root name")
+        .expect("remote root rename should succeed");
+    assert!(matches!(
+        merge(&base, &local, &remote).expect("merge should analyze"),
+        MergeOutcome::Equivalent
+    ));
+}
+
+#[test]
+fn root_group_reorder_cannot_be_hidden_by_local_addition() {
+    let mut prepared = document();
+    let root = root_group(&prepared);
+    let first = prepared
+        .create_group(&root, "order-first")
+        .expect("first group should be created");
+    let second = prepared
+        .create_group(&root, "order-second")
+        .expect("second group should be created");
+    let prepared = bytes(&prepared);
+    let (base, mut local, mut remote) = triplet_from_bytes(&prepared);
+    local
+        .create_group(&root, "local addition")
+        .expect("local group should be created");
+    remote
+        .move_group(&first, &second)
+        .expect("temporary move should succeed");
+    remote
+        .move_group(&first, &root)
+        .expect("move back should reorder siblings");
+
+    let MergeOutcome::Conflicted(conflicts) =
+        merge(&base, &local, &remote).expect("merge should analyze")
+    else {
+        panic!("remote root reorder must not be discarded");
+    };
+    assert!(conflicts.iter().any(|conflict| {
+        conflict.kind() == MergeConflictKind::Metadata
+            && matches!(
+                conflict.object(),
+                vault_sync::MergeConflictObject::Group(id) if id == &root
+            )
+    }));
+}
+
+#[test]
+fn entry_reorder_cannot_be_hidden_by_local_addition() {
+    let mut prepared = document();
+    let root = root_group(&prepared);
+    let parent = prepared
+        .create_group(&root, "ordered entries")
+        .expect("parent group should be created");
+    let first = prepared
+        .create_entry(
+            &parent,
+            NewEntry {
+                title: "first",
+                username: "",
+                url: "",
+                password: None,
+            },
+        )
+        .expect("first entry should be created");
+    prepared
+        .create_entry(
+            &parent,
+            NewEntry {
+                title: "second",
+                username: "",
+                url: "",
+                password: None,
+            },
+        )
+        .expect("second entry should be created");
+    let prepared = bytes(&prepared);
+    let (base, mut local, mut remote) = triplet_from_bytes(&prepared);
+    local
+        .create_entry(
+            &parent,
+            NewEntry {
+                title: "local addition",
+                username: "",
+                url: "",
+                password: None,
+            },
+        )
+        .expect("local entry should be created");
+    remote
+        .move_entry(&first, &root)
+        .expect("temporary move should succeed");
+    remote
+        .move_entry(&first, &parent)
+        .expect("move back should reorder siblings");
+
+    let MergeOutcome::Conflicted(conflicts) =
+        merge(&base, &local, &remote).expect("merge should analyze")
+    else {
+        panic!("remote entry reorder must not be discarded");
+    };
+    assert!(conflicts.iter().any(|conflict| {
+        conflict.kind() == MergeConflictKind::Metadata
+            && matches!(
+                conflict.object(),
+                vault_sync::MergeConflictObject::Group(id) if id == &parent
+            )
+    }));
 }
 
 #[test]
@@ -503,11 +675,27 @@ fn concurrent_independent_entry_creation_preserves_both() {
             },
         )
         .expect("remote entry should be created");
-    let merged = merged(merge(&base, &local, &remote).expect("merge should analyze"));
-    let projection = merged.projection().expect("merged document should project");
+    let merged_document = merged(merge(&base, &local, &remote).expect("merge should analyze"));
+    let repeated = merged(merge(&base, &local, &remote).expect("repeat should analyze"));
+    merged_document
+        .verify_semantic_equivalence(&repeated)
+        .expect("concurrent-addition ordering should be deterministic");
+    let projection = merged_document
+        .projection()
+        .expect("merged document should project");
     assert!(projection.find_entry(&local_id).is_some());
     assert!(projection.find_entry(&remote_id).is_some());
-    roundtrip(&merged);
+    let entries = projection.root().entries();
+    let local_position = entries
+        .iter()
+        .position(|entry| entry.id() == &local_id)
+        .expect("local addition should be ordered");
+    let remote_position = entries
+        .iter()
+        .position(|entry| entry.id() == &remote_id)
+        .expect("remote addition should be ordered");
+    assert!(local_position < remote_position);
+    roundtrip(&merged_document);
 }
 
 #[test]

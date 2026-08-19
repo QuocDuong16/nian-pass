@@ -60,7 +60,7 @@ mean every feature in that database version is supported or tested.
 | Empty fields | Partially verified | Empty entry titles are asserted in KDBX 3.1 and KDBX 4.0; M2.5 preserves absent versus explicit-empty username/URL and secret reads preserve absent versus explicit-empty password, notes, and custom values |
 | Unicode | Partially externally verified | A title containing Vietnamese, Japanese, emoji, and a combining character is written by Nian Pass, read by KeePassXC, resaved, and reopened unchanged; the source fixture has no externally created Unicode case |
 | Custom fields | Self-roundtrip verified | Metadata-only listing excludes values and reserved fields; explicit protected/unprotected reads preserve missing versus empty; add/update/delete preserves protection and tracked history |
-| Entry history | Partially externally verified | Nian Pass and KeePassXC title mutations each append exactly one prior-state history item and preserve it through the external round-trip; M2.5 custom add/update/delete preserves prior absence/value/protection; the fixture has no pre-existing external history |
+| Entry history | Partially externally verified; sync hardening self-tested | Nian Pass and KeePassXC title mutations each append exactly one prior-state history item and preserve it through the external round-trip; attachment-free divergent history is semantically deduplicated and roundtrips deterministically; serialized historical `PreviousParentGroup` participates in equality; cross-generation attachment-bearing history fails closed |
 | Entry modification timestamp | Partially externally verified | Both tracked title mutations update `LastModificationTime`; KeePassXC `edit` also updates `LastAccessTime`, and other time fields are asserted unchanged |
 | Attachments | Sync self-roundtrip verified | An independently added protected attachment plus an unrelated field edit is merged, saved, reopened, and compared semantically; attachment UI is not implemented |
 | Tags | Externally verified for fixture | The externally created three-element tag vector, including order, survives Nian Pass save and KeePassXC resave |
@@ -165,12 +165,17 @@ header material.
 | Deletion/tombstones | Verified | Delete-unchanged, concurrent delete, delete-versus-modify, recursive group-deletion conflict, and saved/reopened tombstones are covered |
 | Entry/group moves | Verified | Move plus field edit and group rename plus entry edit merge; different moves and a concurrent hierarchy cycle conflict |
 | Concurrent creation | Verified | Different entry UUIDs coexist deterministically; different additions with the same UUID conflict |
+| Root group semantics | Verified | Divergent root metadata participates in three-way merge; independent root rename and entry edit survive, while different root renames conflict. Root identity/location remain immutable |
+| Child ordering | Preservation or fail-closed verified | Surviving BASE-relative entry/group order is analyzed independently from membership; reorder plus concurrent addition conflicts rather than silently retaining LOCAL order. LOCAL order is retained and REMOTE-only additions append in UUID order when neither side reorders BASE children |
+| Entry history synthesis | Preservation or fail-closed verified | Attachment-free history union is deterministic and roundtrips; historical `PreviousParentGroup` survives save/reopen; attachment-bearing history requiring cross-database import returns a structured history conflict |
+| Final merged invariants | Verified | A deliberately malformed synthesized candidate is rejected by the complete sync validator before `Merged` can be returned |
 | Attachments and icons | Preservation or fail-closed verified | Attachment addition and existing-icon preservation roundtrip; unrepresentable new custom-icon identity returns conflict |
 | Merged output → KeePassXC open | Externally verified when harness runs | The compatibility harness writes an independent username/title merge and KeePassXC `db-info` opens it; this proves format interoperability, not the merge policy |
 
-Conflict-free synthesis is not claimed. Attachment-bearing history that must be
-re-parented and remote-only custom-icon UUID creation are conservatively
-rejected where `keepass-rs` 0.13.21 lacks a safe public construction path.
+Conflict-free synthesis is not claimed. Ambiguous sibling reorders,
+attachment-bearing history that would require cross-database reference
+rebinding, and remote-only custom-icon UUID creation are conservatively rejected
+where `keepass-rs` 0.13.21 lacks a proven safe construction path.
 
 ### External KeePassXC interoperability
 
