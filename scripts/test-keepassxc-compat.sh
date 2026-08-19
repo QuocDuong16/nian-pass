@@ -39,3 +39,8 @@ NIAN_PASS_REQUIRE_KEEPASSXC=1 timeout 180s \
     cargo test --locked -p kdbx \
     external_keepassxc_roundtrip_preserves_semantics -- \
     --ignored --nocapture --test-threads=1
+
+NIAN_PASS_REQUIRE_KEEPASSXC=1 timeout 180s \
+    cargo test --locked -p vault-sync \
+    external_keepassxc_opens_merged_output -- \
+    --ignored --nocapture --test-threads=1

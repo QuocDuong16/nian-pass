@@ -1,15 +1,13 @@
 [package]
-name = "kdbx"
+name = "vault-sync"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "KDBX adapter for Nian Pass"
+description = "Provider-independent three-way KDBX merge engine for Nian Pass"
 
 [dependencies]
-chrono.workspace = true
-keepass.workspace = true
+kdbx = { path = "../kdbx" }
 thiserror.workspace = true
-uuid.workspace = true
 vault-core.workspace = true
 
 [lib]

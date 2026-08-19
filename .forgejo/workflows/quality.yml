@@ -107,8 +107,8 @@ jobs:
             gcc-mingw-w64-x86-64
           rustup target add x86_64-pc-windows-gnu
 
-      - name: Check vault-session for Windows
-        run: cargo check --locked --all-targets --target x86_64-pc-windows-gnu -p vault-session
+      - name: Check persistence and sync crates for Windows
+        run: cargo check --locked --all-targets --target x86_64-pc-windows-gnu -p vault-session -p vault-sync
 
   keepassxc-compat:
     runs-on: docker

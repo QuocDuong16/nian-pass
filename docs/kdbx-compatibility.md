@@ -62,11 +62,11 @@ mean every feature in that database version is supported or tested.
 | Custom fields | Self-roundtrip verified | Metadata-only listing excludes values and reserved fields; explicit protected/unprotected reads preserve missing versus empty; add/update/delete preserves protection and tracked history |
 | Entry history | Partially externally verified | Nian Pass and KeePassXC title mutations each append exactly one prior-state history item and preserve it through the external round-trip; M2.5 custom add/update/delete preserves prior absence/value/protection; the fixture has no pre-existing external history |
 | Entry modification timestamp | Partially externally verified | Both tracked title mutations update `LastModificationTime`; KeePassXC `edit` also updates `LastAccessTime`, and other time fields are asserted unchanged |
-| Attachments | Not yet tested | Not exposed by the minimal domain projection |
+| Attachments | Sync self-roundtrip verified | An independently added protected attachment plus an unrelated field edit is merged, saved, reopened, and compared semantically; attachment UI is not implemented |
 | Tags | Externally verified for fixture | The externally created three-element tag vector, including order, survives Nian Pass save and KeePassXC resave |
 | Notes | Partially verified | Exact non-empty and explicit-empty synthetic notes values can be fetched by entry UUID through `SecretString`, distinct from an absent field; notes editing and large-note behavior are not tested |
 | Deleted objects | Self-roundtrip verified | Permanent entry deletion creates one UUID/timestamp tombstone; recursive group deletion creates tombstones for every descendant entry and group and preserves them after reopen |
-| Custom icons | Partially verified | Recursive group deletion cleans one synthetic group-icon back-reference and preserves the complete parsed database after reopen; public icon editing is not implemented |
+| Custom icons | Sync preservation self-roundtrip verified | An existing synthetic custom icon survives independent field merge and reopen; remote-only creation with a UUID the pinned API cannot install fails closed as a conflict instead of regenerating identity |
 | Protected values | Externally verified for fixture | Both existing password fields remain protected through Nian Pass save and KeePassXC resave; plaintext values are never logged |
 | Group metadata | Self-roundtrip and externally verified for fixture | Existing complete parsed equality covers UUIDs, hierarchy/order, notes, tags, times, icons, and custom data represented by `keepass-rs`; M2.5 create/rename/move preserves defaults and rejects root/self/descendant cycles |
 
@@ -148,6 +148,29 @@ remain accurately unverified.
 | Semantic reopen after filesystem replacement | Verified on Linux | One stable final generation is hashed, parsed, hashed again, matched to the current path, and compared with the complete in-memory `Database`; only its paired fingerprint becomes the baseline |
 | Windows local write persistence | Explicitly unsupported | Dirty save fails closed with `UnsupportedPersistencePlatform` before transaction I/O because DACL-preserving replacement is not yet proven under the safe-Rust policy. A Windows cross-compile CI gate and cfg-Windows fail-closed test are present; no Windows runtime claim is made |
 | Keyfile-based writing | Not implemented | Credential API is password-only |
+
+## Three-way sync compatibility
+
+M3.5 operates on already-opened BASE, LOCAL, and REMOTE documents. Equivalent
+and one-sided generations are recognized for every readable version, but a new
+synthesized document is restricted to exact KDBX 4.1 because that is the only
+proven writer format. It does not compare ciphertext, file mtime, or random KDBX
+header material.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| BASE/LOCAL/REMOTE fast-forward | Verified | Both one-sided directions and identical independent changes are covered |
+| Independent entry fields | Verified | Username/password and independent protected/unprotected custom fields merge and full semantic output reopens |
+| Same-field divergent edit | Verified conflict | Password values are absent from conflict diagnostics; field identity only is explicit |
+| Deletion/tombstones | Verified | Delete-unchanged, concurrent delete, delete-versus-modify, recursive group-deletion conflict, and saved/reopened tombstones are covered |
+| Entry/group moves | Verified | Move plus field edit and group rename plus entry edit merge; different moves and a concurrent hierarchy cycle conflict |
+| Concurrent creation | Verified | Different entry UUIDs coexist deterministically; different additions with the same UUID conflict |
+| Attachments and icons | Preservation or fail-closed verified | Attachment addition and existing-icon preservation roundtrip; unrepresentable new custom-icon identity returns conflict |
+| Merged output → KeePassXC open | Externally verified when harness runs | The compatibility harness writes an independent username/title merge and KeePassXC `db-info` opens it; this proves format interoperability, not the merge policy |
+
+Conflict-free synthesis is not claimed. Attachment-bearing history that must be
+re-parented and remote-only custom-icon UUID creation are conservatively
+rejected where `keepass-rs` 0.13.21 lacks a safe public construction path.
 
 ### External KeePassXC interoperability
 

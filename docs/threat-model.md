@@ -1,8 +1,9 @@
 # Threat Model
 
-This is the threat model for the M3 local vault session and safe filesystem
-persistence foundation. It records boundaries and assumptions; it is not a
-claim that Nian Pass is ready to protect production credentials.
+This is the threat model for the M3 local vault session/filesystem foundation
+and the M3.5 provider-independent merge core. It records boundaries and
+assumptions; it is not a claim that Nian Pass is ready to protect production
+credentials.
 
 ## Secret material
 
@@ -80,6 +81,14 @@ information to an attacker even when their plaintext remains unavailable.
 - Invalid group moves that create hierarchy cycles
 - Custom-field values copied into bulk projections or diagnostics
 - Standard, TOTP, or passkey fields mutated through a generic custom-field API
+- Silent file-level last-writer-wins during synchronization
+- An incorrect common BASE causing invalid change classification
+- Deletion resurrection when absence is mistaken for an unchanged object
+- Delete-versus-modify data loss
+- Concurrent password edits resolved by timestamps
+- Concurrent group moves producing cycles or an invalid root
+- Attachment, history, custom-icon, or metadata loss during synthesis
+- Secret plaintext or custom-field values exposed by conflict diagnostics
 
 ## Security assumptions
 
@@ -129,9 +138,10 @@ copies made by the operating system, swap, allocator, runtime, compiler, or
 dependencies. A compromised process while the vault is unlocked can still read
 decrypted dependency state and any explicitly exposed secret.
 
-M3 still does not address clipboard access, locked-memory allocation, process
-hardening, cloud conflict merge, sync, or dependency attestation. The project
-must not claim resistance to those threats yet.
+M3.5 still does not address clipboard access, locked-memory allocation, process
+hardening, cloud transport/provider behavior, base-generation storage, or
+dependency attestation. The project must not claim resistance to those threats
+yet.
 
 M2.5 confines experimental mutation to an opaque `KdbxDocument` retaining the
 complete `keepass-rs` representation. It never serializes from the incomplete
@@ -226,6 +236,40 @@ replacement failure, pre-existing backup preservation, post-primary backup
 failure, post-replacement handling, and directory-sync uncertainty. They assert
 exact source/backup byte preservation, dirty revision retention, and
 transaction-temp cleanup where applicable.
+
+## M3.5 merge threats and controls
+
+M3.5 requires the caller to supply the last generation known common to both
+sides. Selecting that BASE correctly remains a future provider/application
+responsibility. The engine never infers BASE from mtime, file size, ciphertext,
+or a newer-looking object timestamp.
+
+Controls are:
+
+- Entry and group UUIDs are identity; titles, names, paths, and ordering indexes
+  are never identity.
+- Changes are classified independently against BASE. Entry fields compare both
+  plaintext semantics and protected/unprotected state inside the sealed KDBX
+  adapter.
+- Deletion requires represented `DeletedObjects` state. Concurrent
+  delete-versus-modify is an explicit conflict rather than deletion or
+  resurrection.
+- Different changes to independent fields or to location versus content can be
+  combined. Different edits to one field and different moves conflict.
+- Group-subtree deletion checks descendants, and final hierarchy validation
+  rejects cycles or root corruption.
+- Attachments, history, icons, metadata, and KDBX configuration participate in
+  analysis. A state the pinned dependency cannot synthesize safely fails closed
+  as a structured conflict.
+- Conflict descriptors carry UUIDs and optional field categories/names, never
+  competing password, note, custom-field, attachment, or icon values.
+- Inputs are immutable. A merged document is returned only after the complete
+  candidate passes conflict and hierarchy analysis.
+
+The engine has no conflict-resolution UI. It does not partially apply a
+conflict, upload, save, choose a side, or mutate an input. Provider/transport
+races, multi-writer BASE selection, explicit manual resolution, and safe
+installation through `VaultSession` remain outside M3.5.
 
 ## M3 residual risks
 

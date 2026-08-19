@@ -4,6 +4,8 @@
 //! implementation. Callers receive only adapter-owned types and `vault_core`
 //! domain values.
 
+mod sync;
+
 use std::{
     fmt,
     fs::File,
@@ -20,6 +22,11 @@ use thiserror::Error;
 use vault_core::{
     CustomFieldSummary, EntryId, EntrySummary, FieldProtection, Group, GroupId, NewEntry,
     SecretString, SummaryText, Vault,
+};
+
+pub use sync::{
+    KdbxDivergentMergeOutcome, SyncConflict, SyncConflictField, SyncConflictFieldKind,
+    SyncConflictKind, SyncConflictObject, SyncConflictSet,
 };
 
 const PASSKEY_FIELD_PREFIX: &str = "KPEX_PASSKEY";
@@ -599,17 +606,29 @@ impl KdbxDocument {
         self.database.save(destination, key).map_err(map_save_error)
     }
 
-    /// Verifies exact parsed KDBX semantic equivalence without exposing the
-    /// underlying `keepass-rs` database representation.
+    /// Verifies exact represented KDBX semantic equivalence without exposing
+    /// the underlying `keepass-rs` database representation.
     ///
     /// Ciphertext is deliberately not compared because fresh salts, seeds,
     /// nonces, and authentication data are expected after serialization.
+    /// Dependency-internal attachment indexes and reverse-reference caches are
+    /// compared through their referenced values rather than allocator-local
+    /// identifiers because the writer reconstructs them during serialization.
     pub fn verify_semantic_equivalence(&self, other: &Self) -> Result<(), KdbxError> {
-        if self.version == other.version && self.database == other.database {
+        if self.version == other.version
+            && sync::database_semantically_eq(&self.database, &other.database)
+        {
             Ok(())
         } else {
             Err(KdbxError::VerificationFailed)
         }
+    }
+
+    /// Returns complete represented semantic equality without exposing dependency types.
+    #[must_use]
+    pub fn semantically_equals(&self, other: &Self) -> bool {
+        self.version == other.version
+            && sync::database_semantically_eq(&self.database, &other.database)
     }
 
     fn ensure_writable_format(&self) -> Result<(), KdbxError> {
@@ -854,6 +873,10 @@ pub enum KdbxError {
     /// Parsed KDBX state differs after a preservation-sensitive round trip.
     #[error("serialized vault did not preserve database semantics")]
     VerificationFailed,
+
+    /// An internally synthesized sync candidate violated a required invariant.
+    #[error("the parsed KDBX state could not be merged safely")]
+    SyncInvariant,
 }
 
 /// Opens a KDBX database with a master password and returns a secret-free

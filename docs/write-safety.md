@@ -61,7 +61,10 @@ For a dirty session, M3 performs this order:
 6. Explicitly flush the buffer and `sync_all` the temp file.
 7. Reopen the temp with the supplied credential and compare exact KDBX version
    plus the complete parsed `keepass::Database` semantics through a narrow
-   adapter API.
+   adapter API. The comparator follows represented attachment names, values,
+   protection state, and icon UUID/content while normalizing dependency-internal
+   attachment indexes and derived reverse-reference caches rebuilt by the
+   writer.
 8. Stream-fingerprint the primary a second time and require the original
    baseline.
 9. Restrict/preserve applicable source permissions on the verified temp and

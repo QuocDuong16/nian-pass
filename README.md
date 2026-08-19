@@ -19,9 +19,26 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M3 — Local Vault Session & Safe Filesystem Persistence
+M3.5 — Conflict-safe Sync Engine
 
-The workspace now contains a local `VaultSession` that owns one canonical
+The workspace now includes `vault-sync`, a synchronous provider-independent
+three-way semantic merge core. Callers supply an explicit last common BASE plus
+already-opened LOCAL and REMOTE `KdbxDocument` values. UUID identity,
+deleted-object tombstones, field protection, hierarchy location, history,
+attachments, custom icons, and database metadata participate in analysis.
+Independent field/location changes can merge; same-field divergence,
+delete-versus-modify, different moves, UUID collisions, subtree deletion
+conflicts, invalid hierarchy, and unsupported synthesis return structured
+value-free conflicts. There is no intentional timestamp/file-level
+last-writer-wins fallback and conflicted analysis returns no partial document.
+
+M3.5 has no provider, network transport, base cache, background task, UI, or
+automatic save behavior. A future application remains responsible for opening
+the encrypted generations, selecting the correct BASE, and installing a
+successful merged document through the safe persistence boundary.
+
+M3 remains complete: the workspace contains a local `VaultSession` that owns
+one canonical
 existing regular-file target, an unlocked `KdbxDocument`, a complete encrypted
 file SHA-256 baseline, and the last safely saved mutation revision. It detects
 external changes optimistically, rejects a wrong ordinary-save credential,
@@ -55,9 +72,9 @@ plus the exact external KeePassXC creation/open and title-mutation pipelines
 recorded in the compatibility matrix.
 
 There is no CLI mutation command and no raw database escape hatch. Product-level
-recycle-bin behavior, notes editing, TOTP, attachments, icons, expiry editing,
-history restore, duplicate, bulk operations, search, UI, sync, and server
-features remain out of scope.
+recycle-bin behavior, notes editing, TOTP, attachment/icon UI, expiry editing,
+history restore, duplicate, bulk operations, search, UI, cloud providers,
+network sync, and server features remain out of scope.
 KDBX 3.1 and 4.0 writing are deliberately rejected rather than upgraded or
 rewritten.
 
@@ -100,8 +117,9 @@ missing external binary is a failure rather than a skip.
 See [the architecture](docs/architecture.md) and
 [threat model](docs/threat-model.md) for the current boundaries and known gaps.
 
-Nian Pass remains experimental and is not production-ready. There is no
-UI, cloud sync or merge, file watcher, autosave timer, keyfile support, master-
+Nian Pass remains experimental and is not production-ready. There is no UI,
+cloud transport/provider integration, manual conflict-resolution UI, file
+watcher, autosave timer, keyfile support, master-
 password rotation, biometric unlock, or guaranteed zeroization of all decrypted
 allocations owned by `keepass-rs`. The CLI remains read-only. Local persistence
 uses optimistic conflict detection rather than cooperative or distributed

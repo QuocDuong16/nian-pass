@@ -1,15 +1,19 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M3 adds an unlocked local session and verified filesystem
-persistence around the M2.5 preservation architecture without adding a UI,
-background service, or synchronization layer.
+the source of truth. M3 provides an unlocked local session and verified
+filesystem persistence. M3.5 adds provider-independent, synchronous three-way
+semantic merge without adding a UI, transport, cloud provider, or background
+service.
 
 ## Dependency direction
 
 ```text
 future UI
- └── vault-session
+ ├── vault-session
+ │    ├── kdbx
+ │    └── vault-core
+ └── vault-sync
       ├── kdbx
       └── vault-core
 
@@ -35,6 +39,41 @@ fingerprint, saved revision, backup policy, conflict checks, and save
 transaction. It accepts `SecretString` credentials at open/save boundaries but
 does not retain them. It exposes `KdbxDocument` only through the adapter's
 narrow public API; no `keepass::Database`, entry, or group type escapes.
+
+`crates/vault-sync` owns only BASE/LOCAL/REMOTE orchestration, fast-forward
+classification, and dependency-neutral conflict descriptors. It has no
+filesystem, credential, async runtime, provider, or `vault-session` dependency.
+The narrow sync adapter inside `kdbx` clones and synthesizes the complete
+private parsed database so neither `keepass` types nor a partial `Vault`
+projection become a merge model.
+
+```text
+last common BASE ─┐
+current LOCAL ────┼─→ vault-sync ─→ merged KdbxDocument or conflict set
+current REMOTE ───┘
+```
+
+UUID is the only entry/group identity. The merge validates exact KDBX versions,
+recognizes equivalent and one-sided generations, indexes groups, entries,
+icons, and tombstones, then analyzes divergent KDBX 4.1 documents. Entry fields
+(including protected state), location, attachments, history, and metadata are
+merged independently when BASE proves that edits do not overlap. Groups use
+the same property/location rule. Tombstones turn absence into an intentional
+deletion; absence without a tombstone is rejected rather than guessed.
+
+Delete-versus-modify, different same-field edits, different moves, UUID
+collisions, deleted-subtree changes, hierarchy cycles, and unsupported
+auxiliary-state synthesis return structured conflicts and no partial document.
+Maps are indexed by UUID, concurrent additions are installed in UUID order,
+history union removes exact duplicates, and synthesized times use only source
+timestamps. No wall clock, mtime, ciphertext ordering, or last-writer-wins
+policy resolves ambiguity.
+
+Semantic equality compares attachment names, values, protection state, and icon
+UUID/content while normalizing `keepass-rs` attachment indexes and derived
+reverse-reference caches. Those process-local implementation details are
+reconstructed by the writer and are not used as sync identity; represented
+orphan binary values remain part of the comparison.
 
 ```text
 .kdbx
@@ -231,6 +270,10 @@ KDF, cipher, or compression migration.
 22. **A session baseline must identify the exact final generation that was parsed and semantically verified.**
 23. **The previous-version backup advances only after a new primary generation is installed and verified.**
 24. **A platform without security-preserving replacement must reject persistence rather than widen access or direct-write the primary.**
+25. **Semantic sync requires one explicit common BASE plus immutable LOCAL and REMOTE inputs.**
+26. **Ambiguous concurrent changes must return conflicts, never timestamp/file-level last-writer-wins.**
+27. **Tombstones, not absence alone, establish intentional deletion.**
+28. **A conflicted merge must not return or install a partially synthesized database.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.
