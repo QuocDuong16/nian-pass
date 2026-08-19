@@ -96,6 +96,7 @@ pub struct KdbxDocument {
     version: KdbxVersion,
     database: Database,
     revision: u64,
+    revision_permanently_dirty: bool,
 }
 
 impl KdbxDocument {
@@ -119,6 +120,7 @@ impl KdbxDocument {
             version,
             database,
             revision: 0,
+            revision_permanently_dirty: false,
         })
     }
 
@@ -130,12 +132,24 @@ impl KdbxDocument {
 
     /// Returns the process-local monotonic mutation revision.
     ///
-    /// The revision starts at zero for every open, increments exactly once for
-    /// each successful real mutation, saturates instead of wrapping, and is
-    /// never serialized into KDBX output.
+    /// The revision starts at zero for every open, advances once for each
+    /// successful real mutation, saturates instead of wrapping, and is never
+    /// serialized into KDBX output. Use [`Self::has_changes_since`] for the
+    /// overflow-aware dirty comparison.
     #[must_use]
     pub const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Returns whether this document differs from a previously saved revision.
+    ///
+    /// Once the numeric counter saturates, the first further real mutation
+    /// makes the document permanently dirty for its remaining lifetime. This
+    /// avoids a wrapped or saturated counter ever making new edits appear
+    /// clean.
+    #[must_use]
+    pub const fn has_changes_since(&self, saved_revision: u64) -> bool {
+        self.revision_permanently_dirty || self.revision != saved_revision
     }
 
     /// Builds a secret-free presentation projection of the current state.
@@ -659,7 +673,11 @@ impl KdbxDocument {
     }
 
     fn mark_changed(&mut self) {
-        self.revision = self.revision.saturating_add(1);
+        if self.revision == u64::MAX {
+            self.revision_permanently_dirty = true;
+        } else {
+            self.revision += 1;
+        }
     }
 
     fn missing_field_is_protected(&self, policy: MissingFieldProtection) -> bool {
@@ -4580,10 +4598,13 @@ mod tests {
         assert_eq!(document.revision(), 10);
 
         document.revision = u64::MAX;
+        document.revision_permanently_dirty = false;
+        assert!(!document.has_changes_since(u64::MAX));
         document
             .set_entry_title(&entry_id, "revision title after saturation")
             .expect("mutation at saturated revision should succeed");
         assert_eq!(document.revision(), u64::MAX);
+        assert!(document.has_changes_since(u64::MAX));
     }
 
     #[test]

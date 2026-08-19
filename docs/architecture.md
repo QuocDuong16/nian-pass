@@ -53,11 +53,13 @@ KdbxDocument
   ↓
 verified same-directory temp
   ↓
-backup exact previous ciphertext
+prepared exact previous ciphertext
   ↓
 atomic primary replacement
   ↓
 verified final .kdbx
+  ↓
+committed previous-generation backup
 ```
 
 The adapter's read API returns an `OpenedVault` containing the `Vault`
@@ -169,19 +171,33 @@ The document never stores the master password; credentials are supplied again
 when saving. Its writer-first API cannot open or overwrite a path.
 
 M3 adds a process-local saturating `u64` revision to `KdbxDocument`. Every real
-successful logical mutation increments exactly once; same-value, same-parent,
-missing-field deletion, and failed operations do not increment. Recursive group
-deletion is clone-then-commit and counts as one revision. The revision starts at
-zero on open, is not serialized, and `save_to_writer()` never resets it.
+successful logical mutation advances change state exactly once; same-value,
+same-parent, missing-field deletion, and failed operations do not increment.
+Recursive group deletion is clone-then-commit and counts as one revision. The
+revision starts at zero on open, is not serialized, and `save_to_writer()`
+never resets it. A real mutation attempted after numeric saturation sets a
+sticky permanently-dirty state, so saturation can never make a new edit appear
+clean.
 
 `VaultSession` captures `saved_revision` on stable open and after a verified
-primary replacement. `is_dirty()` compares the current document revision with
-that saved value. The session never autosaves on `Drop`; `lock(self)` only
-consumes and drops the decrypted representation.
+primary replacement. `is_dirty()` delegates to the document's overflow-aware
+comparison. The session never autosaves on `Drop`; `lock(self)` only consumes
+and drops the decrypted representation.
+
+Final verification returns a parsed document and fingerprint from one stable
+generation. That generation is hashed and parsed through one handle, hashed
+again through that handle, and compared with the current path. Only after full
+semantic equality does the session accept the paired fingerprint. The prepared
+backup is committed afterward, so failed pre-primary transactions cannot
+advance recovery history. Windows dirty saves currently fail closed because M3
+does not yet have a safe-Rust, runtime-proven replacement path that preserves
+the destination security descriptor.
 
 M3 accepts in-memory mutations for opened KDBX 3.1 and 4.0 documents so dirty
-state remains meaningful, but persistence still calls the pinned writer and
-returns `UnsupportedWriteFormat`. It never upgrades those files.
+state remains meaningful. On supported write platforms, persistence still calls
+the pinned writer and returns `UnsupportedWriteFormat`. It never upgrades those
+files. Windows rejects all dirty saves earlier with
+`UnsupportedPersistencePlatform`.
 
 The pinned writer only accepts exact KDBX 4.1. The adapter therefore returns
 `UnsupportedWriteFormat` for KDBX 3.1 and 4.0 and performs no silent format,
@@ -210,6 +226,9 @@ KDF, cipher, or compression migration.
 19. **Ordinary save must authenticate against the unchanged current source and must never act as master-password rotation.**
 20. **The primary path must never be truncated or removed before a complete verified replacement exists.**
 21. **External source fingerprint mismatch must preserve both the external file and dirty in-memory edits.**
+22. **A session baseline must identify the exact final generation that was parsed and semantically verified.**
+23. **The previous-version backup advances only after a new primary generation is installed and verified.**
+24. **A platform without security-preserving replacement must reject persistence rather than widen access or direct-write the primary.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.

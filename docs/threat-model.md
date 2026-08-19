@@ -176,7 +176,10 @@ M3 explicitly considers process crash during save, power loss, disk full, temp
 serialization failure, a wrong password supplied to ordinary save, external
 editors changing the vault before or during save, stale-source overwrite,
 unsafe Windows delete-then-rename behavior, partial/corrupt backup writes,
-symlink/path substitution, and silently discarded dirty sessions.
+destination DACL loss during Windows temp replacement, a failed attempt
+advancing the recovery generation, post-verification path replacement being
+accepted as a new baseline, symlink/path substitution, and silently discarded
+dirty sessions.
 
 Controls are:
 
@@ -193,26 +196,36 @@ Controls are:
   synced before commit.
 - The serialized temp must reopen with the credential and match the in-memory
   document's exact version and complete parsed `Database` semantics. The final
-  installed primary undergoes the same semantic check.
+  installed primary undergoes the same semantic check through a stable-open
+  helper. Its accepted fingerprint comes from the exact handle generation that
+  was hashed, parsed, hashed again, and matched to the current path.
 - Exactly one previous-version backup is copied from source ciphertext through
-  its own verified temp and atomically replaced. Backup failure aborts before
-  primary replacement; recovery is never automatic.
+  its own verified temp. It is committed only after the new primary is installed
+  and verified, so failed pre-primary saves retain the previous successful
+  recovery generation. A post-primary backup commit failure leaves the verified
+  primary/session clean and returns `SavedButBackupUpdateFailed`; recovery is
+  never automatic.
 - All namespace replacement goes through one platform helper. There is no
   delete-destination-then-rename or unsafe direct-write fallback. Unix syncs the
-  parent directory after backup and primary replacement.
+  parent directory after primary and backup replacement. Windows dirty save
+  fails closed with `UnsupportedPersistencePlatform` until security-preserving
+  replacement is available under the workspace's safe-Rust policy.
 - If primary replacement succeeds but parent-directory sync fails, the final
   target is inspected and the session baseline is reconciled before returning
   `DurabilityUncertain`; this is not reported as a pre-commit failure.
 - Revision-based dirty tracking is automatic for all public document mutations.
   No-op and failed operations stay clean, successful logical mutations increment
-  once, `save_to_writer` cannot clear dirty state, and drop never autosaves.
+  once, a mutation after numeric saturation sets a sticky permanently-dirty
+  state, `save_to_writer` cannot clear dirty state, and drop never autosaves.
 - Final-component symlinks and all non-regular sources are rejected. A backup
   symlink is also rejected immediately before replacement.
 
 Fault-injection tests cover every named pre-replacement phase, serialization
-failure, temp verification failure, backup failure, post-replacement handling,
-and directory-sync uncertainty. They assert exact source-byte preservation,
-dirty revision retention, and transaction-temp cleanup where applicable.
+failure, temp verification failure, final-generation replacement, primary
+replacement failure, pre-existing backup preservation, post-primary backup
+failure, post-replacement handling, and directory-sync uncertainty. They assert
+exact source/backup byte preservation, dirty revision retention, and
+transaction-temp cleanup where applicable.
 
 ## M3 residual risks
 
@@ -223,10 +236,11 @@ cloud-folder agents would not honor it. It never auto-reloads or merges on a
 conflict.
 
 Directory `sync_all` and atomic rename behavior depend on the operating system
-and filesystem. Windows replacement is implemented without a delete gap but is
-not runtime-verified in M3, and Windows has no stable Rust parent-directory sync
-used here. Network shares, removable media, and cloud-synchronized folders may
-reject the primitive; M3 returns an error instead of downgrading safety.
+and filesystem. Windows open/read is supported, but write persistence is
+explicitly disabled rather than risk losing the destination DACL or using a
+delete gap; its fail-closed test is present but has not run on Windows in this
+milestone. Network shares, removable media, and cloud-synchronized folders may
+reject the Unix primitive; M3 returns an error instead of downgrading safety.
 
 Locking or dropping the session releases the decrypted database representation,
 but ordinary `keepass-rs` strings are not comprehensively zeroized. M3 does not

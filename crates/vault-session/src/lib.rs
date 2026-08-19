@@ -39,29 +39,13 @@ impl VaultSession {
     /// is fingerprinted once more, so an unstable source cannot seed a session.
     pub fn open(path: impl AsRef<Path>, credential: &SecretString) -> Result<Self, SessionError> {
         let path = canonical_regular_file(path.as_ref())?;
-        let mut source = File::open(&path).map_err(SessionError::ReadSource)?;
-        ensure_handle_regular(&source)?;
-
-        let fingerprint_before =
-            FileFingerprint::from_reader(&mut source).map_err(SessionError::ReadSource)?;
-        source
-            .seek(SeekFrom::Start(0))
-            .map_err(SessionError::ReadSource)?;
-        let document = KdbxDocument::open_reader(&mut source, credential.expose_secret())
-            .map_err(SessionError::Kdbx)?;
-        let fingerprint_after =
-            FileFingerprint::from_reader(&mut source).map_err(SessionError::ReadSource)?;
-
-        if fingerprint_before != fingerprint_after || fingerprint_before != fingerprint_path(&path)?
-        {
-            return Err(SessionError::ExternalModificationDetected);
-        }
+        let (document, source_fingerprint) = open_stable_document(&path, credential)?;
 
         let saved_revision = document.revision();
         Ok(Self {
             path,
             document,
-            source_fingerprint: fingerprint_after,
+            source_fingerprint,
             saved_revision,
         })
     }
@@ -74,7 +58,7 @@ impl VaultSession {
     /// Returns whether a real in-memory mutation has occurred since open/save.
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.document.revision() != self.saved_revision
+        self.document.has_changes_since(self.saved_revision)
     }
 
     /// Returns the canonical source path owned by this session.
@@ -115,6 +99,10 @@ impl VaultSession {
             return Ok(SaveOutcome::Unchanged);
         }
 
+        if !platform::SAVE_SUPPORTED {
+            return Err(SessionError::UnsupportedPersistencePlatform);
+        }
+
         let source_metadata = validate_current_target(&self.path)?;
         self.require_source_unchanged()?;
         self.verify_save_credential(credential)?;
@@ -151,32 +139,33 @@ impl VaultSession {
         sync_path(serialized.path()).map_err(SessionError::SyncTemp)?;
 
         let backup_path = backup_path(&self.path);
-        self.prepare_backup(&backup_path, &source_metadata, observer)?;
+        let prepared_backup = self.prepare_backup(&backup_path, &source_metadata, observer)?;
 
         // A third check narrows the unavoidable cooperative-locking race and
         // detects changes that happened while the exact backup was prepared.
         observer.checkpoint(SavePhase::BeforeTargetReplace, serialized.path())?;
         self.require_source_unchanged()?;
 
-        platform::atomic_replace(serialized.path(), &self.path)
+        observer
+            .replace_primary(serialized.path(), &self.path)
             .map_err(SessionError::AtomicReplaceFailed)?;
         serialized.disarm();
         let post_replace_observer = observer.checkpoint(SavePhase::AfterTargetReplace, &self.path);
 
         let durability = observer.sync_parent(parent, true);
-        validate_current_target(&self.path)?;
-        let final_document =
-            open_document(&self.path, credential).map_err(SessionError::FinalVerificationFailed)?;
+        let final_open = open_stable_document_with_hook(&self.path, credential, || {
+            observer.checkpoint(SavePhase::AfterFinalDocumentRead, &self.path)
+        })
+        .map_err(map_final_open_error)?;
+        let (final_document, final_fingerprint) = final_open;
         self.document
             .verify_semantic_equivalence(&final_document)
             .map_err(SessionError::FinalVerificationFailed)?;
-        let final_fingerprint = fingerprint_path(&self.path).map_err(|error| match error {
-            SessionError::ReadSource(source) => SessionError::FinalFingerprintFailed(source),
-            other => other,
-        })?;
 
         self.source_fingerprint = final_fingerprint;
         self.saved_revision = self.document.revision();
+
+        self.commit_backup(prepared_backup, &backup_path, parent, observer)?;
 
         post_replace_observer?;
         match durability {
@@ -207,7 +196,7 @@ impl VaultSession {
         backup_path: &Path,
         source_metadata: &Metadata,
         observer: &mut impl SaveObserver,
-    ) -> Result<(), SessionError> {
+    ) -> Result<ManagedTemp, SessionError> {
         let parent = self.path.parent().ok_or(SessionError::UnsupportedPath)?;
         reject_symlink_if_present(backup_path).map_err(SessionError::BackupFailed)?;
         let mut backup =
@@ -249,14 +238,25 @@ impl VaultSession {
             return Err(SessionError::BackupVerificationFailed);
         }
 
-        reject_symlink_if_present(backup_path).map_err(SessionError::BackupFailed)?;
-        platform::atomic_replace(backup.path(), backup_path).map_err(SessionError::BackupFailed)?;
+        Ok(backup)
+    }
+
+    fn commit_backup(
+        &self,
+        mut backup: ManagedTemp,
+        backup_path: &Path,
+        parent: &Path,
+        observer: &mut impl SaveObserver,
+    ) -> Result<(), SessionError> {
+        reject_symlink_if_present(backup_path).map_err(SessionError::SavedButBackupUpdateFailed)?;
+        observer
+            .commit_backup(backup.path(), backup_path)
+            .map_err(SessionError::SavedButBackupUpdateFailed)?;
         backup.disarm();
         observer.checkpoint(SavePhase::AfterBackupCommit, backup_path)?;
         observer
             .sync_parent(parent, false)
-            .map_err(SessionError::BackupFailed)?;
-        Ok(())
+            .map_err(SessionError::SavedButBackupDurabilityUncertain)
     }
 }
 
@@ -276,6 +276,10 @@ pub enum SessionError {
     /// The path is a symlink, missing, or not an existing regular file.
     #[error("the vault path is not a supported regular file")]
     UnsupportedPath,
+
+    /// Safe local replacement is unavailable on this operating system.
+    #[error("safe vault persistence is not supported on this platform")]
+    UnsupportedPersistencePlatform,
 
     /// The encrypted source file could not be read.
     #[error("could not read the vault file")]
@@ -329,6 +333,16 @@ pub enum SessionError {
     #[error("the previous vault backup could not be verified")]
     BackupVerificationFailed,
 
+    /// The primary is verified and the session is clean, but the previous
+    /// generation backup could not be advanced.
+    #[error("the vault was saved but its previous-version backup was not updated")]
+    SavedButBackupUpdateFailed(#[source] io::Error),
+
+    /// The primary and backup were installed, but the backup directory entry
+    /// could not be durably synced.
+    #[error("the vault was saved but backup durability is uncertain")]
+    SavedButBackupDurabilityUncertain(#[source] io::Error),
+
     /// The verified temp could not atomically replace the canonical target.
     #[error("could not atomically replace the vault file")]
     AtomicReplaceFailed(#[source] io::Error),
@@ -337,10 +351,14 @@ pub enum SessionError {
     #[error("the replaced vault file could not be verified")]
     FinalVerificationFailed(#[source] KdbxError),
 
-    /// Replacement occurred, but the final encrypted bytes could not be
-    /// fingerprinted for the next optimistic-concurrency baseline.
-    #[error("the replaced vault file could not be fingerprinted")]
-    FinalFingerprintFailed(#[source] io::Error),
+    /// Replacement occurred, but the final target could not be read stably.
+    #[error("the replaced vault file could not be read for verification")]
+    FinalReadFailed(#[source] io::Error),
+
+    /// Replacement occurred, but another writer changed the target during
+    /// final verification. No unverified fingerprint was accepted.
+    #[error("the replaced vault changed again during final verification")]
+    FinalExternalModificationDetected,
 
     /// The new content is present and the session baseline was updated, but
     /// crash durability is uncertain because syncing the directory failed.
@@ -380,6 +398,59 @@ fn ensure_handle_regular(file: &File) -> Result<(), SessionError> {
         Ok(())
     } else {
         Err(SessionError::UnsupportedPath)
+    }
+}
+
+fn open_stable_document(
+    path: &Path,
+    credential: &SecretString,
+) -> Result<(KdbxDocument, FileFingerprint), SessionError> {
+    open_stable_document_with_hook(path, credential, || Ok(()))
+}
+
+fn open_stable_document_with_hook(
+    path: &Path,
+    credential: &SecretString,
+    after_document_read: impl FnOnce() -> Result<(), SessionError>,
+) -> Result<(KdbxDocument, FileFingerprint), SessionError> {
+    validate_current_target(path)?;
+    let mut source = File::open(path).map_err(SessionError::ReadSource)?;
+    ensure_handle_regular(&source)?;
+
+    let fingerprint_before =
+        FileFingerprint::from_reader(&mut source).map_err(SessionError::ReadSource)?;
+    source
+        .seek(SeekFrom::Start(0))
+        .map_err(SessionError::ReadSource)?;
+    let document = KdbxDocument::open_reader(&mut source, credential.expose_secret())
+        .map_err(SessionError::Kdbx)?;
+    source
+        .seek(SeekFrom::Start(0))
+        .map_err(SessionError::ReadSource)?;
+    let fingerprint_after =
+        FileFingerprint::from_reader(&mut source).map_err(SessionError::ReadSource)?;
+
+    if fingerprint_before != fingerprint_after {
+        return Err(SessionError::ExternalModificationDetected);
+    }
+
+    after_document_read()?;
+    validate_current_target(path)?;
+    if fingerprint_before != fingerprint_path(path)? {
+        return Err(SessionError::ExternalModificationDetected);
+    }
+
+    Ok((document, fingerprint_before))
+}
+
+fn map_final_open_error(error: SessionError) -> SessionError {
+    match error {
+        SessionError::Kdbx(source) => SessionError::FinalVerificationFailed(source),
+        SessionError::ReadSource(source) => SessionError::FinalReadFailed(source),
+        SessionError::ExternalModificationDetected | SessionError::UnsupportedPath => {
+            SessionError::FinalExternalModificationDetected
+        }
+        other => other,
     }
 }
 
@@ -462,8 +533,17 @@ impl<R: Read> Read for DigestingReader<R> {
     }
 }
 
+#[cfg(unix)]
 fn sync_path(path: &Path) -> io::Result<()> {
     File::open(path)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_path(_path: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "safe Windows metadata sync is unavailable",
+    ))
 }
 
 #[cfg(unix)]
@@ -475,8 +555,11 @@ fn apply_restricted_permissions(path: &Path, source: &Metadata) -> io::Result<()
 }
 
 #[cfg(windows)]
-fn apply_restricted_permissions(path: &Path, source: &Metadata) -> io::Result<()> {
-    fs::set_permissions(path, source.permissions())
+fn apply_restricted_permissions(_path: &Path, _source: &Metadata) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "safe Windows security metadata preservation is unavailable",
+    ))
 }
 
 struct ManagedTemp {
@@ -579,9 +662,10 @@ enum SavePhase {
     AfterTempVerify,
     AfterFinalExternalCheck,
     AfterBackupWrite,
-    AfterBackupCommit,
     BeforeTargetReplace,
     AfterTargetReplace,
+    AfterFinalDocumentRead,
+    AfterBackupCommit,
 }
 
 trait SaveObserver {
@@ -603,6 +687,14 @@ trait SaveObserver {
     fn sync_parent(&mut self, parent: &Path, _after_target_replace: bool) -> io::Result<()> {
         platform::sync_parent(parent)
     }
+
+    fn replace_primary(&mut self, prepared: &Path, destination: &Path) -> io::Result<()> {
+        platform::replace_existing(prepared, destination)
+    }
+
+    fn commit_backup(&mut self, prepared: &Path, destination: &Path) -> io::Result<()> {
+        platform::install_or_replace(prepared, destination)
+    }
 }
 
 struct NoopObserver;
@@ -612,22 +704,28 @@ impl SaveObserver for NoopObserver {}
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
-        io::{self, Write},
+        fs, io,
         path::{Path, PathBuf},
     };
 
+    #[cfg(unix)]
+    use std::io::Write;
+
+    #[cfg(unix)]
     use kdbx::{KdbxDocument, KdbxError};
     use vault_core::{EntryId, GroupId, NewEntry, SecretString};
 
     use super::{
-        BACKUP_TEMP_PREFIX, SAVE_TEMP_PREFIX, SaveObserver, SaveOutcome, SavePhase, SessionError,
-        VaultSession, backup_path,
+        BACKUP_TEMP_PREFIX, SAVE_TEMP_PREFIX, SaveOutcome, SessionError, VaultSession, backup_path,
     };
+    #[cfg(unix)]
+    use super::{SaveObserver, SavePhase};
 
     const FIXTURE_PASSWORD: &str = "demopass";
     const KDBX41_FIXTURE: &str = "keepassxc-2.7.12-kdbx41.kdbx";
+    #[cfg(unix)]
     const KDBX40_FIXTURE: &str = "keepassxc-upstream-kdbx40-argon2d-aes.kdbx";
+    #[cfg(unix)]
     const KDBX31_FIXTURE: &str = "keepass-upstream-kdbx31-aeskdf-aes.kdbx";
 
     struct TestDir {
@@ -663,10 +761,12 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     struct HookObserver<F> {
         hook: F,
     }
 
+    #[cfg(unix)]
     impl<F> SaveObserver for HookObserver<F>
     where
         F: for<'a> FnMut(SavePhase, &'a Path) -> Result<(), SessionError>,
@@ -676,8 +776,10 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     struct SerializationFailObserver;
 
+    #[cfg(unix)]
     impl SaveObserver for SerializationFailObserver {
         fn serialize(
             &mut self,
@@ -691,8 +793,10 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     struct FinalDirectorySyncFailObserver;
 
+    #[cfg(unix)]
     impl SaveObserver for FinalDirectorySyncFailObserver {
         fn sync_parent(&mut self, parent: &Path, after_target_replace: bool) -> io::Result<()> {
             if after_target_replace {
@@ -700,6 +804,26 @@ mod tests {
             } else {
                 super::platform::sync_parent(parent)
             }
+        }
+    }
+
+    #[cfg(unix)]
+    struct PrimaryReplaceFailObserver;
+
+    #[cfg(unix)]
+    impl SaveObserver for PrimaryReplaceFailObserver {
+        fn replace_primary(&mut self, _prepared: &Path, _destination: &Path) -> io::Result<()> {
+            Err(io::Error::other("injected primary replacement failure"))
+        }
+    }
+
+    #[cfg(unix)]
+    struct BackupCommitFailObserver;
+
+    #[cfg(unix)]
+    impl SaveObserver for BackupCommitFailObserver {
+        fn commit_backup(&mut self, _prepared: &Path, _destination: &Path) -> io::Result<()> {
+            Err(io::Error::other("injected backup commit failure"))
         }
     }
 
@@ -745,6 +869,7 @@ mod tests {
         session
     }
 
+    #[cfg(unix)]
     fn save_document_to_path(document: &KdbxDocument, path: &Path) {
         let mut output = Vec::new();
         document
@@ -753,6 +878,7 @@ mod tests {
         fs::write(path, output).expect("test output should be written");
     }
 
+    #[cfg(unix)]
     fn external_valid_version(path: &Path, title: &str) {
         let mut document =
             KdbxDocument::open(path, FIXTURE_PASSWORD).expect("source should open for test edit");
@@ -880,6 +1006,7 @@ mod tests {
         assert!(session.is_dirty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn verified_saves_rotate_exact_previous_ciphertext_and_update_baseline() {
         let directory = TestDir::create();
@@ -931,6 +1058,161 @@ mod tests {
         assert_no_transaction_temps(&directory.path);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn failed_second_save_does_not_advance_existing_backup() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let source_a = fs::read(&path).expect("source A should be readable");
+        let mut session = dirty_session(&path, "successful B");
+        session.save(&credential()).expect("B save should succeed");
+        let source_b = fs::read(&path).expect("source B should be readable");
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("backup A should exist"),
+            source_a
+        );
+
+        let entry = first_entry(&session);
+        session
+            .document_mut()
+            .set_entry_title(&entry, "failed C")
+            .expect("C mutation should succeed");
+        let saved_revision = session.saved_revision;
+        let mut observer = HookObserver {
+            hook: |phase, _: &Path| {
+                if phase == SavePhase::BeforeTargetReplace {
+                    Err(SessionError::InjectedFailure)
+                } else {
+                    Ok(())
+                }
+            },
+        };
+
+        assert!(matches!(
+            session.save_with_observer(&credential(), &mut observer),
+            Err(SessionError::InjectedFailure)
+        ));
+        assert_eq!(fs::read(&path).expect("primary B should remain"), source_b);
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("backup A should remain"),
+            source_a
+        );
+        assert!(session.is_dirty());
+        assert_eq!(session.saved_revision, saved_revision);
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn primary_replace_failure_does_not_advance_existing_backup() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let source_a = fs::read(&path).expect("source A should be readable");
+        let mut session = dirty_session(&path, "successful B");
+        session.save(&credential()).expect("B save should succeed");
+        let source_b = fs::read(&path).expect("source B should be readable");
+
+        let entry = first_entry(&session);
+        session
+            .document_mut()
+            .set_entry_title(&entry, "replacement-failed C")
+            .expect("C mutation should succeed");
+        assert!(matches!(
+            session.save_with_observer(&credential(), &mut PrimaryReplaceFailObserver),
+            Err(SessionError::AtomicReplaceFailed(_))
+        ));
+        assert_eq!(fs::read(&path).expect("primary B should remain"), source_b);
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("backup A should remain"),
+            source_a
+        );
+        assert!(session.is_dirty());
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_commit_failure_after_save_keeps_old_backup_and_reconciles_primary() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let source_a = fs::read(&path).expect("source A should be readable");
+        let mut session = dirty_session(&path, "successful B");
+        session.save(&credential()).expect("B save should succeed");
+
+        let entry = first_entry(&session);
+        session
+            .document_mut()
+            .set_entry_title(&entry, "saved C without backup advance")
+            .expect("C mutation should succeed");
+        assert!(matches!(
+            session.save_with_observer(&credential(), &mut BackupCommitFailObserver),
+            Err(SessionError::SavedButBackupUpdateFailed(_))
+        ));
+
+        let source_c = fs::read(&path).expect("primary C should be readable");
+        let reopened_c =
+            KdbxDocument::open(&path, FIXTURE_PASSWORD).expect("primary C should reopen");
+        session
+            .document()
+            .verify_semantic_equivalence(&reopened_c)
+            .expect("primary C should equal memory");
+        assert!(
+            super::fingerprint_path(&path).expect("primary C should fingerprint")
+                == session.source_fingerprint
+        );
+        assert_eq!(session.saved_revision, session.document().revision());
+        assert!(!session.is_dirty());
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("backup A should remain"),
+            source_a
+        );
+        assert!(source_c != source_a);
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn final_generation_race_never_accepts_unverified_external_baseline() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let external_path = directory.fixture_copy(KDBX41_FIXTURE, "external.kdbx");
+        external_valid_version(&external_path, "external C");
+        let external_c = fs::read(&external_path).expect("external C should be readable");
+        let mut session = dirty_session(&path, "Nian B");
+        let target = path.clone();
+        let replacement = external_path.clone();
+        let mut observer = HookObserver {
+            hook: move |phase, _: &Path| {
+                if phase == SavePhase::AfterFinalDocumentRead {
+                    fs::rename(&replacement, &target)
+                        .expect("external final replacement should succeed");
+                }
+                Ok(())
+            },
+        };
+
+        assert!(matches!(
+            session.save_with_observer(&credential(), &mut observer),
+            Err(SessionError::FinalExternalModificationDetected)
+        ));
+        assert_eq!(
+            fs::read(&path).expect("external C should remain"),
+            external_c
+        );
+        assert!(session.is_dirty());
+        assert!(matches!(
+            session.save(&credential()),
+            Err(SessionError::ExternalModificationDetected)
+        ));
+        assert_eq!(
+            fs::read(&path).expect("external C should still remain"),
+            external_c
+        );
+        assert!(!backup_path(&path).exists());
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(unix)]
     #[test]
     fn wrong_save_credential_cannot_rekey_or_advance_backup() {
         let directory = TestDir::create();
@@ -954,6 +1236,7 @@ mod tests {
         assert_no_transaction_temps(&directory.path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn external_change_before_save_is_never_overwritten() {
         let directory = TestDir::create();
@@ -971,6 +1254,7 @@ mod tests {
         assert!(!backup_path(&path).exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn same_size_external_byte_change_is_detected_by_sha256() {
         let directory = TestDir::create();
@@ -992,6 +1276,7 @@ mod tests {
         assert!(session.is_dirty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn external_change_after_temp_verification_is_caught_by_second_check() {
         let directory = TestDir::create();
@@ -1024,6 +1309,7 @@ mod tests {
         assert_no_transaction_temps(&directory.path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn serialization_and_temp_verification_failures_preserve_exact_source() {
         let directory = TestDir::create();
@@ -1065,6 +1351,7 @@ mod tests {
         assert_no_transaction_temps(&directory.path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn backup_failure_aborts_before_source_replacement() {
         let directory = TestDir::create();
@@ -1085,6 +1372,7 @@ mod tests {
         assert_no_transaction_temps(&directory.path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn corrupt_backup_temp_is_rejected_before_source_replacement() {
         let directory = TestDir::create();
@@ -1114,6 +1402,7 @@ mod tests {
         assert_no_transaction_temps(&directory.path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn every_injected_pre_replace_failure_preserves_source_and_dirty_revision() {
         let phases = [
@@ -1123,7 +1412,6 @@ mod tests {
             SavePhase::AfterTempVerify,
             SavePhase::AfterFinalExternalCheck,
             SavePhase::AfterBackupWrite,
-            SavePhase::AfterBackupCommit,
             SavePhase::BeforeTargetReplace,
         ];
 
@@ -1163,6 +1451,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn post_replace_fault_still_reconciles_session_with_verified_final_target() {
         let directory = TestDir::create();
@@ -1193,6 +1482,7 @@ mod tests {
             .expect("post-replace final target should be verified");
     }
 
+    #[cfg(unix)]
     #[test]
     fn directory_sync_failure_reports_uncertainty_after_reconciling_final_target() {
         let directory = TestDir::create();
@@ -1218,6 +1508,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn dirty_kdbx31_and_kdbx40_sessions_reject_save_without_touching_source() {
         for fixture in [KDBX31_FIXTURE, KDBX40_FIXTURE] {
@@ -1298,5 +1589,38 @@ mod tests {
             "could not atomically replace the vault file"
         );
         assert!(!error.to_string().contains(sensitive_path));
+
+        let backup_error =
+            SessionError::SavedButBackupUpdateFailed(io::Error::other(sensitive_path));
+        assert_eq!(
+            backup_error.to_string(),
+            "the vault was saved but its previous-version backup was not updated"
+        );
+        assert!(!backup_error.to_string().contains(sensitive_path));
+
+        let final_error = SessionError::FinalReadFailed(io::Error::other(sensitive_path));
+        assert_eq!(
+            final_error.to_string(),
+            "the replaced vault file could not be read for verification"
+        );
+        assert!(!final_error.to_string().contains(sensitive_path));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_dirty_save_fails_closed_without_touching_primary_or_backup() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let before = fs::read(&path).expect("source should be readable");
+        let mut session = dirty_session(&path, "unsupported Windows save");
+
+        assert!(matches!(
+            session.save(&credential()),
+            Err(SessionError::UnsupportedPersistencePlatform)
+        ));
+        assert_eq!(fs::read(&path).expect("source should remain"), before);
+        assert!(!backup_path(&path).exists());
+        assert!(session.is_dirty());
+        assert_no_transaction_temps(&directory.path);
     }
 }

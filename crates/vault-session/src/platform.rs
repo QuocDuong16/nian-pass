@@ -1,13 +1,43 @@
-use std::{fs, io, path::Path};
+#[cfg(unix)]
+use std::fs;
+use std::{io, path::Path};
 
-/// Atomically replaces `destination` with a same-filesystem prepared file.
+#[cfg(unix)]
+pub(crate) const SAVE_SUPPORTED: bool = true;
+
+#[cfg(windows)]
+pub(crate) const SAVE_SUPPORTED: bool = false;
+
+/// Atomically replaces an existing destination with a same-filesystem file.
 ///
-/// No implementation may remove `destination` first. On Unix this maps to
-/// `rename(2)`. On Windows, Rust 1.97 maps replacement rename to
-/// `FileRenameInfoEx` where supported and otherwise `MoveFileExW` with replace
-/// semantics. Both paths keep the dangerous operation centralized here.
-pub(crate) fn atomic_replace(prepared: &Path, destination: &Path) -> io::Result<()> {
+/// Unix rename preserves an always-present destination namespace entry. M3
+/// deliberately fails closed on Windows until a safe-Rust replacement path can
+/// preserve the destination security descriptor and related metadata.
+#[cfg(unix)]
+pub(crate) fn replace_existing(prepared: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(prepared, destination)
+}
+
+#[cfg(windows)]
+pub(crate) fn replace_existing(_prepared: &Path, _destination: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "safe Windows replacement is unavailable",
+    ))
+}
+
+/// Installs a first backup or atomically replaces an existing one.
+#[cfg(unix)]
+pub(crate) fn install_or_replace(prepared: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(prepared, destination)
+}
+
+#[cfg(windows)]
+pub(crate) fn install_or_replace(_prepared: &Path, _destination: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "safe Windows replacement is unavailable",
+    ))
 }
 
 #[cfg(unix)]
@@ -17,9 +47,6 @@ pub(crate) fn sync_parent(parent: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 pub(crate) fn sync_parent(_parent: &Path) -> io::Result<()> {
-    // Windows has no stable Rust API equivalent to syncing a directory handle.
-    // The replacement primitive still provides atomic namespace replacement;
-    // crash durability is reported as best effort on this platform.
     Ok(())
 }
 

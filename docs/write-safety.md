@@ -14,6 +14,14 @@ opens the `KdbxDocument`, then hashes the same handle again. It also reopens and
 hashes the canonical path. All three fingerprints must agree before the session
 starts.
 
+The same stable-generation helper is used after primary replacement. The
+fingerprint accepted as the next session baseline is the first handle digest:
+that exact handle generation is hashed, parsed, rewound and hashed again, then
+the current path is independently required to still name those bytes. The
+parsed document is semantically verified before its paired fingerprint is
+accepted. Nian Pass therefore never verifies generation B and adopts an
+unverified generation C fingerprint as B's baseline.
+
 The source fingerprint is `(encrypted byte length, SHA-256)`. Size, mtime,
 inode, and other filesystem metadata are not used as conflict identity. The
 digest is streamed with a fixed-size buffer and has no `Debug`, `Display`, or
@@ -22,9 +30,13 @@ serialization implementation.
 ## Dirty state
 
 Every opened `KdbxDocument` starts at revision zero. Each successful real
-logical mutation increments a saturating process-local counter exactly once;
-no-op and failed operations do not increment. Revision is not KDBX data and is
+logical mutation advances process-local change state exactly once; no-op and
+failed operations do not. Revision is not KDBX data and is
 not serialized. `VaultSession` compares that revision with `saved_revision`.
+If a real mutation occurs while the counter is already `u64::MAX`, a sticky bit
+makes the document permanently dirty for the rest of its in-memory lifetime.
+This deliberately favors repeated save prompts over allowing a saturated
+counter to make a real edit appear clean.
 
 A clean `save()` returns `SaveOutcome::Unchanged` without opening, hashing,
 rewriting, backing up, or changing the mtime of the vault. A dirty session is
@@ -57,21 +69,21 @@ For a dirty session, M3 performs this order:
 10. Copy the current primary bytes into a second same-directory backup temp
     while streaming its fingerprint. Require that fingerprint to equal the
     source baseline, flush and sync the backup temp, apply restrictive
-    permissions, reopen/hash it, then atomically install it as
-    `vault.kdbx.bak`.
-11. Sync the containing directory after the backup namespace update.
-12. Run a third primary fingerprint check immediately before replacement. This
+    permissions, and reopen/hash it. The prepared backup is not committed yet.
+11. Run a third primary fingerprint check immediately before replacement. This
     narrows changes that race with backup preparation; it does not create a
     cross-application lock.
-13. Atomically replace the primary with the already verified save temp through
+12. Atomically replace the primary with the already verified save temp through
     the single platform replacement helper. The implementation never removes
     the primary first and never falls back to direct truncate/write.
-14. Sync the containing directory on Unix.
-15. Revalidate and reopen the final primary, then compare its complete parsed
-    semantics with the in-memory document.
-16. Fingerprint the actual final primary and store that value as the new source
-    baseline.
-17. Record the current document revision as saved.
+13. Sync the containing directory on Unix.
+14. Stable-open one final primary generation: hash one handle, parse it, hash
+    that handle again, and require the current path to still match. Compare the
+    parsed document's complete semantics with the in-memory document.
+15. Store the fingerprint paired with that verified parsed generation as the
+    new source baseline and record the current document revision as saved.
+16. Only now atomically install the already prepared previous-ciphertext temp
+    as `vault.kdbx.bak`, then sync the backup namespace on Unix.
 
 Fresh encryption salts, seeds, IVs/nonces, authentication data, and ciphertext
 are expected, so successful saves use parsed semantic equality rather than
@@ -88,19 +100,31 @@ vault.kdbx.bak
 ```
 
 The backup is copied from the primary ciphertext; it is never reconstructed by
-reserializing an old database. On the first successful A-to-B save it contains
-exact A bytes. On the next B-to-C save it atomically rotates to exact B bytes.
-An existing backup is never directly truncated. Backup preparation or commit
-failure aborts before primary replacement. M3 never promotes or restores the
-backup automatically.
+reserializing an old database. It represents the primary generation immediately
+preceding the most recent successful save. On the first successful A-to-B save
+it contains exact A bytes. On the next successful B-to-C save it atomically
+rotates to exact B bytes. A failed B-to-C attempt leaves primary B and backup A
+unchanged. An existing backup is never directly truncated, and the prepared
+backup is not committed until primary C has been installed and verified. M3
+never promotes or restores the backup automatically.
+
+If primary C is installed and verified but committing backup B fails, the
+session baseline and saved revision remain reconciled to primary C, so the
+session is clean. `SavedButBackupUpdateFailed` explicitly reports that the old
+backup A remains. A failure syncing the already committed backup namespace is
+reported separately as `SavedButBackupDurabilityUncertain`.
 
 On Unix, save and backup temps start at `0600`; installed files retain only the
 source owner's read/write permission bits (`source mode & 0600`). This may make
 an originally broader mode more restrictive and never broadens it. Rename-based
 replacement creates a new inode owned by the saving user; M3 does not attempt
-privileged `chown` or promise preservation of every metadata bit. Windows
-applies the source's Rust-visible permissions to prepared files; Windows ACL and
-hidden-attribute preservation remains runtime-unverified.
+privileged `chown` or promise preservation of every metadata bit.
+
+Windows write persistence currently fails closed with
+`UnsupportedPersistencePlatform`. Rust-visible permissions cannot prove DACL
+preservation, and the workspace forbids local unsafe Rust needed by raw Win32
+bindings. Opening and read-only sessions remain supported; dirty save creates no
+temp, backup, or primary write on Windows.
 
 ## Platform behavior
 
@@ -108,7 +132,7 @@ hidden-attribute preservation remains runtime-unverified.
 |---|---|---|---|
 | Linux/Unix | Same-filesystem `std::fs::rename` replacement; destination is never removed first | Directory handle `sync_all` | Linux tests passed |
 | macOS | Unix replacement and directory sync implementation | Directory handle `sync_all` | Not runtime tested |
-| Windows | Rust 1.97 replacement rename (`FileRenameInfoEx` where supported, otherwise `MoveFileExW` replacement semantics); no delete+rename fallback | No stable Rust directory-sync primitive; best effort | `x86_64-pc-windows-gnu` cross-compile passed; not runtime tested |
+| Windows | Write persistence explicitly unsupported; typed fail-closed error before transaction I/O | Not applicable while writes are disabled | Local `x86_64-pc-windows-gnu --all-targets` check passed and CI gate configured; runtime not tested |
 
 If the replacement primitive fails on a filesystem, save fails safely. M3 does
 not downgrade to truncating the primary. Cloud-synchronized folders, network
@@ -118,10 +142,10 @@ shares, and removable filesystems receive no special fallback.
 
 Credential mismatch, temp creation, serialization, flush, temp sync, temp
 reopen, semantic mismatch, second/third fingerprint conflict, backup write,
-backup verification, backup commit, and injected pre-replacement failures all
-leave the primary's exact bytes unchanged and leave the session dirty. RAII
-cleanup removes abandoned save and backup temps where possible without hiding
-the primary error.
+backup verification, primary replacement failure, and injected pre-replacement
+failures all leave the primary's exact bytes and an existing backup unchanged,
+and leave the session dirty. RAII cleanup removes abandoned save and backup
+temps where possible without hiding the primary error.
 
 Once atomic primary replacement succeeds, an error is post-commit. M3 still
 reopens and semantically verifies the final target and updates the fingerprint
@@ -129,7 +153,8 @@ and saved revision where possible. In particular, if primary replacement
 succeeds but Unix parent-directory sync fails, `DurabilityUncertain` reports
 that the new content is currently present and verified but its survival across
 power loss is uncertain; the session is clean because disk currently matches
-memory.
+memory. A final-generation conflict or verification failure is also explicitly
+post-commit: no baseline is accepted and the session remains dirty/unreconciled.
 
 ## Concurrency and lifecycle limitations
 

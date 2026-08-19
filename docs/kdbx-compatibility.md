@@ -139,14 +139,14 @@ remain accurately unverified.
 | Custom-field mutation | Self-roundtrip verified | Protected/unprotected creation, protection-preserving update, empty key/value, same-value no-op, tracked deletion, missing deletion no-op, and protected-value reopen are asserted |
 | Reserved generic field access | Verified rejected | Standard fields, current/legacy TOTP storage names, and KeePassXC passkey attributes return generic `ReservedField` without mutation |
 | KeePassXC-specific nullable group flags and AutoType obfuscation XML encodings | Supporting regression verified | Output XML asserts literal `null` and integer `0`, matching pinned upstream KeePassXC 2.7+ regressions |
-| KDBX 4.0 writing | Unsupported | Dirty in-memory session edits are allowed, but save returns typed `UnsupportedWriteFormat`; pinned writer only emits exact 4.1 and source bytes remain unchanged |
-| KDBX 3.1 writing | Unsupported | Dirty in-memory session edits are allowed, but save returns typed `UnsupportedWriteFormat`; no silent KDBX 4.1 upgrade and source bytes remain unchanged |
+| KDBX 4.0 writing | Unsupported | On Linux, dirty in-memory session edits are allowed, but save returns typed `UnsupportedWriteFormat`; pinned writer only emits exact 4.1 and source bytes remain unchanged |
+| KDBX 3.1 writing | Unsupported | On Linux, dirty in-memory session edits are allowed, but save returns typed `UnsupportedWriteFormat`; no silent KDBX 4.1 upgrade and source bytes remain unchanged |
 | Verified local atomic save | Verified on Linux | Same-directory private temp is flushed, synced, reopened, compared to complete parsed semantics, atomically installed without deleting the source first, and final target is reopened and compared again |
 | External modification rejection | Verified on Linux | Complete encrypted-file SHA-256 catches pre-save changes, a valid external replacement after temp verification, and a controlled same-size byte change without overwriting external bytes |
 | Wrong ordinary-save password rejection | Verified on Linux | Credential must open the unchanged current source; mismatch leaves exact source bytes, backup, and dirty revision unchanged |
-| Previous ciphertext backup | Verified on Linux | A→B leaves exact A at `.bak`; B→C rotates `.bak` to exact B bytes through its own synced temp and atomic replacement |
-| Semantic reopen after filesystem replacement | Verified on Linux | Final primary's exact version and complete parsed `Database` equal the current session document; baseline and saved revision update afterward |
-| Windows atomic replacement | Implemented, not runtime verified on Windows | `vault-session` cross-compiles for `x86_64-pc-windows-gnu` with Rust 1.97 replacement rename; no delete+rename or direct-write fallback. Parent-directory sync and ACL/hidden-attribute behavior remain runtime-unverified |
+| Previous ciphertext backup | Verified on Linux | A→B leaves exact A at `.bak`; B→C rotates `.bak` to exact B only after verified primary success. Injected pre-primary and primary-replacement failures retain the prior backup, while post-primary backup failure leaves the verified primary/session reconciled and reports a typed warning error |
+| Semantic reopen after filesystem replacement | Verified on Linux | One stable final generation is hashed, parsed, hashed again, matched to the current path, and compared with the complete in-memory `Database`; only its paired fingerprint becomes the baseline |
+| Windows local write persistence | Explicitly unsupported | Dirty save fails closed with `UnsupportedPersistencePlatform` before transaction I/O because DACL-preserving replacement is not yet proven under the safe-Rust policy. A Windows cross-compile CI gate and cfg-Windows fail-closed test are present; no Windows runtime claim is made |
 | Keyfile-based writing | Not implemented | Credential API is password-only |
 
 ### External KeePassXC interoperability

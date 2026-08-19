@@ -26,9 +26,11 @@ existing regular-file target, an unlocked `KdbxDocument`, a complete encrypted
 file SHA-256 baseline, and the last safely saved mutation revision. It detects
 external changes optimistically, rejects a wrong ordinary-save credential,
 serializes to a same-directory private temp, reopens and semantically verifies
-that temp, copies the exact previous source ciphertext into `vault.kdbx.bak`,
-atomically replaces the source, verifies the final target, and only then marks
-the session clean. A clean save performs no filesystem I/O.
+that temp, prepares an exact previous-ciphertext backup, atomically replaces the
+source, stable-opens and verifies one final target generation, marks the session
+clean against that generation, and only then advances `vault.kdbx.bak`. A failed
+pre-primary save does not advance the recovery generation. A clean save performs
+no filesystem I/O.
 
 The workspace also retains a KDBX-independent, secret-free metadata projection;
 an explicit zeroizing `SecretString` for narrow password and notes reads; an
@@ -103,6 +105,7 @@ UI, cloud sync or merge, file watcher, autosave timer, keyfile support, master-
 password rotation, biometric unlock, or guaranteed zeroization of all decrypted
 allocations owned by `keepass-rs`. The CLI remains read-only. Local persistence
 uses optimistic conflict detection rather than cooperative or distributed
-locking, and Windows behavior is implemented but not runtime-verified in this
-milestone. See [write safety](docs/write-safety.md) for exact guarantees and
-limitations.
+locking. Windows open/read sessions are supported, but dirty save currently
+fails closed with `UnsupportedPersistencePlatform` pending a safe-Rust,
+security-preserving replacement implementation. See [write
+safety](docs/write-safety.md) for exact guarantees and limitations.
