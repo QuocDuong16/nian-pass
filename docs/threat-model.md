@@ -242,6 +242,17 @@ delete gap; its fail-closed test is present but has not run on Windows in this
 milestone. Network shares, removable media, and cloud-synchronized folders may
 reject the Unix primitive; M3 returns an error instead of downgrading safety.
 
+The M3.1 Windows evaluation also treats replacement failure semantics as a
+threat. `ReplaceFileW` has the desired documented DACL, EFS, compression, and
+named-stream preservation on success, but documented failure states can move
+the old file away from its canonical name. Rename-based alternatives preserve
+the prepared temp's identity instead of merging the destination security state.
+Creating the first backup likewise requires its restrictive security state to
+be established before publication. With no primitive satisfying all of those
+properties and no native Windows/DACL runtime evidence in current Forgejo
+infrastructure, the control remains fail-closed Windows save rather than a
+metadata repair after publication or an unsafe fallback.
+
 Locking or dropping the session releases the decrypted database representation,
 but ordinary `keepass-rs` strings are not comprehensively zeroized. M3 does not
 claim immediate physical erasure from allocator pages, swap, runtime copies, or

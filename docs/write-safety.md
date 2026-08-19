@@ -126,13 +126,54 @@ preservation, and the workspace forbids local unsafe Rust needed by raw Win32
 bindings. Opening and read-only sessions remain supported; dirty save creates no
 temp, backup, or primary write on Windows.
 
+### M3.1 Windows replacement evaluation
+
+The 2026-08-19 M3.1 evaluation did not enable Windows writes. Microsoft
+[documents that a successful `ReplaceFileW`
+call](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)
+preserves the replaced file's
+creation time, DACL, security resource attributes, EFS encryption, compression,
+and named streams not already present in the replacement. That is the required
+metadata behavior, and calls that ignore merge or ACL errors are unacceptable.
+However, the same contract documents `ERROR_UNABLE_TO_MOVE_REPLACEMENT` and
+`ERROR_UNABLE_TO_MOVE_REPLACEMENT_2` failure states in which the replaced file
+can cease to exist at its canonical name and remain under another name. That
+does not satisfy Nian Pass's always-present canonical-path and ordinary failure
+invariants.
+
+Rust 1.97.1's Windows `std::fs::rename` implementation was also inspected. It
+uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` and, for an access-denied case,
+falls back to `SetFileInformationByHandle(FileRenameInfoEx)`. These operations
+rename the prepared file identity; they do not provide `ReplaceFileW`'s
+documented destination-DACL, EFS, compression, and named-stream merge contract.
+They therefore cannot safely replace a restrictive vault with a temp that may
+have inherited a broader directory DACL.
+
+Safe public wrappers were evaluated rather than introducing local Win32 FFI.
+`winsafe` 0.0.28 exposes `ReplaceFileW`, but accepts UTF-8 strings rather than
+arbitrary Windows paths and cannot strengthen the operating-system failure
+contract. `atomic-write-file` 0.3.1, `atomicwrites` 0.4.4, and `safe-write` 0.2.0
+use rename/`MoveFileExW` on Windows and do not preserve the required destination
+security metadata. `windows-acl` 0.3.0 can inspect or modify ACLs but does not
+supply an atomic replacement primitive, and applying a DACL after publication
+would create an unacceptable exposure window. No dependency was added.
+
+The first-backup case remains a separate blocker: publishing a new `.bak` must
+not expose a temp with broader inherited access than the primary, and this must
+be established before its name becomes visible. The current Forgejo
+infrastructure has a Windows cross-compilation job but no native Windows runner,
+so destination and backup DACL behavior cannot receive the required runtime
+evidence here. Until an operation satisfies both the replacement failure
+contract and first-backup security contract, followed by native DACL tests,
+`SAVE_SUPPORTED` remains false on Windows.
+
 ## Platform behavior
 
 | Platform | Atomic replacement implementation | Parent directory sync | Runtime evidence |
 |---|---|---|---|
 | Linux/Unix | Same-filesystem `std::fs::rename` replacement; destination is never removed first | Directory handle `sync_all` | Linux tests passed |
 | macOS | Unix replacement and directory sync implementation | Directory handle `sync_all` | Not runtime tested |
-| Windows | Write persistence explicitly unsupported; typed fail-closed error before transaction I/O | Not applicable while writes are disabled | Local `x86_64-pc-windows-gnu --all-targets` check passed and CI gate configured; runtime not tested |
+| Windows | Write persistence explicitly unsupported after M3.1 primitive evaluation; typed fail-closed error before transaction I/O | Not applicable while writes are disabled | Local `x86_64-pc-windows-gnu --all-targets` check passed and CI gate configured; native runtime and DACL behavior not tested |
 
 If the replacement primitive fails on a filesystem, save fails safely. M3 does
 not downgrade to truncating the primary. Cloud-synchronized folders, network

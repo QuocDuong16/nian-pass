@@ -190,8 +190,10 @@ again through that handle, and compared with the current path. Only after full
 semantic equality does the session accept the paired fingerprint. The prepared
 backup is committed afterward, so failed pre-primary transactions cannot
 advance recovery history. Windows dirty saves currently fail closed because M3
-does not yet have a safe-Rust, runtime-proven replacement path that preserves
-the destination security descriptor.
+does not yet have a safe-Rust, runtime-proven replacement path that both
+preserves the destination security descriptor and keeps the canonical path
+present across documented replacement failures. First-backup DACL behavior also
+requires native Windows evidence before writes can be enabled.
 
 M3 accepts in-memory mutations for opened KDBX 3.1 and 4.0 documents so dirty
 state remains meaningful. On supported write platforms, persistence still calls

@@ -107,5 +107,6 @@ allocations owned by `keepass-rs`. The CLI remains read-only. Local persistence
 uses optimistic conflict detection rather than cooperative or distributed
 locking. Windows open/read sessions are supported, but dirty save currently
 fails closed with `UnsupportedPersistencePlatform` pending a safe-Rust,
-security-preserving replacement implementation. See [write
+security-preserving replacement implementation whose failure states also keep
+the canonical path present, plus native primary/backup DACL evidence. See [write
 safety](docs/write-safety.md) for exact guarantees and limitations.
