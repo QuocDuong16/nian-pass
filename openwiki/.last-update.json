@@ -1,6 +1,6 @@
 {
-  "updatedAt": "2026-08-18T03:21:24.582Z",
-  "command": "init",
-  "gitHead": "5bf38957028e8b07765dd0a5079c976da9d1faaf",
+  "updatedAt": "2026-08-20T01:21:28.566Z",
+  "command": "update",
+  "gitHead": "d366b2851f2d454715b0ec2c8e3978f6110147a4",
   "model": "mimo-v2.5"
 }
