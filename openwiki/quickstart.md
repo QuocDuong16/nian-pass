@@ -9,7 +9,7 @@ tags: [quickstart, navigation, overview]
 
 Nian Pass is an **experimental, KDBX-native password manager** focused on KeePass and KeePassXC interoperability. It is written in Rust and organized as a Cargo workspace.
 
-> **Status:** Early development (M0 milestone). Do not use with production credentials.
+> **Status:** Early development (M3.5 milestone). Do not use with production credentials.
 
 ## Principles
 
@@ -19,16 +19,16 @@ Nian Pass is an **experimental, KDBX-native password manager** focused on KeePas
 - **KeePass/KeePassXC interoperability** — must never break KeePass compatibility
 - **Bring your own cloud** — users choose their own sync backend
 
-## Current Milestone: M0 — KDBX Foundation
+## Current Milestone: M3.5 — Conflict-safe Sync Engine
 
-The codebase provides a **read-only** foundation:
+The workspace provides:
 
-- A KDBX-independent domain model ([`vault-core`](/openwiki/architecture/overview.md))
-- A read-only [`keepass-rs`](https://crates.io/crates/keepass) adapter ([`kdbx`](/openwiki/architecture/overview.md))
-- A CLI for non-sensitive metadata inspection ([`nian-pass`](/openwiki/architecture/overview.md))
-- A checked-in [fixture policy](/openwiki/testing.md) proving one real KeePassXC KDBX 4.1 file can be opened
-
-Saving and sync are **intentionally not implemented**.
+- A KDBX-independent domain model with secret handling ([`vault-core`](/openwiki/architecture/overview.md))
+- A KDBX adapter with read, mutation, save, and three-way merge ([`kdbx`](/openwiki/architecture/overview.md))
+- A local unlocked vault session with verified persistence ([`vault-session`](/openwiki/architecture/overview.md))
+- A provider-independent three-way semantic merge orchestrator ([`vault-sync`](/openwiki/architecture/overview.md))
+- A CLI for metadata inspection ([`nian-pass`](/openwiki/architecture/overview.md))
+- Four checked-in [fixtures](/openwiki/testing.md) proving read compatibility across KDBX 3.1, 4.0, and 4.1
 
 ## Quick Start
 
@@ -48,11 +48,13 @@ Both commands prompt for the master password interactively. There is no `--passw
 nian-pass/
 ├── apps/cli/          nian-pass CLI binary
 ├── crates/
-│   ├── vault-core/    KDBX-independent domain model
-│   └── kdbx/          KDBX adapter (keepass-rs boundary)
-├── fixtures/kdbx/     Synthetic test databases
-├── docs/              Architecture and threat model
-└── .forgejo/workflows/ CI quality checks
+│   ├── vault-core/    KDBX-independent domain model + secret types
+│   ├── kdbx/          KDBX adapter (keepass-rs boundary, mutations, sync)
+│   ├── vault-session/ Local session with verified atomic persistence
+│   └── vault-sync/    Provider-independent three-way merge orchestrator
+├── fixtures/kdbx/     Synthetic test databases (4 fixtures)
+├── docs/              Architecture, threat model, compatibility, write safety
+└── .forgejo/workflows/ CI quality checks (Rust, Windows cross-check, KeePassXC compat)
 ```
 
 See [architecture/overview](/openwiki/architecture/overview.md) for how the crates depend on each other and why.
@@ -61,33 +63,42 @@ See [architecture/overview](/openwiki/architecture/overview.md) for how the crat
 
 | Topic | Page |
 |---|---|
-| Architecture, domain model, invariants | [architecture/overview](/openwiki/architecture/overview.md) |
+| Architecture, domain model, crate dependency, invariants | [architecture/overview](/openwiki/architecture/overview.md) |
+| Three-way sync engine, merge model, conflict types | [architecture/sync-engine](/openwiki/architecture/sync-engine.md) |
+| Verified persistence, save protocol, platform limits | [architecture/persistence](/openwiki/architecture/persistence.md) |
 | Test suite, fixtures, CI pipeline | [testing](/openwiki/testing.md) |
 
 ## Development Commands
 
 ```bash
+# Verify fixture integrity
+sha256sum --check fixtures/kdbx/SHA256SUMS
+
 # Format check
 cargo fmt --check
 
 # Lint (warnings are errors)
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
 # Run all tests
-cargo test --workspace
+cargo test --locked --workspace
+
+# KeePassXC external compatibility (skips if keepassxc-cli absent)
+scripts/test-keepassxc-compat.sh
 ```
 
-## Known Gaps (M0)
+## Known Gaps (M3.5)
 
-- No save/write support
-- No sync or conflict resolution
+- No UI, cloud transport, or provider integration
 - No clipboard protection, locked-memory allocation, or process hardening
-- No lossless round-trip guarantee (intentionally deferred)
-- The domain model excludes passwords, TOTP seeds, notes, attachments, history, and custom fields
+- No keyfile or hardware key support
+- Windows save persistence disabled pending safe-Rust DACL-preserving replacement
+- No product-level recycle-bin, notes editing, TOTP, attachment/icon UI, or history restore
+- KDBX 3.1 and 4.0 writing deliberately rejected (not upgraded or rewritten)
 
 ## Backlog
 
-- **Write/save support** — requires lossless round-trip compatibility tests against KeePass and KeePassXC
-- **Sync protocol** — must maintain zero-knowledge architecture
 - **Clipboard and memory hardening** — critical for production use
 - **Extended KDBX feature coverage** — key files, key-provider plugins, custom data
+- **Windows persistence** — safe DACL-preserving write implementation
+- **UI and cloud transport** — future milestones
