@@ -16,7 +16,7 @@ for feedback but is intentionally not equivalent to the full gate.
 - Rust 1.97.1 with rustfmt, Clippy, and `llvm-tools-preview`
 - Node 24.19.0 from `.node-version`
 - pnpm 11.22.0 from the root `packageManager`
-- GNU Make and `rg`
+- GNU Make
 - Tauri's documented headless GTK/WebKit development packages
 
 `make tools-install` installs `cargo-deny 0.20.2`, `cargo-machete 0.9.2`, and

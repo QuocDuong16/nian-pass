@@ -131,9 +131,7 @@ desktop-lint:
 
 desktop-no-eslint-disable:
 	@echo "Check forbidden production eslint-disable comments..."
-	@set +e; output="$$(rg -n 'eslint-disable(?:-next-line|-line)?' apps/desktop/src -g '!**/*.test.*' -g '!**/*.spec.*' 2>&1)"; status=$$?; set -e; \
-	if [ $$status -eq 0 ]; then printf '%s\n' "$$output"; echo "Production eslint-disable comments are forbidden." >&2; exit 1; \
-	elif [ $$status -ne 1 ]; then printf '%s\n' "$$output" >&2; exit $$status; fi
+	node scripts/check_no_eslint_disable.mjs
 
 desktop-typecheck:
 	@echo "Check strict desktop TypeScript..."
