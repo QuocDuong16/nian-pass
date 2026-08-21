@@ -3,6 +3,7 @@ name = "kdbx"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
+publish.workspace = true
 description = "KDBX adapter for Nian Pass"
 
 [dependencies]

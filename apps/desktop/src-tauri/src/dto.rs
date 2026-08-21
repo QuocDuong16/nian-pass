@@ -123,10 +123,10 @@ impl EntrySummaryDto {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, to_value};
+    use serde_json::{Value, from_str, json, to_value};
     use vault_core::SummaryText;
 
-    use super::SummaryTextDto;
+    use super::{EntrySummaryDto, GroupDto, SelectedVaultDto, SummaryTextDto, VaultSnapshotDto};
 
     #[test]
     fn summary_text_mapping_preserves_all_security_states() {
@@ -148,5 +148,44 @@ mod tests {
             let serialized = to_value(dto).expect("summary DTO should serialize");
             assert_eq!(serialized, expected);
         }
+    }
+
+    #[test]
+    fn committed_contract_fixture_matches_rust_serialization() {
+        let contract: Value = from_str(include_str!("../../contracts/desktop-contract.json"))
+            .expect("committed desktop contract should be valid JSON");
+        let selected = SelectedVaultDto {
+            file_name: "example.kdbx".to_owned(),
+        };
+        let snapshot = VaultSnapshotDto {
+            root_group_id: "group-root".to_owned(),
+            groups: vec![GroupDto {
+                id: "group-root".to_owned(),
+                name: "Root".to_owned(),
+                child_group_ids: Vec::new(),
+                entry_ids: vec!["entry-example".to_owned()],
+            }],
+            entries: vec![EntrySummaryDto {
+                id: "entry-example".to_owned(),
+                group_id: "group-root".to_owned(),
+                title: SummaryTextDto::Visible {
+                    value: "Example".to_owned(),
+                },
+                username: SummaryTextDto::Missing,
+                url: SummaryTextDto::Protected,
+                password_present: true,
+                notes_present: false,
+                tags: vec!["test".to_owned()],
+            }],
+        };
+
+        assert_eq!(
+            contract["selectedVault"],
+            to_value(selected).expect("selected vault DTO should serialize")
+        );
+        assert_eq!(
+            contract["snapshot"],
+            to_value(snapshot).expect("snapshot DTO should serialize")
+        );
     }
 }

@@ -28,7 +28,9 @@ export default function App({ api = desktopApi }: AppProps) {
       await api.lockVault();
       setSnapshot(null);
     } catch {
-      setLockError("Nian Pass could not lock the vault. Close the application to drop the session.");
+      setLockError(
+        "Nian Pass could not lock the vault. Close the application to drop the session.",
+      );
     } finally {
       setLocking(false);
     }

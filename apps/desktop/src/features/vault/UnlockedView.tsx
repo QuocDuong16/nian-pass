@@ -11,7 +11,12 @@ interface UnlockedViewProps {
   onLock: () => Promise<void>;
 }
 
-export function UnlockedView({ snapshot, locking, lockError, onLock }: UnlockedViewProps) {
+export function UnlockedView({
+  snapshot,
+  locking,
+  lockError,
+  onLock,
+}: UnlockedViewProps) {
   const [selectedGroupId, setSelectedGroupId] = useState(snapshot.rootGroupId);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const groupsById = useMemo(
@@ -22,7 +27,8 @@ export function UnlockedView({ snapshot, locking, lockError, onLock }: UnlockedV
     () => new Map(snapshot.entries.map((entry) => [entry.id, entry])),
     [snapshot.entries],
   );
-  const selectedGroup = groupsById.get(selectedGroupId) ?? groupsById.get(snapshot.rootGroupId);
+  const selectedGroup =
+    groupsById.get(selectedGroupId) ?? groupsById.get(snapshot.rootGroupId);
 
   if (selectedGroup === undefined) {
     throw new Error("Vault snapshot has no root group");
@@ -45,17 +51,26 @@ export function UnlockedView({ snapshot, locking, lockError, onLock }: UnlockedV
     <main className="vault-shell">
       <header className="top-bar">
         <div className="product-lockup">
-          <span className="brand-mark small" aria-hidden="true">N</span>
+          <span className="brand-mark small" aria-hidden="true">
+            N
+          </span>
           <div>
             <p className="eyebrow">Nian Pass</p>
             <h1>Vault browser</h1>
           </div>
         </div>
-        <button className="secondary-button lock-button" type="button" disabled={locking} onClick={() => void onLock()}>
+        <button
+          className="secondary-button lock-button"
+          type="button"
+          disabled={locking}
+          onClick={() => void onLock()}
+        >
           {locking ? "Locking…" : "Lock"}
         </button>
       </header>
-      <p className="shell-error" role="alert" aria-live="assertive">{lockError ?? ""}</p>
+      <p className="shell-error" role="alert" aria-live="assertive">
+        {lockError ?? ""}
+      </p>
       <div className="vault-layout">
         <GroupTree
           rootGroupId={snapshot.rootGroupId}

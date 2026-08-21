@@ -3,6 +3,7 @@ name = "vault-session"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
+publish.workspace = true
 description = "Verified local filesystem persistence for Nian Pass"
 
 [dependencies]

@@ -8,18 +8,21 @@ interface ErrorBoundaryState {
   failed: boolean;
 }
 
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { failed: false };
+export class ErrorBoundary extends Component<
+  ErrorBoundaryProps,
+  ErrorBoundaryState
+> {
+  override state: ErrorBoundaryState = { failed: false };
 
   static getDerivedStateFromError(): ErrorBoundaryState {
     return { failed: true };
   }
 
-  componentDidCatch(): void {
+  override componentDidCatch(): void {
     // Intentionally no runtime logging: component state may include vault metadata.
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.failed) {
       return (
         <main className="fatal-view" role="alert">

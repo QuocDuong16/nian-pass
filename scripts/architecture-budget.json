@@ -1,0 +1,27 @@
+{
+  "typescript": {
+    "defaultMaxLines": 250,
+    "exceptions": {}
+  },
+  "rust": {
+    "defaultMaxLines": 400,
+    "exceptions": {
+      "crates/kdbx/src/lib.rs": {
+        "maxLines": 992,
+        "reason": "Preservation-aware KDBX adapter accumulated before M4.Q; this exact ceiling prevents further growth while later decomposition preserves the sealed dependency boundary."
+      },
+      "crates/kdbx/src/sync.rs": {
+        "maxLines": 1706,
+        "reason": "The verified three-way merge engine predates M4.Q and is kept intact to avoid risky semantic churn; the exception is locked to its current production size."
+      },
+      "crates/vault-core/src/lib.rs": {
+        "maxLines": 416,
+        "reason": "The compact domain model is only slightly over the default and remains one cohesive secret-boundary module; no additional growth is permitted."
+      },
+      "crates/vault-session/src/lib.rs": {
+        "maxLines": 702,
+        "reason": "The existing verified persistence transaction is security-sensitive and remains cohesive for M4.Q; the current production size is an exact ceiling."
+      }
+    }
+  }
+}

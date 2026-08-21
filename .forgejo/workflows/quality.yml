@@ -8,7 +8,7 @@ on:
 jobs:
   rust:
     runs-on: docker
-    timeout-minutes: 20
+    timeout-minutes: 35
     container:
       image: rust:1.97.1-bookworm
 
@@ -17,7 +17,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           node_version="24.19.0"
-          # Forgejo's Docker runners may use either supported 64-bit architecture.
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
@@ -36,39 +35,32 @@ jobs:
           curl --fail --silent --show-error --location \
             --output "/tmp/${node_archive}" \
             "https://nodejs.org/dist/v${node_version}/${node_archive}"
-          echo "${node_checksum}  /tmp/${node_archive}" \
-            | sha256sum --check -
+          echo "${node_checksum}  /tmp/${node_archive}" | sha256sum --check -
           tar --extract --xz --file "/tmp/${node_archive}" \
             --directory /usr/local --strip-components=1
-          node --version
 
       - name: Check out repository
         uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
-      - name: Install Rust quality components
-        run: rustup component add rustfmt clippy
+      - name: Install pinned Rust quality tooling
+        run: make tools-install
 
-      - name: Verify KDBX fixture integrity
-        run: sha256sum --check fixtures/kdbx/SHA256SUMS
-
-      - name: Check formatting
-        run: cargo fmt --check
-
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets --all-features -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync -- -D warnings
-
-      - name: Run tests
-        run: cargo test --locked -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync
+      - name: Run canonical non-Tauri Rust gates
+        run: make rust-core-check rust-deps-check rust-security-check
 
   desktop-frontend:
     runs-on: docker
-    timeout-minutes: 20
+    timeout-minutes: 25
     container:
       image: node:24.19.0-bookworm
 
     steps:
       - name: Check out repository
         uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Activate pinned pnpm
         run: |
@@ -76,24 +68,20 @@ jobs:
           corepack install --global pnpm@11.22.0
           pnpm --version
 
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Run repository policy gates
+        run: make policy-check
 
-      - name: Lint desktop frontend
-        run: pnpm --filter @nian-pass/desktop lint
-
-      - name: Type-check desktop frontend
-        run: pnpm --filter @nian-pass/desktop typecheck
-
-      - name: Test desktop frontend
-        run: pnpm --filter @nian-pass/desktop test
-
-      - name: Build desktop frontend
-        run: pnpm --filter @nian-pass/desktop build
+      - name: Run canonical desktop frontend gates
+        run: |
+          set -Eeuo pipefail
+          base="${{ forgejo.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then base="${{ forgejo.event.before }}"; fi
+          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then base="origin/main"; fi
+          COVERAGE_DIFF_BASE="$base" make desktop-check
 
   desktop-native-check:
     runs-on: docker
-    timeout-minutes: 30
+    timeout-minutes: 50
     container:
       image: rust:1.97.1-bookworm
 
@@ -120,16 +108,16 @@ jobs:
           curl --fail --silent --show-error --location \
             --output "/tmp/${node_archive}" \
             "https://nodejs.org/dist/v${node_version}/${node_archive}"
-          echo "${node_checksum}  /tmp/${node_archive}" \
-            | sha256sum --check -
+          echo "${node_checksum}  /tmp/${node_archive}" | sha256sum --check -
           tar --extract --xz --file "/tmp/${node_archive}" \
             --directory /usr/local --strip-components=1
-          node --version
 
       - name: Check out repository
         uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
-      - name: Install Tauri Linux build prerequisites
+      - name: Install Tauri headless build prerequisites
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install \
@@ -144,16 +132,18 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
             wget
-          rustup component add clippy
 
-      - name: Check desktop native crate
-        run: cargo check --locked -p nian-pass-desktop
+      - name: Install pinned Rust quality tooling
+        run: make tools-install
 
-      - name: Test desktop service headlessly
-        run: cargo test --locked -p nian-pass-desktop
-
-      - name: Lint desktop native crate
-        run: cargo clippy --locked -p nian-pass-desktop --all-targets --all-features -- -D warnings
+      - name: Run native and Rust coverage gates headlessly
+        run: |
+          set -Eeuo pipefail
+          base="${{ forgejo.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then base="${{ forgejo.event.before }}"; fi
+          if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then base="origin/main"; fi
+          make desktop-native-check rust-coverage rust-coverage-check
+          COVERAGE_DIFF_BASE="$base" make rust-coverage-diff
 
   windows-cross-check:
     runs-on: docker
@@ -184,11 +174,9 @@ jobs:
           curl --fail --silent --show-error --location \
             --output "/tmp/${node_archive}" \
             "https://nodejs.org/dist/v${node_version}/${node_archive}"
-          echo "${node_checksum}  /tmp/${node_archive}" \
-            | sha256sum --check -
+          echo "${node_checksum}  /tmp/${node_archive}" | sha256sum --check -
           tar --extract --xz --file "/tmp/${node_archive}" \
             --directory /usr/local --strip-components=1
-          node --version
 
       - name: Check out repository
         uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -202,8 +190,8 @@ jobs:
             gcc-mingw-w64-x86-64
           rustup target add x86_64-pc-windows-gnu
 
-      - name: Check persistence and sync crates for Windows
-        run: cargo check --locked --all-targets --target x86_64-pc-windows-gnu -p vault-session -p vault-sync
+      - name: Run canonical Windows core cross-check
+        run: make windows-cross-check
 
   keepassxc-compat:
     runs-on: docker
@@ -216,7 +204,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           node_version="24.19.0"
-          # Forgejo's Docker runners may use either supported 64-bit architecture.
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
@@ -235,11 +222,9 @@ jobs:
           curl --fail --silent --show-error --location \
             --output "/tmp/${node_archive}" \
             "https://nodejs.org/dist/v${node_version}/${node_archive}"
-          echo "${node_checksum}  /tmp/${node_archive}" \
-            | sha256sum --check -
+          echo "${node_checksum}  /tmp/${node_archive}" | sha256sum --check -
           tar --extract --xz --file "/tmp/${node_archive}" \
             --directory /usr/local --strip-components=1
-          node --version
 
       - name: Check out repository
         uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -255,8 +240,5 @@ jobs:
           dpkg-query --showformat='Package: ${Package}\nVersion: ${Version}\n' \
             --show keepassxc
 
-      - name: Verify KDBX fixture integrity
-        run: sha256sum --check fixtures/kdbx/SHA256SUMS
-
-      - name: Run external KeePassXC compatibility suite
-        run: scripts/test-keepassxc-compat.sh --require
+      - name: Run required external compatibility gate
+        run: make fixture-check compat-check-required

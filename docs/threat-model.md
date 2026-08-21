@@ -1,9 +1,9 @@
 # Threat Model
 
-This is the threat model for the M3 local vault session/filesystem foundation
-and the M3.5 provider-independent merge core. It records boundaries and
-assumptions; it is not a claim that Nian Pass is ready to protect production
-credentials.
+This is the threat model for the M3 local vault session/filesystem foundation,
+the M3.5 provider-independent merge core, the M4.1 browse-only desktop, and the
+M4.Q quality/security gates. It records boundaries and assumptions; it is not a
+claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
 
@@ -93,6 +93,34 @@ information to an attacker even when their plaintext remains unavailable.
 - Cross-generation historical attachment references bound to the wrong binary
 - An invalid synthesized candidate escaping partial hierarchy checks
 - Secret plaintext or custom-field values exposed by conflict diagnostics
+- Malformed or drifted IPC data reaching React state
+- Browser persistence retaining master-password, vault, or session state
+- Direct Tauri IPC calls bypassing the reviewed desktop adapter
+- Remote assets, permissive CSP, or new Tauri capabilities widening the WebView
+- Render failures producing a blank screen or exposing raw exception text
+
+## M4.Q desktop and repository controls
+
+Production frontend code cannot use browser storage/cookies/cache APIs,
+`eval`, `Function`, `document.write`, `dangerouslySetInnerHTML`, console output,
+or runtime HTTP(S) assets. Only `src/lib/desktop.ts` may import Tauri core or
+invoke commands. Runtime IPC data is reconstructed through exact-key validators
+before use; malformed snapshots and unknown enum values fail closed as a
+generic internal error. The application-level ErrorBoundary renders fixed
+recovery guidance without the exception message, stack, props, state, or
+logging.
+
+Tauri capability JSON is held to `core:default`. The current Rust plugin
+allowlist is Tauri core plus dialog; filesystem, shell, HTTP, process, updater,
+and clipboard plugins are rejected. CSP is parsed and rejects wildcard default,
+script, or connect sources, `unsafe-eval`, and arbitrary HTTPS connections.
+The existing `style-src 'unsafe-inline'` remains a narrow styling requirement;
+it does not permit script execution and is tracked in the quality policy.
+
+Rust advisory, license, source, duplicate-version, and unused-dependency policy
+is machine checked. npm production dependencies are audited separately from
+dev-only tooling. Coverage is a regression guard, not proof of security; exact
+DTO whitelist and state-transition assertions remain required.
 
 ## Security assumptions
 

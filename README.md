@@ -19,7 +19,15 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M4.0 + M4.1 — Desktop Shell + Unlock/Browse Vault
+M4.Q — Quality, Security & Architecture Gates
+
+M4.Q adds machine-enforced repository policy without adding product features.
+The root `Makefile` is the single developer/CI interface for formatting, typed
+linting, tests, coverage and changed-line coverage, dependency policy, dead
+code, architecture/security invariants, contract drift, builds, and docs.
+
+M4.0 + M4.1 remain the current product functionality: Desktop Shell +
+Unlock/Browse Vault.
 
 `apps/desktop` is the first visible Nian Pass application: a Tauri 2 shell with
 React, strict TypeScript, Vite, and pnpm. It selects a local `.kdbx` through a
@@ -122,24 +130,26 @@ version from the opened file plus group and entry counts.
 ## Development
 
 ```bash
-sha256sum --check fixtures/kdbx/SHA256SUMS
-cargo fmt --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace
-# Skips clearly when keepassxc-cli is unavailable locally.
-scripts/test-keepassxc-compat.sh
+make tools-install     # one-time pinned Rust quality tooling
+make quality-check    # canonical full pre-merge gate
+make quick-check      # faster feedback; not equivalent to quality-check
 ```
 
-Desktop frontend gates use the pinned pnpm version from the root
-`packageManager` field:
+`quality-check` uses frozen Cargo/pnpm lockfiles, remains headless, and runs the
+external KeePassXC suite when `keepassxc-cli` is available. Forgejo requires
+that compatibility suite in its dedicated job. Node comes from `.node-version`
+and pnpm from the exact root `packageManager` field.
+
+Individual reusable targets remain available for focused work:
 
 ```bash
-corepack enable
-pnpm install --frozen-lockfile
-pnpm --filter @nian-pass/desktop lint
-pnpm --filter @nian-pass/desktop typecheck
-pnpm --filter @nian-pass/desktop test
-pnpm --filter @nian-pass/desktop build
+make fixture-check
+make scripts-check
+make architecture-check
+make rust-check
+make desktop-check
+make security-check
+make docs-check
 ```
 
 ### Headless Linux desktop development
@@ -184,6 +194,8 @@ missing external binary is a failure rather than a skip.
 
 See [the architecture](docs/architecture.md) and
 [threat model](docs/threat-model.md) for the current boundaries and known gaps.
+See [quality policy](docs/quality.md) for pinned tools, coverage ratchets,
+dependency/advisory handling, and the reviewed exception process.
 
 Nian Pass remains experimental and is not production-ready. The desktop UI is
 browse-only; there is no cloud transport/provider integration, manual conflict-resolution UI, file

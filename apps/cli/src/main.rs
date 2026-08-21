@@ -1,3 +1,7 @@
+// This binary's stdout/stderr is its explicit user-facing command interface,
+// not application logging or telemetry. Output remains metadata-only and sanitized.
+#![allow(clippy::print_stderr, clippy::print_stdout)]
+
 use std::{borrow::Cow, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand};

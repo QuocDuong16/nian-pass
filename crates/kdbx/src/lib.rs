@@ -4,6 +4,9 @@
 //! implementation. Callers receive only adapter-owned types and `vault_core`
 //! domain values.
 
+// External compatibility tests surface child-process diagnostics on failure only.
+#![cfg_attr(test, allow(clippy::print_stderr))]
+
 mod sync;
 
 use std::{

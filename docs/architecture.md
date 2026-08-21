@@ -7,6 +7,37 @@ verified filesystem persistence beneath it. M3.5 adds provider-independent,
 synchronous three-way semantic merge; the M4.1 desktop does not call sync or
 expose editing/save behavior.
 
+M4.Q adds no product behavior. It makes these boundaries executable through
+the root `Makefile`, tested architecture/security scripts, dependency policy,
+coverage ratchets, and Forgejo jobs that call the same targets used locally.
+
+## M4.Q quality architecture
+
+`make quality-check` composes small reusable gates rather than duplicating
+their commands. Rust gates cover the complete workspace, including the Tauri
+crate, while frontend gates use strict typed ESLint, TypeScript, Vitest,
+Prettier, Knip, Vite build, and production-only pnpm audit. Forgejo owns only
+runner setup and calls those Make targets.
+
+The architecture guard parses Cargo dependency declarations, confines
+`keepass` and Tauri to their intended layers, confines `#[tauri::command]` and
+frontend `invoke`, enforces production line budgets, and rejects serialization
+on `SecretString`, `KdbxDocument`, and `VaultSession`. The security guard parses
+Tauri capability JSON and CSP, enforces the M4.Q plugin allowlist, and rejects
+browser persistence, runtime remote assets, dangerous JavaScript, console
+logging, or forbidden Rust diagnostics outside tests. Both guards have
+behavioral fixture tests.
+
+The Rust/TypeScript IPC types remain handwritten, but drift is no longer
+unchecked. A committed JSON contract fixture is compared against actual Rust
+Serde output and consumed by TypeScript runtime validators. The validators
+require exact keys, known enum variants, correct primitive types, a real root
+group, unique identities, valid group/entry references, and a complete acyclic
+tree before any IPC value enters React state. Unknown errors become the generic
+`internal` code. A generator dependency was deliberately deferred because this
+narrow fixture/validator boundary provides runtime safety without deriving a
+third-party export trait on secret-bearing domain types.
+
 ## Dependency direction
 
 ```text

@@ -1,5 +1,7 @@
 /target/
 /node_modules/
+/.bin/
 /apps/desktop/dist/
+/apps/desktop/coverage/
 /apps/desktop/src-tauri/gen/
 /apps/desktop/node_modules/

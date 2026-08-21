@@ -11,7 +11,12 @@ interface GroupNodeProps extends Omit<GroupTreeProps, "rootGroupId"> {
   groupId: string;
 }
 
-function GroupNode({ groupId, groupsById, selectedGroupId, onSelect }: GroupNodeProps) {
+function GroupNode({
+  groupId,
+  groupsById,
+  selectedGroupId,
+  onSelect,
+}: GroupNodeProps) {
   const group = groupsById.get(groupId);
   if (group === undefined) {
     return null;
@@ -20,14 +25,20 @@ function GroupNode({ groupId, groupsById, selectedGroupId, onSelect }: GroupNode
   return (
     <li>
       <button
-        className={group.id === selectedGroupId ? "group-button selected" : "group-button"}
+        className={
+          group.id === selectedGroupId
+            ? "group-button selected"
+            : "group-button"
+        }
         type="button"
         aria-current={group.id === selectedGroupId ? "true" : undefined}
         onClick={() => {
           onSelect(group.id);
         }}
       >
-        <span className="folder-glyph" aria-hidden="true">▸</span>
+        <span className="folder-glyph" aria-hidden="true">
+          ▸
+        </span>
         <span>{group.name || "Unnamed group"}</span>
       </button>
       {group.childGroupIds.length > 0 ? (

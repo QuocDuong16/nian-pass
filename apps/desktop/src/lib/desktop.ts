@@ -5,6 +5,12 @@ import type {
   SelectedVaultDto,
   VaultSnapshotDto,
 } from "../types/desktop";
+import {
+  parseDesktopErrorCode,
+  parseNull,
+  parseSelectedVault,
+  parseVaultSnapshot,
+} from "./validation";
 
 export interface DesktopApi {
   selectVault: () => Promise<SelectedVaultDto | null>;
@@ -23,38 +29,47 @@ export class DesktopCommandError extends Error {
   }
 }
 
-const knownErrorCodes = new Set<DesktopErrorCode>([
-  "already_unlocked",
-  "locked",
-  "no_vault_selected",
-  "unlock_failed",
-  "unsupported_vault",
-  "internal",
-]);
-
 function toDesktopError(error: unknown): DesktopCommandError {
+  if (error instanceof DesktopCommandError) return error;
   if (typeof error === "object" && error !== null && "code" in error) {
-    const code = Reflect.get(error, "code");
-    if (typeof code === "string" && knownErrorCodes.has(code as DesktopErrorCode)) {
-      return new DesktopCommandError(code as DesktopErrorCode);
+    try {
+      return new DesktopCommandError(
+        parseDesktopErrorCode(Reflect.get(error, "code")),
+      );
+    } catch {
+      return new DesktopCommandError("internal");
     }
   }
   return new DesktopCommandError("internal");
 }
 
-async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+async function call<T>(
+  command: string,
+  parse: (value: unknown) => T,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  let value: unknown;
   try {
-    return await invoke<T>(command, args);
+    value = await invoke<unknown>(command, args);
   } catch (error: unknown) {
     throw toDesktopError(error);
+  }
+  try {
+    return parse(value);
+  } catch {
+    throw new DesktopCommandError("internal");
   }
 }
 
 export const desktopApi: DesktopApi = {
-  selectVault: () => call<SelectedVaultDto | null>("select_vault"),
-  unlockVault: (password) => call<VaultSnapshotDto>("unlock_vault", { password }),
-  getVaultSnapshot: () => call<VaultSnapshotDto>("vault_snapshot"),
+  selectVault: () =>
+    call("select_vault", (value) =>
+      value === null ? null : parseSelectedVault(value),
+    ),
+  unlockVault: (password) =>
+    call("unlock_vault", parseVaultSnapshot, { password }),
+  getVaultSnapshot: () => call("vault_snapshot", parseVaultSnapshot),
   lockVault: async () => {
-    await call<null>("lock_vault");
+    await call("lock_vault", parseNull);
   },
 };

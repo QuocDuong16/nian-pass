@@ -100,3 +100,36 @@ pub fn lock_vault(state: State<'_, AppState>) -> Result<(), DesktopErrorDto> {
         .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
     service.lock().map_err(Into::into)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, from_str, to_value};
+
+    use super::DesktopErrorDto;
+    use crate::state::DesktopError;
+
+    #[test]
+    fn committed_contract_fixture_matches_all_error_codes() {
+        let contract: Value = from_str(include_str!("../../contracts/desktop-contract.json"))
+            .expect("committed desktop contract should be valid JSON");
+        let errors = [
+            DesktopError::AlreadyUnlocked,
+            DesktopError::Locked,
+            DesktopError::NoVaultSelected,
+            DesktopError::UnlockFailed,
+            DesktopError::UnsupportedVault,
+            DesktopError::Internal,
+        ];
+        let serialized: Vec<Value> = errors
+            .into_iter()
+            .map(DesktopErrorDto::from)
+            .map(|error| to_value(error).expect("desktop error DTO should serialize"))
+            .map(|error| error["code"].clone())
+            .collect();
+
+        assert_eq!(
+            contract["errorCodes"],
+            to_value(serialized).expect("error code list should serialize")
+        );
+    }
+}

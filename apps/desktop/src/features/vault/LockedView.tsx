@@ -1,14 +1,18 @@
 import { useState, type SyntheticEvent } from "react";
 
-import type { DesktopApi } from "../../lib/desktop";
-import type { SelectedVaultDto, VaultSnapshotDto } from "../../types/desktop";
+import { DesktopCommandError, type DesktopApi } from "../../lib/desktop";
+import type {
+  DesktopErrorCode,
+  SelectedVaultDto,
+  VaultSnapshotDto,
+} from "../../types/desktop";
 
 interface LockedViewProps {
   api: DesktopApi;
   onUnlocked: (snapshot: VaultSnapshotDto) => void;
 }
 
-function unlockMessage(code: string): string {
+function unlockMessage(code: DesktopErrorCode): string {
   switch (code) {
     case "unlock_failed":
       return "Could not unlock this vault. Check the password and try again.";
@@ -16,17 +20,15 @@ function unlockMessage(code: string): string {
       return "This file is not a supported KDBX vault.";
     case "already_unlocked":
       return "Lock the current vault before opening another one.";
-    default:
+    case "locked":
+    case "no_vault_selected":
+    case "internal":
       return "Nian Pass could not open the vault. Try again.";
   }
 }
 
-function errorCode(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = Reflect.get(error, "code");
-    return typeof code === "string" ? code : "internal";
-  }
-  return "internal";
+function errorCode(error: unknown): DesktopErrorCode {
+  return error instanceof DesktopCommandError ? error.code : "internal";
 }
 
 export function LockedView({ api, onUnlocked }: LockedViewProps) {
@@ -71,12 +73,20 @@ export function LockedView({ api, onUnlocked }: LockedViewProps) {
   return (
     <main className="locked-view">
       <section className="unlock-card" aria-labelledby="unlock-title">
-        <div className="brand-mark" aria-hidden="true">N</div>
+        <div className="brand-mark" aria-hidden="true">
+          N
+        </div>
         <p className="eyebrow">Nian Pass</p>
         <h1 id="unlock-title">Open your vault</h1>
-        <p className="unlock-intro">Choose a local KDBX file, then enter its master password.</p>
+        <p className="unlock-intro">
+          Choose a local KDBX file, then enter its master password.
+        </p>
 
-        <button className="secondary-button file-button" type="button" onClick={() => void chooseVault()}>
+        <button
+          className="secondary-button file-button"
+          type="button"
+          onClick={() => void chooseVault()}
+        >
           Choose KDBX file
         </button>
         <p className="selected-file" aria-live="polite">

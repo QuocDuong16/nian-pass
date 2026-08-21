@@ -1,0 +1,36 @@
+{
+  "selectedVault": {
+    "fileName": "example.kdbx"
+  },
+  "snapshot": {
+    "rootGroupId": "group-root",
+    "groups": [
+      {
+        "id": "group-root",
+        "name": "Root",
+        "childGroupIds": [],
+        "entryIds": ["entry-example"]
+      }
+    ],
+    "entries": [
+      {
+        "id": "entry-example",
+        "groupId": "group-root",
+        "title": { "kind": "visible", "value": "Example" },
+        "username": { "kind": "missing" },
+        "url": { "kind": "protected" },
+        "passwordPresent": true,
+        "notesPresent": false,
+        "tags": ["test"]
+      }
+    ]
+  },
+  "errorCodes": [
+    "already_unlocked",
+    "locked",
+    "no_vault_selected",
+    "unlock_failed",
+    "unsupported_vault",
+    "internal"
+  ]
+}
