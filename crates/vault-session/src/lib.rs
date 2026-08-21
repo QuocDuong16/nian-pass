@@ -370,6 +370,32 @@ pub enum SessionError {
     InjectedFailure,
 }
 
+impl SessionError {
+    /// Returns whether an open failed because the supplied credential was rejected.
+    ///
+    /// This classification lets application adapters map authentication failure
+    /// without depending directly on the sealed KDBX adapter or exposing its
+    /// parser and cryptography details.
+    #[must_use]
+    pub const fn is_open_credential_rejected(&self) -> bool {
+        matches!(self, Self::Kdbx(KdbxError::InvalidCredentials))
+    }
+
+    /// Returns whether an open target is not a supported local KDBX vault.
+    ///
+    /// The classification deliberately groups path, read, malformed-file, and
+    /// unsupported-format failures so desktop errors remain path-free.
+    #[must_use]
+    pub const fn is_unsupported_open_target(&self) -> bool {
+        matches!(
+            self,
+            Self::UnsupportedPath
+                | Self::ReadSource(_)
+                | Self::Kdbx(KdbxError::InvalidKdbx | KdbxError::UnsupportedFormat)
+        )
+    }
+}
+
 fn canonical_regular_file(path: &Path) -> Result<PathBuf, SessionError> {
     let metadata = fs::symlink_metadata(path).map_err(SessionError::ReadSource)?;
     if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {

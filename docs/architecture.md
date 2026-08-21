@@ -1,18 +1,23 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M3 provides an unlocked local session and verified
-filesystem persistence. M3.5 adds provider-independent, synchronous three-way
-semantic merge without adding a UI, transport, cloud provider, or background
-service.
+the source of truth. M4.0/M4.1 adds a Tauri 2 + React desktop shell for local
+open, unlock, browse, and lock. M3 provides the unlocked local session and
+verified filesystem persistence beneath it. M3.5 adds provider-independent,
+synchronous three-way semantic merge; the M4.1 desktop does not call sync or
+expose editing/save behavior.
 
 ## Dependency direction
 
 ```text
-future UI
- ├── vault-session
- │    ├── kdbx
- │    └── vault-core
+React WebView
+ └── secret-free DTOs / typed Tauri commands
+      └── desktop Rust adapter
+           └── vault-session
+                ├── kdbx
+                └── vault-core
+
+future sync application path
  └── vault-sync
       ├── kdbx
       └── vault-core
@@ -28,6 +33,50 @@ kdbx
 vault-core
  └── no KDBX dependency
 ```
+
+## M4.1 desktop security boundary
+
+The frontend is a presentation client, not the vault source of truth. The
+desktop Rust adapter owns one `DesktopVaultService`, protected by
+application-managed synchronization, and that service owns at most one
+`VaultSession`. Selecting a file stores its absolute path only in Rust and
+returns a display filename. Unlocking moves the IPC password string immediately
+into `SecretString`, calls `VaultSession::open` on Tauri's blocking runtime,
+builds a secret-free projection, and drops the credential before returning.
+
+```text
+master password (one explicit attempt)
+  -> React password input
+  -> unlock_vault IPC
+  -> SecretString
+  -> VaultSession::open
+  -> credential dropped
+
+Rust-owned VaultSession
+  -> Vault projection
+  -> reviewed desktop DTOs
+  -> React group/entry browser
+```
+
+The DTO boundary consists only of `SelectedVaultDto`, `VaultSnapshotDto`,
+`GroupDto`, `EntrySummaryDto`, `SummaryTextDto`, and the stable error-code
+payload. `SummaryTextDto` preserves Missing, Visible (including visible empty),
+and Protected. Entry DTOs include stable IDs, group membership, title/username/
+URL summaries, tags, and password/notes presence booleans. They exclude password
+and notes plaintext, custom-field values, TOTP/passkey data, attachments, raw
+KDBX state, and the master password.
+
+Lock calls `Option<VaultSession>::take`, consumes `VaultSession::lock`, clears
+the selected Rust path, and only then lets React discard its snapshot and
+selection state. Closing the process naturally drops the same Rust state. No
+autosave or save-on-drop exists. A second unlock is rejected until Lock.
+
+The only Tauri plugin is `dialog`, used from Rust for native `.kdbx` selection.
+The main WebView capability grants `core:default`; no dialog command is exposed
+to JavaScript, and no filesystem, shell, HTTP, process, updater, clipboard, or
+remote-content capability is enabled. Production CSP permits bundled local
+assets and Tauri IPC only; it forbids remote scripts, objects, frames, and
+`unsafe-eval`.
 
 `vault-core` owns KDBX-independent domain types. `crates/kdbx` is the adapter
 that contains all `keepass-rs` types and converts them to the domain model. The
@@ -288,6 +337,8 @@ KDF, cipher, or compression migration.
 26. **Ambiguous concurrent changes must return conflicts, never timestamp/file-level last-writer-wins.**
 27. **Tombstones, not absence alone, establish intentional deletion.**
 28. **A conflicted merge must not return or install a partially synthesized database.**
+29. **The unlocked `VaultSession` must remain Rust-owned; JavaScript receives only reviewed secret-free browse DTOs.**
+30. **UI Lock must drop the Rust session, not merely hide the unlocked view.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.

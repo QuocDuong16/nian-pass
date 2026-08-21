@@ -19,7 +19,21 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M3.5 — Conflict-safe Sync Engine
+M4.0 + M4.1 — Desktop Shell + Unlock/Browse Vault
+
+`apps/desktop` is the first visible Nian Pass application: a Tauri 2 shell with
+React, strict TypeScript, Vite, and pnpm. It selects a local `.kdbx` through a
+native dialog, unlocks a Rust-owned `VaultSession` with a password supplied for
+that attempt only, displays the group tree and secret-free entry summaries, and
+explicitly drops the session on Lock. The absolute selected path remains in
+Rust; JavaScript receives only the selected filename and presentation DTOs.
+
+M4.1 is browse-only. It has no password reveal/copy, entry detail, editing,
+save UI, search, cloud transport, autosave, or background file monitoring. The
+desktop source, frontend headless tests/build, and native headless compile are
+available, but Nian Pass is still experimental and not a user-ready product.
+
+M3.5 remains complete as the underlying conflict-safe sync engine.
 
 The workspace now includes `vault-sync`, a synchronous provider-independent
 three-way semantic merge core. Callers supply an explicit last common BASE plus
@@ -116,6 +130,54 @@ cargo test --locked --workspace
 scripts/test-keepassxc-compat.sh
 ```
 
+Desktop frontend gates use the pinned pnpm version from the root
+`packageManager` field:
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm --filter @nian-pass/desktop lint
+pnpm --filter @nian-pass/desktop typecheck
+pnpm --filter @nian-pass/desktop test
+pnpm --filter @nian-pass/desktop build
+```
+
+### Headless Linux desktop development
+
+Native compilation does not require an X11/Wayland session. On Debian
+Bookworm/Ubuntu, install the Tauri 2 build prerequisites without installing a
+desktop environment:
+
+```bash
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Then run the no-GUI native gates:
+
+```bash
+cargo check --locked -p nian-pass-desktop
+cargo test --locked -p nian-pass-desktop
+pnpm --filter @nian-pass/desktop tauri build --no-bundle
+```
+
+`tauri build --no-bundle` compiles the native application without producing an
+installer and does not launch a window. `pnpm --filter @nian-pass/desktop dev`
+serves only the frontend and is useful for browser-oriented UI work, but real
+desktop commands require Tauri.
+
+On a graphical Linux, Windows, or macOS development machine, a manual runtime
+smoke test can use:
+
+```bash
+pnpm --filter @nian-pass/desktop tauri dev
+```
+
+The expected flow is select a synthetic fixture, enter its public fixture
+password, browse groups/entries, and Lock back to the unlock screen. `tauri
+dev` is intentionally not a headless or Forgejo quality gate.
+
 The dedicated Forgejo compatibility job installs the pinned Debian Bookworm
 KeePassXC package and runs `scripts/test-keepassxc-compat.sh --require`, where a
 missing external binary is a failure rather than a skip.
@@ -123,8 +185,8 @@ missing external binary is a failure rather than a skip.
 See [the architecture](docs/architecture.md) and
 [threat model](docs/threat-model.md) for the current boundaries and known gaps.
 
-Nian Pass remains experimental and is not production-ready. There is no UI,
-cloud transport/provider integration, manual conflict-resolution UI, file
+Nian Pass remains experimental and is not production-ready. The desktop UI is
+browse-only; there is no cloud transport/provider integration, manual conflict-resolution UI, file
 watcher, autosave timer, keyfile support, master-
 password rotation, biometric unlock, or guaranteed zeroization of all decrypted
 allocations owned by `keepass-rs`. The CLI remains read-only. Local persistence

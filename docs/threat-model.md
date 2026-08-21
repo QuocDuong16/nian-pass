@@ -281,6 +281,47 @@ conflict, upload, save, choose a side, or mutate an input. Provider/transport
 races, multi-writer BASE selection, explicit manual resolution, and safe
 installation through `VaultSession` remain outside M3.5.
 
+## M4.1 desktop threats and controls
+
+The WebView necessarily originates the password for an explicit unlock, but it
+must not become a second unlocked-vault owner. Controls are:
+
+- The password input is `type=password`, uses no browser storage or persistence
+  middleware, is never logged, and is cleared immediately after every unlock
+  attempt. The Tauri command moves the owned IPC string directly into
+  `SecretString`; neither the desktop service nor `VaultSession` retains it.
+- The selected absolute path stays in Rust. The WebView receives only a display
+  filename, and public desktop errors contain stable codes without paths,
+  parser failures, MAC/cipher/KDF details, or dependency debug output.
+- Rust owns the only unlocked `VaultSession`. Browse DTOs are explicit serde
+  types and a serialization allowlist test checks their reviewed field set.
+  Password/notes/custom values, TOTP/passkey data, attachments, master password,
+  `KdbxDocument`, and `VaultSession` are not serializable across this boundary.
+- `SummaryText::Protected` maps to a marker-only DTO. Missing, visible empty,
+  visible text, and protected remain distinct; protected standard-field
+  plaintext is never fetched for list rendering.
+- Explicit Lock takes and consumes the Rust session, clears the Rust-selected
+  path, and then clears the frontend snapshot and selected IDs. Duplicate unlock
+  is rejected while a session exists. Window/process close drops app state and
+  never autosaves.
+- Every Tauri `invoke` is confined to one frontend adapter. Command errors use
+  the fixed codes `already_unlocked`, `locked`, `no_vault_selected`,
+  `unlock_failed`, `unsupported_vault`, and `internal`.
+- The only plugin is the native dialog plugin, called from Rust. The WebView has
+  `core:default` only; there is no filesystem, shell, HTTP, process, updater, or
+  clipboard permission. Production CSP permits bundled local assets and IPC,
+  excludes remote content, and does not allow `unsafe-eval`.
+- Rust service tests open the immutable synthetic KDBX fixture without a
+  WebView. React tests mock the desktop adapter, so headless CI never needs to
+  launch GTK/WebKit or create a display server.
+
+Residual risks remain: JavaScript strings and `keepass-rs` allocations cannot
+be guaranteed physically zeroized, a compromised WebView could observe the
+password while it is entered or in flight, privacy-sensitive group/entry
+metadata is intentionally present in the WebView while unlocked, and a native
+runtime smoke test still requires a graphical host. M4.1 has no reveal, copy,
+editing, save, sync transport, autosave, or auto-lock timer.
+
 ## M3 residual risks
 
 SHA-256 checks provide optimistic conflict detection, not cooperative locking.
