@@ -14,7 +14,7 @@ for feedback but is intentionally not equivalent to the full gate.
 ## Toolchain and local prerequisites
 
 - Rust 1.97.1 with rustfmt, Clippy, and `llvm-tools-preview`
-- Node 24.19.0 from `.node-version`
+- Node 26.7.0 from `.node-version`
 - pnpm 11.22.0 from the root `packageManager`
 - GNU Make
 - Tauri's documented headless GTK/WebKit development packages

@@ -31,13 +31,13 @@ function fixture(t) {
       "OpenWiki is not the source of truth.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
-  write(root, ".node-version", "24.19.0\n");
+  write(root, ".node-version", "26.7.0\n");
   write(
     root,
     "package.json",
-    '{"engines":{"node":"24.19.0"},"packageManager":"pnpm@11.22.0"}\n',
+    '{"engines":{"node":"26.7.0"},"packageManager":"pnpm@11.22.0"}\n',
   );
-  write(root, ".forgejo/workflows/quality.yml", "node:24.19.0\npnpm@11.22.0\n");
+  write(root, ".forgejo/workflows/quality.yml", "node:26.7.0\npnpm@11.22.0\n");
   return root;
 }
 
@@ -47,7 +47,7 @@ test("complete policy documentation passes", (t) => {
 
 test("runtime version drift is rejected", (t) => {
   const root = fixture(t);
-  write(root, ".node-version", "24.20.0\n");
+  write(root, ".node-version", "26.7.1\n");
   assert.match(runChecks(root).join("\n"), /same exact version/);
 });
 

@@ -16,15 +16,15 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="24.19.0"
+          node_version="26.7.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc"
+              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -54,7 +54,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 25
     container:
-      image: node:24.19.0-bookworm
+      image: node:26.7.0-bookworm
 
     steps:
       - name: Check out repository
@@ -89,15 +89,15 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="24.19.0"
+          node_version="26.7.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc"
+              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -155,15 +155,15 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="24.19.0"
+          node_version="26.7.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc"
+              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -203,15 +203,15 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="24.19.0"
+          node_version="26.7.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647"
+              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc"
+              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
