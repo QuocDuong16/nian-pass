@@ -94,6 +94,10 @@ export function runChecks(root) {
     [/(?:\bnew\s+Function\s*\(|\bFunction\s*\()/g, "Function constructors are forbidden"],
     [/https?:\/\//g, "runtime remote URLs/assets are forbidden in production frontend source"],
     [/@tauri-apps\/plugin-/g, "Tauri JavaScript plugins are not approved for the M4.Q frontend"],
+    [
+      /\b(?:(?:window|globalThis)\s*\.\s*)?navigator\s*(?:(?:\?\.|\.)\s*clipboard\b|\[\s*["']clipboard["']\s*\])/g,
+      "browser clipboard access is forbidden; use semantic Rust IPC commands",
+    ],
   ];
   for (const path of frontendProductionFiles(root)) {
     const source = readFileSync(path, "utf8");
@@ -124,7 +128,10 @@ export function runChecks(root) {
       );
     }
     for (const match of source.matchAll(/\btauri_plugin_([A-Za-z0-9_]+)/g)) {
-      if (match[1] !== "dialog") {
+      const approvedDesktopPlugin =
+        name.startsWith("apps/desktop/src-tauri/") &&
+        (match[1] === "dialog" || match[1] === "clipboard_manager");
+      if (!approvedDesktopPlugin) {
         violations.push(
           `${name}:${lineNumberAt(source, match.index)}: Tauri plugin ${match[1]} is not approved for M4.Q`,
         );
@@ -146,6 +153,12 @@ export function runChecks(root) {
   }
   for (const pkg of loadWorkspacePackages(root)) {
     for (const dependency of pkg.dependencies) {
+      if (
+        dependency.packageName === "tauri-plugin-clipboard-manager" &&
+        pkg.manifestPath === "apps/desktop/src-tauri/Cargo.toml"
+      ) {
+        continue;
+      }
       if (forbiddenPlugins.has(dependency.packageName)) {
         violations.push(
           `${pkg.manifestPath}: forbidden current-milestone plugin ${dependencyLabel(dependency)}`,

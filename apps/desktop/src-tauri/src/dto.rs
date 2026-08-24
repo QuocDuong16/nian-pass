@@ -1,5 +1,7 @@
 use serde::Serialize;
-use vault_core::{EntrySummary, Group, SummaryText, Vault};
+use vault_core::{CustomFieldSummary, EntrySummary, FieldProtection, Group, SummaryText, Vault};
+
+use crate::clipboard::{ClipboardClearStatus, ClipboardCopy};
 
 /// Filename metadata returned after a native file selection.
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -41,6 +43,51 @@ pub struct EntrySummaryDto {
     pub tags: Vec<String>,
 }
 
+/// Secret-free metadata for a selected entry.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryDetailDto {
+    pub id: String,
+    pub title: SummaryTextDto,
+    pub username: SummaryTextDto,
+    pub url: SummaryTextDto,
+    pub password_present: bool,
+    pub notes_present: bool,
+    pub custom_fields: Vec<CustomFieldSummaryDto>,
+}
+
+/// A custom-field name and protection state, deliberately without its value.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFieldSummaryDto {
+    pub name: String,
+    pub protection: FieldProtectionDto,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldProtectionDto {
+    Protected,
+    Unprotected,
+}
+
+/// Safe confirmation that clipboard I/O succeeded.
+#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardReceiptDto {
+    pub copied: bool,
+    pub expires_in_ms: u64,
+}
+
+/// Lock always drops the session; this reports best-effort clipboard cleanup.
+#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "clipboard")]
+pub enum LockResultDto {
+    Cleared,
+    NotOwned,
+    ClearFailed,
+}
+
 /// Explicit projection that preserves missing, visible-empty, and protected.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -73,6 +120,52 @@ impl VaultSnapshotDto {
             root_group_id: vault.root().id().as_str().to_owned(),
             groups,
             entries,
+        }
+    }
+}
+
+impl EntryDetailDto {
+    #[must_use]
+    pub fn from_entry(entry: &EntrySummary, custom_fields: &[CustomFieldSummary]) -> Self {
+        Self {
+            id: entry.id().as_str().to_owned(),
+            title: entry.title().into(),
+            username: entry.username().into(),
+            url: entry.url().into(),
+            password_present: entry.has_password(),
+            notes_present: entry.has_notes(),
+            custom_fields: custom_fields.iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&CustomFieldSummary> for CustomFieldSummaryDto {
+    fn from(value: &CustomFieldSummary) -> Self {
+        Self {
+            name: value.name().to_owned(),
+            protection: match value.protection() {
+                FieldProtection::Protected => FieldProtectionDto::Protected,
+                FieldProtection::Unprotected => FieldProtectionDto::Unprotected,
+            },
+        }
+    }
+}
+
+impl From<ClipboardCopy> for ClipboardReceiptDto {
+    fn from(value: ClipboardCopy) -> Self {
+        Self {
+            copied: true,
+            expires_in_ms: value.expires_in_ms,
+        }
+    }
+}
+
+impl From<ClipboardClearStatus> for LockResultDto {
+    fn from(value: ClipboardClearStatus) -> Self {
+        match value {
+            ClipboardClearStatus::Cleared => Self::Cleared,
+            ClipboardClearStatus::NotOwned => Self::NotOwned,
+            ClipboardClearStatus::ClearFailed => Self::ClearFailed,
         }
     }
 }
@@ -124,9 +217,13 @@ impl EntrySummaryDto {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, from_str, json, to_value};
-    use vault_core::SummaryText;
+    use vault_core::{CustomFieldSummary, EntryId, EntrySummary, FieldProtection, SummaryText};
 
-    use super::{EntrySummaryDto, GroupDto, SelectedVaultDto, SummaryTextDto, VaultSnapshotDto};
+    use super::{
+        ClipboardReceiptDto, EntryDetailDto, EntrySummaryDto, GroupDto, LockResultDto,
+        SelectedVaultDto, SummaryTextDto, VaultSnapshotDto,
+    };
+    use crate::clipboard::{CLIPBOARD_CLEAR_MS, ClipboardClearStatus, ClipboardCopy};
 
     #[test]
     fn summary_text_mapping_preserves_all_security_states() {
@@ -187,5 +284,86 @@ mod tests {
             contract["snapshot"],
             to_value(snapshot).expect("snapshot DTO should serialize")
         );
+
+        let entry = EntrySummary::new(
+            EntryId::new("entry-example"),
+            SummaryText::Visible("Example".to_owned()),
+            SummaryText::Protected,
+            SummaryText::Missing,
+            Vec::new(),
+            true,
+            true,
+        );
+        let detail = EntryDetailDto::from_entry(
+            &entry,
+            &[
+                CustomFieldSummary::new("Recovery hint", FieldProtection::Protected),
+                CustomFieldSummary::new("Region", FieldProtection::Unprotected),
+            ],
+        );
+        assert_eq!(
+            contract["entryDetail"],
+            to_value(detail).expect("entry detail should serialize")
+        );
+        assert_eq!(
+            contract["clipboardReceipt"],
+            to_value(ClipboardReceiptDto::from(ClipboardCopy {
+                generation: 1,
+                expires_in_ms: CLIPBOARD_CLEAR_MS,
+            }))
+            .expect("clipboard receipt should serialize")
+        );
+        let lock_results = [
+            ClipboardClearStatus::Cleared,
+            ClipboardClearStatus::NotOwned,
+            ClipboardClearStatus::ClearFailed,
+        ]
+        .map(LockResultDto::from);
+        assert_eq!(
+            contract["lockResults"],
+            to_value(lock_results).expect("lock results should serialize")
+        );
+    }
+
+    #[test]
+    fn entry_detail_serialization_has_only_secret_free_reviewed_keys() {
+        let detail = EntryDetailDto::from_entry(
+            &EntrySummary::new(
+                EntryId::new("entry-id"),
+                SummaryText::Visible("Title".to_owned()),
+                SummaryText::Protected,
+                SummaryText::Visible("https://example.test".to_owned()),
+                Vec::new(),
+                true,
+                true,
+            ),
+            &[CustomFieldSummary::new(
+                "Synthetic field name",
+                FieldProtection::Protected,
+            )],
+        );
+        let value = to_value(detail).expect("entry detail should serialize");
+        let object = value.as_object().expect("entry detail should be an object");
+        assert_eq!(
+            object
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                "customFields",
+                "id",
+                "notesPresent",
+                "passwordPresent",
+                "title",
+                "url",
+                "username",
+            ]
+            .into_iter()
+            .collect()
+        );
+        let serialized = value.to_string();
+        for forbidden in ["password\"", "notes\"", "secret", "value\":\"Synthetic"] {
+            assert!(!serialized.contains(forbidden));
+        }
     }
 }

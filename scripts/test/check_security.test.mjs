@@ -41,7 +41,7 @@ function fixture(t) {
   write(
     root,
     "Cargo.toml",
-    `[workspace]\nmembers = ${JSON.stringify(workspaceMembers)}\nexclude = ["support/tauri-plugin-shell"]\nresolver = "3"\n`,
+    `[workspace]\nmembers = ${JSON.stringify(workspaceMembers)}\nexclude = ["support/tauri-plugin-shell", "support/tauri-plugin-clipboard-manager"]\nresolver = "3"\n`,
   );
   for (const path of [
     "apps/cli/src/main.rs",
@@ -84,6 +84,19 @@ test("browser storage and console output are rejected", (t) => {
   const violations = runChecks(root).join("\n");
   assert.match(violations, /console logging/);
   assert.match(violations, /browser persistence/);
+});
+
+test("browser clipboard access spellings are rejected", (t) => {
+  for (const source of [
+    "navigator.clipboard.writeText('x');\n",
+    "window.navigator.clipboard.readText();\n",
+    "globalThis.navigator?.clipboard.clear();\n",
+    "navigator['clipboard'].writeText('x');\n",
+  ]) {
+    const root = fixture(t);
+    write(root, "apps/desktop/src/App.tsx", source);
+    assert.match(runChecks(root).join("\n"), /browser clipboard access is forbidden/);
+  }
 });
 
 test("remote script origin is rejected", (t) => {
@@ -215,6 +228,55 @@ test("npm alias of a forbidden Tauri plugin is rejected", (t) => {
   assert.match(
     runChecks(root).join("\n"),
     /shell-runtime \(package @tauri-apps\/plugin-shell\)/,
+  );
+});
+
+test("official Rust clipboard plugin is allowed only in desktop", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "support/tauri-plugin-clipboard-manager/Cargo.toml",
+    packageManifest("tauri-plugin-clipboard-manager"),
+  );
+  write(
+    root,
+    "support/tauri-plugin-clipboard-manager/src/lib.rs",
+    "pub fn support() {}\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/Cargo.toml",
+    packageManifest(
+      "nian-pass-desktop",
+      '[dependencies]\nclipboard = { package = "tauri-plugin-clipboard-manager", path = "../../../support/tauri-plugin-clipboard-manager" }\n',
+    ),
+  );
+  assert.deepEqual(runChecks(root), []);
+
+  write(
+    root,
+    "crates/vault-core/Cargo.toml",
+    packageManifest(
+      "vault-core",
+      '[dependencies]\ncb = { package = "tauri-plugin-clipboard-manager", path = "../../support/tauri-plugin-clipboard-manager" }\n',
+    ),
+  );
+  assert.match(
+    runChecks(root).join("\n"),
+    /cb \(package tauri-plugin-clipboard-manager\)/,
+  );
+});
+
+test("npm alias of clipboard manager remains forbidden", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/package.json",
+    '{"dependencies":{"clipboard":"npm:@tauri-apps/plugin-clipboard-manager@2.3.2"}}\n',
+  );
+  assert.match(
+    runChecks(root).join("\n"),
+    /clipboard \(package @tauri-apps\/plugin-clipboard-manager\)/,
   );
 });
 

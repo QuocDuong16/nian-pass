@@ -1,13 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  ClipboardReceiptDto,
   DesktopErrorCode,
+  EntryDetailDto,
+  EntryId,
+  LockResultDto,
   SelectedVaultDto,
   VaultSnapshotDto,
 } from "../types/desktop";
 import {
+  parseClipboardReceipt,
+  parseEntryDetail,
+  parseLockResult,
+  parseSecretString,
+} from "./entry-validation";
+import {
   parseDesktopErrorCode,
-  parseNull,
   parseSelectedVault,
   parseVaultSnapshot,
 } from "./validation";
@@ -16,7 +25,12 @@ export interface DesktopApi {
   selectVault: () => Promise<SelectedVaultDto | null>;
   unlockVault: (password: string) => Promise<VaultSnapshotDto>;
   getVaultSnapshot: () => Promise<VaultSnapshotDto>;
-  lockVault: () => Promise<void>;
+  getEntryDetail: (entryId: EntryId) => Promise<EntryDetailDto>;
+  revealEntryPassword: (entryId: EntryId) => Promise<string>;
+  revealEntryNotes: (entryId: EntryId) => Promise<string>;
+  copyEntryUsername: (entryId: EntryId) => Promise<ClipboardReceiptDto>;
+  copyEntryPassword: (entryId: EntryId) => Promise<ClipboardReceiptDto>;
+  lockVault: () => Promise<LockResultDto>;
 }
 
 export class DesktopCommandError extends Error {
@@ -69,7 +83,15 @@ export const desktopApi: DesktopApi = {
   unlockVault: (password) =>
     call("unlock_vault", parseVaultSnapshot, { password }),
   getVaultSnapshot: () => call("vault_snapshot", parseVaultSnapshot),
-  lockVault: async () => {
-    await call("lock_vault", parseNull);
-  },
+  getEntryDetail: (entryId) =>
+    call("entry_detail", parseEntryDetail, { entryId }),
+  revealEntryPassword: (entryId) =>
+    call("reveal_entry_password", parseSecretString, { entryId }),
+  revealEntryNotes: (entryId) =>
+    call("reveal_entry_notes", parseSecretString, { entryId }),
+  copyEntryUsername: (entryId) =>
+    call("copy_entry_username", parseClipboardReceipt, { entryId }),
+  copyEntryPassword: (entryId) =>
+    call("copy_entry_password", parseClipboardReceipt, { entryId }),
+  lockVault: () => call("lock_vault", parseLockResult),
 };

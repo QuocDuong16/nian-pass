@@ -309,7 +309,7 @@ conflict, upload, save, choose a side, or mutate an input. Provider/transport
 races, multi-writer BASE selection, explicit manual resolution, and safe
 installation through `VaultSession` remain outside M3.5.
 
-## M4.1 desktop threats and controls
+## M4.2 desktop reveal and clipboard threats and controls
 
 The WebView necessarily originates the password for an explicit unlock, but it
 must not become a second unlocked-vault owner. Controls are:
@@ -321,34 +321,63 @@ must not become a second unlocked-vault owner. Controls are:
 - The selected absolute path stays in Rust. The WebView receives only a display
   filename, and public desktop errors contain stable codes without paths,
   parser failures, MAC/cipher/KDF details, or dependency debug output.
-- Rust owns the only unlocked `VaultSession`. Browse DTOs are explicit serde
-  types and a serialization allowlist test checks their reviewed field set.
-  Password/notes/custom values, TOTP/passkey data, attachments, master password,
-  `KdbxDocument`, and `VaultSession` are not serializable across this boundary.
+- Rust owns the only unlocked `VaultSession`. Browse and entry-detail DTOs are
+  explicit serde types with exact-key tests. They carry safe summaries,
+  password/notes presence, and custom-field name/protection metadata, but no
+  password, notes, custom value, TOTP/passkey data, attachment, history, master
+  password, `KdbxDocument`, or `VaultSession`.
 - `SummaryText::Protected` maps to a marker-only DTO. Missing, visible empty,
   visible text, and protected remain distinct; protected standard-field
   plaintext is never fetched for list rendering.
-- Explicit Lock takes and consumes the Rust session, clears the Rust-selected
-  path, and then clears the frontend snapshot and selected IDs. Duplicate unlock
-  is rejected while a session exists. Window/process close drops app state and
-  never autosaves.
+- Opening an entry never fetches password or notes. Separate fixed commands
+  resolve an exact entry UUID and return only one password or notes string after
+  the corresponding Reveal action. Runtime validation rejects non-string or
+  expanded responses. No generic arbitrary-field reveal exists.
+- Reveal plaintext stays in a local detail hook rather than global state or
+  browser persistence. Hide and a 15-second timer remove it from state and the
+  DOM; entry/group change, Lock start, component unmount, window blur, and hidden
+  visibility also clear it. The hidden state renders fixed bullets without
+  fetching or retaining the real value.
+- Each reveal request has a generation and entry identity. A response for entry
+  A is ignored after selecting B, and starting Lock invalidates pending requests
+  before the backend result. This controls stale async population of the wrong
+  entry or a locking view.
+- Copy Username and Copy Password are semantic Rust commands. They resolve the
+  UUID through narrow secret-bearing getters and write through `ClipboardPort`;
+  password copy returns only a safe receipt, so copy does not introduce password
+  plaintext into React. Browser clipboard APIs and the JavaScript clipboard
+  plugin are rejected by ESLint and the repository security guard.
+- A clipboard lease contains a monotonic generation, secure-random 32-byte salt,
+  and SHA-256 digest only. It contains no plaintext string. Expiration reads the
+  active clipboard off the main thread and clears only if the generation is
+  current and the salted fingerprint matches. If another application replaces
+  the clipboard, Nian Pass drops ownership and preserves that content. An older
+  timer cannot clear a newer Nian Pass copy.
+- Explicit Lock clears frontend secrets immediately, drops the Rust session
+  before clipboard I/O, then attempts conditional clipboard cleanup. Clipboard
+  read/clear failure is reported as safe `clear_failed` metadata and can never
+  prevent session lock. Duplicate unlock remains rejected while a session exists.
 - Every Tauri `invoke` is confined to one frontend adapter. Command errors use
-  the fixed codes `already_unlocked`, `locked`, `no_vault_selected`,
-  `unlock_failed`, `unsupported_vault`, and `internal`.
-- The only plugin is the native dialog plugin, called from Rust. The WebView has
-  `core:default` only; there is no filesystem, shell, HTTP, process, updater, or
-  clipboard permission. Production CSP permits bundled local assets and IPC,
-  excludes remote content, and does not allow `unsafe-eval`.
+  fixed reviewed error codes and never returns parser, filesystem, clipboard
+  library, identifier, metadata, or secret details.
+- The official clipboard-manager plugin is allowed only in desktop Rust beside
+  the dialog plugin. The WebView remains `core:default` only and receives no
+  direct clipboard, filesystem, shell, HTTP, process, or updater permission.
+  Production CSP is unchanged: bundled local assets and IPC only, with no remote
+  content or `unsafe-eval`.
 - Rust service tests open the immutable synthetic KDBX fixture without a
   WebView. React tests mock the desktop adapter, so headless CI never needs to
   launch GTK/WebKit or create a display server.
 
-Residual risks remain: JavaScript strings and `keepass-rs` allocations cannot
-be guaranteed physically zeroized, a compromised WebView could observe the
-password while it is entered or in flight, privacy-sensitive group/entry
-metadata is intentionally present in the WebView while unlocked, and a native
-runtime smoke test still requires a graphical host. M4.1 has no reveal, copy,
-editing, save, sync transport, autosave, or auto-lock timer.
+Residual risks remain. Once explicitly revealed, plaintext in JavaScript/WebView
+strings cannot be deterministically zeroized; a compromised WebView can observe
+it during its bounded lifetime. `keepass-rs` allocations likewise lack a full
+zeroization guarantee. Clearing the active clipboard cannot remove copies held
+by OS clipboard history, desktop clipboard managers, cloud clipboard sync, or
+third-party utilities. Auto-clear is best-effort at the OS boundary, not secure
+erasure. Privacy-sensitive metadata remains visible while unlocked, and native
+runtime smoke testing still needs a graphical host. M4.2 has no editing, save,
+sync transport, autosave, auto-lock, biometrics, or screenshot protection.
 
 ## M3 residual risks
 

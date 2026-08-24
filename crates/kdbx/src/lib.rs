@@ -7,6 +7,7 @@
 // External compatibility tests surface child-process diagnostics on failure only.
 #![cfg_attr(test, allow(clippy::print_stderr))]
 
+mod entry_reads;
 mod sync;
 
 use std::{
@@ -167,24 +168,6 @@ impl KdbxDocument {
     /// This is a one-way view for callers and is not a serialization model.
     pub fn projection(&self) -> Result<Vault, KdbxError> {
         convert_database(&self.database)
-    }
-
-    /// Fetches one entry password by stable identifier.
-    ///
-    /// A missing field remains distinct from an explicitly empty field. The
-    /// returned owned copy is wrapped immediately in [`SecretString`]. No entry
-    /// metadata or secret plaintext is included in errors.
-    pub fn entry_password(&self, id: &EntryId) -> Result<Option<SecretString>, KdbxError> {
-        self.entry_secret(id, fields::PASSWORD)
-    }
-
-    /// Fetches one entry's notes by stable identifier as a secret-bearing value.
-    ///
-    /// Notes may contain recovery codes or other credentials and are therefore
-    /// excluded from the bulk projection. Missing and explicitly empty fields
-    /// remain distinct.
-    pub fn entry_notes(&self, id: &EntryId) -> Result<Option<SecretString>, KdbxError> {
-        self.entry_secret(id, fields::NOTES)
     }
 
     /// Renames an entry by its stable identifier while retaining the complete
@@ -640,19 +623,6 @@ impl KdbxDocument {
         } else {
             Err(KdbxError::UnsupportedWriteFormat)
         }
-    }
-
-    fn entry_secret(&self, id: &EntryId, field: &str) -> Result<Option<SecretString>, KdbxError> {
-        let upstream_id = self.find_entry_id(id)?;
-        let entry = self
-            .database
-            .entry(upstream_id)
-            .ok_or(KdbxError::EntryNotFound)?;
-
-        Ok(entry
-            .fields
-            .get(field)
-            .map(|value| SecretString::new(value.get().to_owned())))
     }
 
     fn set_standard_field(
@@ -2552,6 +2522,59 @@ mod tests {
 
         assert!(matches!(
             document.entry_password(&EntryId::new("00000000-0000-0000-0000-000000000000")),
+            Err(KdbxError::EntryNotFound)
+        ));
+    }
+
+    #[test]
+    fn reads_username_explicitly_across_protection_missing_empty_and_unknown() {
+        const TEST_USERNAME: &str = "public-test-username";
+        let mut document = kdbx41_document();
+        let (projected_id, upstream_id) = first_entry_ids(&document);
+
+        for protected in [false, true] {
+            let mut entry = document
+                .database
+                .entry_mut(upstream_id)
+                .expect("target entry should exist");
+            if protected {
+                entry.set_protected(fields::USERNAME, TEST_USERNAME);
+            } else {
+                entry.set_unprotected(fields::USERNAME, TEST_USERNAME);
+            }
+            let username = document
+                .entry_username(&projected_id)
+                .expect("username lookup should succeed")
+                .expect("prepared username should exist");
+            assert!(username.expose_secret() == TEST_USERNAME);
+        }
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .fields
+            .remove(fields::USERNAME);
+        assert!(
+            document
+                .entry_username(&projected_id)
+                .expect("missing username lookup should succeed")
+                .is_none()
+        );
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("target entry should exist")
+            .set_protected(fields::USERNAME, "");
+        assert!(
+            document
+                .entry_username(&projected_id)
+                .expect("empty username lookup should succeed")
+                .is_some_and(|value| value.expose_secret().is_empty())
+        );
+        assert!(matches!(
+            document.entry_username(&EntryId::new("00000000-0000-0000-0000-000000000000")),
             Err(KdbxError::EntryNotFound)
         ));
     }

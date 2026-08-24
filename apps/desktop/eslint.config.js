@@ -99,6 +99,24 @@ export default tseslint.config(
             "MemberExpression[object.object.name=/^(window|globalThis)$/][object.property.name='document'][property.name='cookie']",
           message: "Browser-managed cookies are forbidden for vault state.",
         },
+        {
+          selector:
+            "MemberExpression[object.name='navigator'][property.name='clipboard']",
+          message:
+            "Browser clipboard access is forbidden; use semantic Rust IPC commands.",
+        },
+        {
+          selector:
+            "MemberExpression[object.name='navigator'][computed=true][property.value='clipboard']",
+          message:
+            "Browser clipboard access is forbidden; use semantic Rust IPC commands.",
+        },
+        {
+          selector:
+            "MemberExpression[object.object.name=/^(window|globalThis)$/][object.property.name='navigator'][property.name='clipboard']",
+          message:
+            "Browser clipboard access is forbidden; use semantic Rust IPC commands.",
+        },
       ],
       "no-unsanitized/method": "error",
       "no-unsanitized/property": "error",

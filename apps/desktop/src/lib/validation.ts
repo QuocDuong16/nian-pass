@@ -7,11 +7,11 @@ import type {
   VaultSnapshotDto,
 } from "../types/desktop";
 
-function invalidContract(): never {
+export function invalidContract(): never {
   throw new Error("Nian Pass received an invalid desktop contract");
 }
 
-function record(
+export function record(
   value: unknown,
   keys: readonly string[],
 ): Record<string, unknown> {
@@ -30,12 +30,12 @@ function record(
   return object;
 }
 
-function nonEmptyString(value: unknown): string {
+export function nonEmptyString(value: unknown): string {
   if (typeof value !== "string" || value === "") return invalidContract();
   return value;
 }
 
-function stringValue(value: unknown): string {
+export function stringValue(value: unknown): string {
   if (typeof value !== "string") return invalidContract();
   return value;
 }
@@ -52,6 +52,9 @@ export function parseDesktopErrorCode(value: unknown): DesktopErrorCode {
     case "no_vault_selected":
     case "unlock_failed":
     case "unsupported_vault":
+    case "entry_not_found":
+    case "secret_unavailable":
+    case "clipboard_failed":
     case "internal":
       return value;
     default:
@@ -189,9 +192,4 @@ export function parseVaultSnapshot(value: unknown): VaultSnapshotDto {
   };
   validateRelations(snapshot);
   return snapshot;
-}
-
-export function parseNull(value: unknown): null {
-  if (value !== null) return invalidContract();
-  return null;
 }

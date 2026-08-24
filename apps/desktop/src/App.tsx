@@ -15,7 +15,16 @@ export default function App({ api = desktopApi }: AppProps) {
   const [lockError, setLockError] = useState<string | null>(null);
 
   if (snapshot === null) {
-    return <LockedView api={api} onUnlocked={setSnapshot} />;
+    return (
+      <LockedView
+        api={api}
+        notice={lockError}
+        onUnlocked={(nextSnapshot) => {
+          setLockError(null);
+          setSnapshot(nextSnapshot);
+        }}
+      />
+    );
   }
 
   const lock = async () => {
@@ -25,7 +34,12 @@ export default function App({ api = desktopApi }: AppProps) {
     setLocking(true);
     setLockError(null);
     try {
-      await api.lockVault();
+      const result = await api.lockVault();
+      if (result.clipboard === "clear_failed") {
+        setLockError(
+          "Vault locked, but Nian Pass could not clear the clipboard.",
+        );
+      }
       setSnapshot(null);
     } catch {
       setLockError(
@@ -38,6 +52,7 @@ export default function App({ api = desktopApi }: AppProps) {
 
   return (
     <UnlockedView
+      api={api}
       snapshot={snapshot}
       locking={locking}
       lockError={lockError}

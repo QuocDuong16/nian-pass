@@ -25,12 +25,33 @@
       }
     ]
   },
+  "entryDetail": {
+    "id": "entry-example",
+    "title": { "kind": "visible", "value": "Example" },
+    "username": { "kind": "protected" },
+    "url": { "kind": "missing" },
+    "passwordPresent": true,
+    "notesPresent": true,
+    "customFields": [
+      { "name": "Recovery hint", "protection": "protected" },
+      { "name": "Region", "protection": "unprotected" }
+    ]
+  },
+  "clipboardReceipt": { "copied": true, "expiresInMs": 30000 },
+  "lockResults": [
+    { "clipboard": "cleared" },
+    { "clipboard": "not_owned" },
+    { "clipboard": "clear_failed" }
+  ],
   "errorCodes": [
     "already_unlocked",
     "locked",
     "no_vault_selected",
     "unlock_failed",
     "unsupported_vault",
+    "entry_not_found",
+    "secret_unavailable",
+    "clipboard_failed",
     "internal"
   ]
 }

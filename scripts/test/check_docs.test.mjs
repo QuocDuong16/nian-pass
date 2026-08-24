@@ -18,16 +18,26 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M4.Q — Quality\nmake quality-check\nHeadless Linux\nWindows persistence remains deferred.\n",
+    "M4.2 — Entry Detail\nmake quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
+      "The active clipboard clears only if it still contains the value written by Nian Pass.\n",
   );
-  write(root, "docs/architecture.md", "M4.Q quality architecture\n");
-  write(root, "docs/threat-model.md", "Compromised supply-chain dependencies\n");
+  write(
+    root,
+    "docs/architecture.md",
+    "M4.Q quality architecture. Clipboard salt then SHA-256 fingerprint then generation.\n",
+  );
+  write(
+    root,
+    "docs/threat-model.md",
+    "Compromised supply-chain dependencies. OS clipboard history may retain data.\n",
+  );
   write(root, "docs/write-safety.md", "Windows persistence is unsupported and fails closed.\n");
   write(
     root,
     "docs/quality.md",
     "Coverage ratchet. Lowering requires architecture or security review. eslint-disable is forbidden. " +
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
+      "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
       "Corepack 0.35.0. OpenWiki is not the source of truth.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");

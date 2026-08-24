@@ -1,8 +1,8 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M4.0/M4.1 adds a Tauri 2 + React desktop shell for local
-open, unlock, browse, and lock. M3 provides the unlocked local session and
+the source of truth. M4.0 through M4.2 provide a Tauri 2 + React desktop shell
+for local open, unlock, browse, detail, explicit reveal/copy, and lock. M3 provides the unlocked local session and
 verified filesystem persistence beneath it. M3.5 adds provider-independent,
 synchronous three-way semantic merge; the M4.1 desktop does not call sync or
 expose editing/save behavior.
@@ -65,7 +65,7 @@ vault-core
  └── no KDBX dependency
 ```
 
-## M4.1 desktop security boundary
+## M4.2 desktop security boundary
 
 The frontend is a presentation client, not the vault source of truth. The
 desktop Rust adapter owns one `DesktopVaultService`, protected by
@@ -85,29 +85,58 @@ master password (one explicit attempt)
 
 Rust-owned VaultSession
   -> Vault projection
-  -> reviewed desktop DTOs
-  -> React group/entry browser
+  -> secret-free browse/detail DTOs
+  -> React group/entry/detail browser
+
+explicit Reveal Password / Reveal Notes
+  -> narrow stable EntryId command
+  -> one SecretString
+  -> one validated JavaScript string
+  -> local detail state for at most 15 seconds
+
+explicit Copy Password / Copy Username
+  -> narrow stable EntryId command
+  -> one SecretString
+  -> Rust clipboard service
+  -> OS active clipboard
+  -> no plaintext response to React
 ```
 
-The DTO boundary consists only of `SelectedVaultDto`, `VaultSnapshotDto`,
-`GroupDto`, `EntrySummaryDto`, `SummaryTextDto`, and the stable error-code
-payload. `SummaryTextDto` preserves Missing, Visible (including visible empty),
-and Protected. Entry DTOs include stable IDs, group membership, title/username/
-URL summaries, tags, and password/notes presence booleans. They exclude password
-and notes plaintext, custom-field values, TOTP/passkey data, attachments, raw
-KDBX state, and the master password.
+The normal DTO boundary includes `SelectedVaultDto`, `VaultSnapshotDto`,
+`GroupDto`, `EntrySummaryDto`, `EntryDetailDto`, `SummaryTextDto`, clipboard/lock
+receipts, and stable error codes. `EntryDetailDto` contains stable ID,
+title/username/URL summaries, password/notes presence, and custom-field names plus
+protection states. Browse/detail DTOs exclude password and notes plaintext,
+custom-field values, TOTP/passkey data, attachments, history, raw KDBX state,
+and the master password. Reveal commands deliberately return only one validated
+string; they never add that value to a reusable DTO or global state.
 
-Lock calls `Option<VaultSession>::take`, consumes `VaultSession::lock`, clears
-the selected Rust path, and only then lets React discard its snapshot and
-selection state. Closing the process naturally drops the same Rust state. No
-autosave or save-on-drop exists. A second unlock is rejected until Lock.
+React keys the detail lifetime to the stable entry ID and lock state. Password
+and notes are fetched only after their own Reveal action and are cleared on
+Hide, the 15-second timeout, entry/group change, Lock start, unmount, window
+blur, and hidden visibility. Generation checks prevent a late request for entry
+A from populating entry B or repopulating a locking view. This minimizes WebView
+plaintext lifetime but cannot provide deterministic JavaScript string
+zeroization.
 
-The only Tauri plugin is `dialog`, used from Rust for native `.kdbx` selection.
-The main WebView capability grants `core:default`; no dialog command is exposed
-to JavaScript, and no filesystem, shell, HTTP, process, updater, clipboard, or
-remote-content capability is enabled. Production CSP permits bundled local
-assets and Tauri IPC only; it forbids remote scripts, objects, frames, and
-`unsafe-eval`.
+`DesktopClipboardService` owns an injected `ClipboardPort` and a mutex separate
+from `VaultSession`. Copy extracts one `SecretString` under the session mutex,
+releases that mutex, and then performs clipboard I/O. A lease retains only a
+monotonic generation, 32-byte secure-random salt, and SHA-256 digest. Expiration
+reads the current active clipboard on Tauri's blocking runtime and clears only
+when both generation and fingerprint still match. External replacement is
+preserved; an older timer cannot clear a newer copy. Tests use `FakeClipboard`
+and call expiration directly, so no display server or real clipboard is needed.
+
+Lock drops `VaultSession` before best-effort conditional clipboard cleanup, so a
+clipboard read/clear failure cannot keep the vault unlocked. Its secret-free
+result reports `cleared`, `not_owned`, or `clear_failed`. The official
+`tauri-plugin-clipboard-manager` is initialized only in the Rust desktop adapter.
+The main WebView capability remains exactly `core:default`; it receives no
+plugin clipboard permission and has no JavaScript clipboard package or browser
+clipboard API. The CSP is unchanged and still permits only bundled local assets
+and Tauri IPC. Dialog and clipboard are the only approved Rust plugins; shell,
+HTTP, filesystem, process, updater, and remote-content capabilities remain absent.
 
 `vault-core` owns KDBX-independent domain types. `crates/kdbx` is the adapter
 that contains all `keepass-rs` types and converts them to the domain model. The
@@ -368,8 +397,10 @@ KDF, cipher, or compression migration.
 26. **Ambiguous concurrent changes must return conflicts, never timestamp/file-level last-writer-wins.**
 27. **Tombstones, not absence alone, establish intentional deletion.**
 28. **A conflicted merge must not return or install a partially synthesized database.**
-29. **The unlocked `VaultSession` must remain Rust-owned; JavaScript receives only reviewed secret-free browse DTOs.**
+29. **The unlocked `VaultSession` must remain Rust-owned; normal browse/detail DTOs stay secret-free and only explicit reveal commands may return one secret string.**
 30. **UI Lock must drop the Rust session, not merely hide the unlocked view.**
+31. **Password copy must remain a semantic Rust command and must not return the password to JavaScript.**
+32. **Clipboard cleanup must match both the current lease generation and salted fingerprint before clearing.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.

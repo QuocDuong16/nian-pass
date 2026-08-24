@@ -56,6 +56,10 @@ are independently rejected by ESLint and/or repository guards. Prettier checks
 without mutation in quality/CI. Knip checks files, exports, dependencies, and
 missing dependencies. `pnpm audit --prod` is blocking and never auto-fixes.
 
+M4.2 additionally forbids `navigator.clipboard`, including window/global aliases,
+and every JavaScript clipboard plugin dependency. Username/password copy must use
+the semantic desktop IPC adapter rather than a generic browser write API.
+
 ## Coverage ratchets
 
 The pre-M4.Q measured Rust line baseline was 87.04% (6118/7029 meaningful
@@ -83,7 +87,9 @@ path dependencies are approved. Duplicate versions warn because Tauri and KDBX
 currently contain legitimate multi-version graphs; they are still visible for
 review. Workspace crates are private and are not assigned an invented project
 license by this milestone. Approved dependency licenses are enumerated in
-`deny.toml`.
+`deny.toml`. M4.2 adds the OSI-approved `BSL-1.0` license used by the official
+clipboard plugin's Windows-only transitive crates; this is a license approval,
+not an advisory, source, or package exception.
 
 Wildcard registry dependency requirements are denied. A declaration such as
 `foo = "*"` is not allowed; dependencies use the repository's existing exact
@@ -141,9 +147,14 @@ and `script-src` allow only `'self'`; `connect-src` allows only `ipc:` and
 directives and every unapproved token fail the security gate.
 
 The current plugin/capability allowlist is Tauri core, the Rust dialog plugin,
-and `core:default`. A future milestone may intentionally update it with threat
-model, capability, CSP, and test changes. M4.Q does not permanently ban future
-features.
+the official Rust `tauri-plugin-clipboard-manager` dependency only in
+`apps/desktop/src-tauri`, and `core:default`. The clipboard dependency remains
+forbidden in every core crate and CLI, including renamed Cargo aliases. The
+frontend package and direct browser clipboard API remain forbidden, including
+npm aliases. No clipboard permission is granted to the WebView; Rust calls the
+plugin behind Nian Pass semantic commands. CSP tokens are unchanged. A future
+milestone may intentionally update this policy only with threat-model,
+capability, CSP, and regression-test review.
 
 ## IPC and OpenWiki
 

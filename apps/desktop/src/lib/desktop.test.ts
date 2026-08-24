@@ -3,6 +3,12 @@ import { afterEach, expect, test, vi } from "vitest";
 import contract from "../../contracts/desktop-contract.json";
 import { DesktopCommandError, desktopApi } from "./desktop";
 import {
+  parseClipboardReceipt,
+  parseEntryDetail,
+  parseLockResult,
+  parseSecretString,
+} from "./entry-validation";
+import {
   parseDesktopErrorCode,
   parseSelectedVault,
   parseSummaryText,
@@ -21,6 +27,13 @@ test("committed Rust contract fixture passes runtime validation", () => {
     contract.selectedVault,
   );
   expect(parseVaultSnapshot(contract.snapshot)).toEqual(contract.snapshot);
+  expect(parseEntryDetail(contract.entryDetail)).toEqual(contract.entryDetail);
+  expect(parseClipboardReceipt(contract.clipboardReceipt)).toEqual(
+    contract.clipboardReceipt,
+  );
+  expect(contract.lockResults.map(parseLockResult)).toEqual(
+    contract.lockResults,
+  );
   expect(contract.errorCodes.map(parseDesktopErrorCode)).toEqual(
     contract.errorCodes,
   );
@@ -31,7 +44,12 @@ test("desktop adapter validates successful IPC responses", async () => {
     .mockResolvedValueOnce(contract.selectedVault)
     .mockResolvedValueOnce(contract.snapshot)
     .mockResolvedValueOnce(contract.snapshot)
-    .mockResolvedValueOnce(null);
+    .mockResolvedValueOnce(contract.entryDetail)
+    .mockResolvedValueOnce("test-secret-password-M4.2")
+    .mockResolvedValueOnce("test-secret-notes-M4.2")
+    .mockResolvedValueOnce(contract.clipboardReceipt)
+    .mockResolvedValueOnce(contract.clipboardReceipt)
+    .mockResolvedValueOnce(contract.lockResults[0]);
 
   await expect(desktopApi.selectVault()).resolves.toEqual(
     contract.selectedVault,
@@ -42,9 +60,29 @@ test("desktop adapter validates successful IPC responses", async () => {
   await expect(desktopApi.getVaultSnapshot()).resolves.toEqual(
     contract.snapshot,
   );
-  await expect(desktopApi.lockVault()).resolves.toBeUndefined();
+  await expect(desktopApi.getEntryDetail("entry-example")).resolves.toEqual(
+    contract.entryDetail,
+  );
+  await expect(desktopApi.revealEntryPassword("entry-example")).resolves.toBe(
+    "test-secret-password-M4.2",
+  );
+  await expect(desktopApi.revealEntryNotes("entry-example")).resolves.toBe(
+    "test-secret-notes-M4.2",
+  );
+  await expect(desktopApi.copyEntryUsername("entry-example")).resolves.toEqual(
+    contract.clipboardReceipt,
+  );
+  await expect(desktopApi.copyEntryPassword("entry-example")).resolves.toEqual(
+    contract.clipboardReceipt,
+  );
+  await expect(desktopApi.lockVault()).resolves.toEqual(
+    contract.lockResults[0],
+  );
   expect(invoke).toHaveBeenNthCalledWith(2, "unlock_vault", {
     password: "test-password",
+  });
+  expect(invoke).toHaveBeenNthCalledWith(8, "copy_entry_password", {
+    entryId: "entry-example",
   });
 });
 
@@ -68,6 +106,33 @@ test("unknown summary kind and wrong field type fail closed", () => {
   expect(() =>
     parseVaultSnapshot({ ...contract.snapshot, rootGroupId: 123 }),
   ).toThrow(/invalid desktop contract/);
+});
+
+test("new M4.2 responses reject unknown keys and wrong secret types", () => {
+  expect(() =>
+    parseEntryDetail({ ...contract.entryDetail, notes: "must-not-cross" }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseClipboardReceipt({ ...contract.clipboardReceipt, value: "secret" }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseEntryDetail({
+      ...contract.entryDetail,
+      customFields: [{ name: "Future", protection: "future" }],
+    }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseEntryDetail({ ...contract.entryDetail, passwordPresent: "yes" }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseClipboardReceipt({ copied: false, expiresInMs: 30_000 }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() => parseLockResult({ clipboard: "future" })).toThrow(
+    /invalid desktop contract/,
+  );
+  expect(() => parseSecretString({ value: "secret" })).toThrow(
+    /invalid desktop contract/,
+  );
 });
 
 test("unknown error codes become internal while known codes remain stable", async () => {

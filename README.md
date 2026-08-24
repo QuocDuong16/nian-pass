@@ -19,27 +19,43 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M4.Q — Quality, Security & Architecture Gates
+M4.2 — Entry Detail + Explicit Secret Reveal + Secure Copy
 
-M4.Q adds machine-enforced repository policy without adding product features.
-The root `Makefile` is the single developer/CI interface for formatting, typed
-linting, tests, coverage and changed-line coverage, dependency policy, dead
-code, architecture/security invariants, contract drift, builds, and docs.
+M4.2 adds a three-pane entry-detail read experience, explicit password and notes
+reveal, and Rust-owned username/password copy. M4.Q remains complete: the root
+`Makefile` is still the single developer/CI interface for formatting, typed
+linting, tests, coverage and changed-line coverage, dependency policy, dead code,
+architecture/security invariants, contract drift, builds, and docs.
 
-M4.0 + M4.1 remain the current product functionality: Desktop Shell +
-Unlock/Browse Vault.
+M4.0 + M4.1 + M4.2 are the current desktop functionality: Shell, Unlock/Browse,
+and explicit read/copy.
 
 `apps/desktop` is the first visible Nian Pass application: a Tauri 2 shell with
 React, strict TypeScript, Vite, and pnpm. It selects a local `.kdbx` through a
 native dialog, unlocks a Rust-owned `VaultSession` with a password supplied for
-that attempt only, displays the group tree and secret-free entry summaries, and
-explicitly drops the session on Lock. The absolute selected path remains in
-Rust; JavaScript receives only the selected filename and presentation DTOs.
+that attempt only, displays a group tree, secret-free entry summaries and
+secret-free entry details, and explicitly drops the session on Lock. The
+absolute selected path remains in Rust; JavaScript receives only the selected
+filename and reviewed presentation DTOs.
 
-M4.1 is browse-only. It has no password reveal/copy, entry detail, editing,
-save UI, search, cloud transport, autosave, or background file monitoring. The
-desktop source, frontend headless tests/build, and native headless compile are
-available, but Nian Pass is still experimental and not a user-ready product.
+Password and notes plaintext cross into React only after their respective
+Reveal action, live in local detail state for at most 15 seconds, and clear on
+Hide, entry/group change, Lock, unmount, blur, or hidden visibility. JavaScript
+strings cannot be deterministically zeroized. Copy Password and Copy Username
+instead use semantic Rust IPC commands; password plaintext is never returned to
+React by the copy path.
+
+Nian Pass clears the active clipboard after 30 seconds only if it still contains
+the value written by Nian Pass. Ownership uses a per-copy random salt, SHA-256
+fingerprint, and generation in Rust without retaining plaintext solely for
+tracking. A later user copy is preserved, and an old timer cannot clear a newer
+Nian Pass copy. Clipboard history, cloud clipboard sync, and third-party
+clipboard managers may retain copies outside the process's control.
+
+M4.2 still has no editing, save UI, entry/group mutations, password generator,
+TOTP, attachments, custom-field value reveal, URL opening, search, cloud
+transport, autosave, auto-lock, biometrics, or updater. Nian Pass remains
+experimental and is not a user-ready product.
 
 M3.5 remains complete as the underlying conflict-safe sync engine.
 
@@ -185,8 +201,9 @@ pnpm --filter @nian-pass/desktop tauri dev
 ```
 
 The expected flow is select a synthetic fixture, enter its public fixture
-password, browse groups/entries, and Lock back to the unlock screen. `tauri
-dev` is intentionally not a headless or Forgejo quality gate.
+password, browse groups/entries, inspect safe detail, explicitly reveal/copy a
+synthetic value, and Lock back to the unlock screen. `tauri dev` is intentionally
+not a headless or Forgejo quality gate.
 
 The dedicated Forgejo compatibility job installs the pinned Debian Bookworm
 KeePassXC package and runs `scripts/test-keepassxc-compat.sh --require`, where a
@@ -197,11 +214,11 @@ See [the architecture](docs/architecture.md) and
 See [quality policy](docs/quality.md) for pinned tools, coverage ratchets,
 dependency/advisory handling, and the reviewed exception process.
 
-Nian Pass remains experimental and is not production-ready. The desktop UI is
-browse-only; there is no cloud transport/provider integration, manual conflict-resolution UI, file
-watcher, autosave timer, keyfile support, master-
-password rotation, biometric unlock, or guaranteed zeroization of all decrypted
-allocations owned by `keepass-rs`. The CLI remains read-only. Local persistence
+Nian Pass remains experimental and is not production-ready. The desktop UI has
+no editing/save path; there is no cloud transport/provider integration, manual
+conflict-resolution UI, file watcher, autosave timer, keyfile support, master-
+password rotation, biometric unlock, or guaranteed zeroization of decrypted
+allocations owned by `keepass-rs` or JavaScript/WebView strings. The CLI remains read-only. Local persistence
 uses optimistic conflict detection rather than cooperative or distributed
 locking. Windows open/read sessions are supported, but dirty save currently
 fails closed with `UnsupportedPersistencePlatform` pending a safe-Rust,

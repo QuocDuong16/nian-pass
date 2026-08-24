@@ -9,6 +9,7 @@ import type {
 
 interface LockedViewProps {
   api: DesktopApi;
+  notice?: string | null;
   onUnlocked: (snapshot: VaultSnapshotDto) => void;
 }
 
@@ -20,6 +21,9 @@ function unlockMessage(code: DesktopErrorCode): string {
       return "This file is not a supported KDBX vault.";
     case "already_unlocked":
       return "Lock the current vault before opening another one.";
+    case "entry_not_found":
+    case "secret_unavailable":
+    case "clipboard_failed":
     case "locked":
     case "no_vault_selected":
     case "internal":
@@ -31,7 +35,7 @@ function errorCode(error: unknown): DesktopErrorCode {
   return error instanceof DesktopCommandError ? error.code : "internal";
 }
 
-export function LockedView({ api, onUnlocked }: LockedViewProps) {
+export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
   const [selection, setSelection] = useState<SelectedVaultDto | null>(null);
   const [password, setPassword] = useState("");
   const [unlocking, setUnlocking] = useState(false);
@@ -92,6 +96,11 @@ export function LockedView({ api, onUnlocked }: LockedViewProps) {
         <p className="selected-file" aria-live="polite">
           {selection === null ? "No vault selected" : selection.fileName}
         </p>
+        {notice === undefined || notice === null ? null : (
+          <p className="lock-notice" role="status">
+            {notice}
+          </p>
+        )}
 
         <form onSubmit={(event) => void submit(event)}>
           <label htmlFor="master-password">Master password</label>

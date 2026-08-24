@@ -29,13 +29,16 @@ export function runChecks(root) {
   const packageSource = readRequired(root, "package.json", violations);
   const nodeVersion = readRequired(root, ".node-version", violations).trim();
 
-  requirePattern(violations, "README.md", readme, /M4\.Q\s*[—-]\s*Quality/, "current milestone must be M4.Q");
+  requirePattern(violations, "README.md", readme, /M4\.2\s*[—-]\s*Entry Detail/, "current milestone must be M4.2");
   requirePattern(violations, "docs/architecture.md", architecture, /M4\.Q/, "architecture must describe M4.Q");
   requirePattern(violations, "README.md", readme, /make quality-check/, "canonical quality command is missing");
   requirePattern(violations, "README.md", readme, /Headless Linux/i, "headless desktop development guidance is missing");
   requirePattern(violations, "README.md", readme, /Windows[\s\S]{0,240}(?:deferred|fails closed|unsupported)/i, "Windows persistence deferral is missing");
   requirePattern(violations, "docs/write-safety.md", writeSafety, /Windows[\s\S]{0,240}(?:fails closed|unsupported)/i, "Windows write safety deferral is missing");
   requirePattern(violations, "docs/threat-model.md", threatModel, /supply-chain dependencies/i, "dependency threat is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /clipboard history/i, "clipboard history limitation is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /salt[\s\S]{0,160}SHA-256[\s\S]{0,160}generation/i, "clipboard ownership architecture is missing");
+  requirePattern(violations, "README.md", readme, /clipboard[\s\S]{0,180}only if[\s\S]{0,180}written by Nian Pass/i, "conditional clipboard clearing is missing");
   requirePattern(violations, "AGENTS.md", agents, /Do not hand-edit generated OpenWiki pages/i, "generated OpenWiki ownership rule is missing");
 
   const qualityRequirements = [
@@ -46,6 +49,8 @@ export function runChecks(root) {
     [/exact path/i, "exact-path exception policy is missing"],
     [/cargo-deny/i, "Rust dependency policy is missing"],
     [/pnpm audit --prod/i, "frontend production audit policy is missing"],
+    [/navigator\.clipboard/i, "browser clipboard ban is missing"],
+    [/clipboard-manager[\s\S]{0,160}apps\/desktop\/src-tauri/i, "Rust clipboard allowlist is missing"],
     [/OpenWiki[\s\S]{0,500}(?:not|isn't)[\s\S]{0,40}source of[\s\S]{0,10}truth/i, "OpenWiki source-of-truth policy is missing"],
   ];
   for (const [pattern, message] of qualityRequirements) {

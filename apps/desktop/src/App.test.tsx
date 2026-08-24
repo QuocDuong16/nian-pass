@@ -9,7 +9,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import App from "./App";
 import { DesktopCommandError, type DesktopApi } from "./lib/desktop";
-import type { VaultSnapshotDto } from "./types/desktop";
+import type { EntryDetailDto, VaultSnapshotDto } from "./types/desktop";
 
 afterEach(cleanup);
 
@@ -37,7 +37,7 @@ const snapshot: VaultSnapshotDto = {
       username: { kind: "visible", value: "user@example.com" },
       url: { kind: "visible", value: "https://example.com" },
       passwordPresent: true,
-      notesPresent: false,
+      notesPresent: true,
       tags: [],
     },
     {
@@ -53,12 +53,40 @@ const snapshot: VaultSnapshotDto = {
   ],
 };
 
+const detail: EntryDetailDto = {
+  id: "entry-visible",
+  title: { kind: "visible", value: "Example Account" },
+  username: { kind: "visible", value: "user@example.com" },
+  url: { kind: "visible", value: "https://example.com" },
+  passwordPresent: true,
+  notesPresent: true,
+  customFields: [],
+};
+
 function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
   return {
     selectVault: vi.fn().mockResolvedValue({ fileName: "test-vault.kdbx" }),
     unlockVault: vi.fn().mockResolvedValue(snapshot),
     getVaultSnapshot: vi.fn().mockResolvedValue(snapshot),
-    lockVault: vi.fn().mockResolvedValue(undefined),
+    getEntryDetail: vi.fn().mockImplementation((entryId: string) =>
+      Promise.resolve({
+        ...detail,
+        id: entryId,
+        title:
+          entryId === "entry-protected"
+            ? { kind: "protected" as const }
+            : detail.title,
+      }),
+    ),
+    revealEntryPassword: vi.fn().mockResolvedValue("synthetic-password-M4.2"),
+    revealEntryNotes: vi.fn().mockResolvedValue("synthetic-notes-M4.2"),
+    copyEntryUsername: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    copyEntryPassword: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    lockVault: vi.fn().mockResolvedValue({ clipboard: "not_owned" }),
     ...overrides,
   };
 }
@@ -110,6 +138,25 @@ test("group and entry selection exercise the browse-only navigation state", asyn
   expect(entry).toHaveClass("selected");
 });
 
+test("group change resets entry selection and removes revealed secrets", async () => {
+  render(<App api={api()} />);
+  await selectAndEnterPassword();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Example Account/ }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Reveal password" }),
+  );
+  expect(await screen.findByText("synthetic-password-M4.2")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: /Work/ }));
+  expect(screen.queryByText("synthetic-password-M4.2")).not.toBeInTheDocument();
+  expect(
+    screen.getByText("Select an entry to view its safe details."),
+  ).toBeVisible();
+});
+
 test("unlock failure is generic and clears the password field", async () => {
   const failedApi = api({
     unlockVault: vi
@@ -141,6 +188,50 @@ test("lock drops the presentation state and restores the locked screen", async (
   });
   expect(
     await screen.findByRole("button", { name: "Choose KDBX file" }),
+  ).toBeVisible();
+  expect(screen.queryByText("Example Account")).not.toBeInTheDocument();
+});
+
+test("Lock clears a revealed secret before the backend promise completes", async () => {
+  let resolveLock: (value: { clipboard: "cleared" }) => void = () => undefined;
+  const lockPromise = new Promise<{ clipboard: "cleared" }>((resolve) => {
+    resolveLock = resolve;
+  });
+  const desktop = api({ lockVault: vi.fn().mockReturnValue(lockPromise) });
+  render(<App api={desktop} />);
+  await selectAndEnterPassword();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Example Account/ }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Reveal password" }),
+  );
+  expect(await screen.findByText("synthetic-password-M4.2")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+  expect(screen.queryByText("synthetic-password-M4.2")).not.toBeInTheDocument();
+  resolveLock({ clipboard: "cleared" });
+  expect(
+    await screen.findByRole("button", { name: "Choose KDBX file" }),
+  ).toBeVisible();
+});
+
+test("clipboard clear failure is reported after the vault is locked", async () => {
+  render(
+    <App
+      api={api({
+        lockVault: vi.fn().mockResolvedValue({ clipboard: "clear_failed" }),
+      })}
+    />,
+  );
+  await selectAndEnterPassword();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Lock" }));
+  expect(
+    await screen.findByText(
+      "Vault locked, but Nian Pass could not clear the clipboard.",
+    ),
   ).toBeVisible();
   expect(screen.queryByText("Example Account")).not.toBeInTheDocument();
 });

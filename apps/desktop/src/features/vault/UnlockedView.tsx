@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
 
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { DesktopApi } from "../../lib/desktop";
+import type { EntryId, VaultSnapshotDto } from "../../types/desktop";
+import { EntryDetail } from "./EntryDetail";
 import { EntryList } from "./EntryList";
 import { GroupTree } from "./GroupTree";
 
 interface UnlockedViewProps {
+  api: DesktopApi;
   snapshot: VaultSnapshotDto;
   locking: boolean;
   lockError: string | null;
@@ -12,13 +15,14 @@ interface UnlockedViewProps {
 }
 
 export function UnlockedView({
+  api,
   snapshot,
   locking,
   lockError,
   onLock,
 }: UnlockedViewProps) {
   const [selectedGroupId, setSelectedGroupId] = useState(snapshot.rootGroupId);
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [selectedEntryId, setSelectedEntryId] = useState<EntryId | null>(null);
   const groupsById = useMemo(
     () => new Map(snapshot.groups.map((group) => [group.id, group])),
     [snapshot.groups],
@@ -84,6 +88,18 @@ export function UnlockedView({
           selectedEntryId={selectedEntryId}
           onSelect={setSelectedEntryId}
         />
+        {selectedEntryId === null ? (
+          <aside className="detail-pane detail-empty" aria-label="Entry detail">
+            Select an entry to view its safe details.
+          </aside>
+        ) : (
+          <EntryDetail
+            key={selectedEntryId}
+            api={api}
+            entryId={selectedEntryId}
+            disabled={locking}
+          />
+        )}
       </div>
     </main>
   );

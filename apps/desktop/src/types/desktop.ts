@@ -3,6 +3,8 @@ export type SummaryTextDto =
   | { kind: "visible"; value: string }
   | { kind: "protected" };
 
+export type EntryId = string;
+
 export interface SelectedVaultDto {
   fileName: string;
 }
@@ -15,7 +17,7 @@ export interface GroupDto {
 }
 
 export interface EntrySummaryDto {
-  id: string;
+  id: EntryId;
   groupId: string;
   title: SummaryTextDto;
   username: SummaryTextDto;
@@ -23,6 +25,30 @@ export interface EntrySummaryDto {
   passwordPresent: boolean;
   notesPresent: boolean;
   tags: string[];
+}
+
+export interface CustomFieldSummaryDto {
+  name: string;
+  protection: "protected" | "unprotected";
+}
+
+export interface EntryDetailDto {
+  id: EntryId;
+  title: SummaryTextDto;
+  username: SummaryTextDto;
+  url: SummaryTextDto;
+  passwordPresent: boolean;
+  notesPresent: boolean;
+  customFields: CustomFieldSummaryDto[];
+}
+
+export interface ClipboardReceiptDto {
+  copied: true;
+  expiresInMs: number;
+}
+
+export interface LockResultDto {
+  clipboard: "cleared" | "not_owned" | "clear_failed";
 }
 
 export interface VaultSnapshotDto {
@@ -37,4 +63,7 @@ export type DesktopErrorCode =
   | "no_vault_selected"
   | "unlock_failed"
   | "unsupported_vault"
+  | "entry_not_found"
+  | "secret_unavailable"
+  | "clipboard_failed"
   | "internal";
