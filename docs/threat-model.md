@@ -1,7 +1,7 @@
 # Threat Model
 
 This is the threat model for the M3 local vault session/filesystem foundation,
-the M3.5 provider-independent merge core, the M4.1 browse-only desktop, and the
+the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, and the
 M4.Q quality/security gates. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
@@ -98,6 +98,8 @@ information to an attacker even when their plaintext remains unavailable.
 - Direct Tauri IPC calls bypassing the reviewed desktop adapter
 - Remote assets, permissive CSP, or new Tauri capabilities widening the WebView
 - Render failures producing a blank screen or exposing raw exception text
+- A copy-versus-Lock race writing a vault secret after Lock completes
+- External clipboard replacement between ownership verification and clear
 
 ## M4.Q desktop and repository controls
 
@@ -111,9 +113,12 @@ recovery guidance without the exception message, stack, props, state, or
 logging.
 
 Tauri capability JSON is held to `core:default`. The current Rust plugin
-allowlist is Tauri core plus dialog; filesystem, shell, HTTP, process, updater,
-and clipboard plugins are rejected. CSP is parsed and rejects wildcard default,
-script, or connect sources, `unsafe-eval`, and arbitrary HTTPS connections.
+allowlist is Tauri core plus dialog and the official clipboard-manager plugin
+only inside `apps/desktop/src-tauri`; filesystem, shell, HTTP, process, updater,
+and every other clipboard plugin remain rejected. The JavaScript clipboard
+plugin and browser clipboard APIs are forbidden, and the WebView receives no
+clipboard permission. CSP is parsed and rejects wildcard default, script, or
+connect sources, `unsafe-eval`, and arbitrary HTTPS connections.
 The existing `style-src 'unsafe-inline'` remains a narrow styling requirement;
 it does not permit script execution and is tracked in the quality policy.
 
@@ -170,10 +175,11 @@ copies made by the operating system, swap, allocator, runtime, compiler, or
 dependencies. A compromised process while the vault is unlocked can still read
 decrypted dependency state and any explicitly exposed secret.
 
-M3.5 still does not address clipboard access, locked-memory allocation, process
+M3.5 itself does not address clipboard access, locked-memory allocation, process
 hardening, cloud transport/provider behavior, base-generation storage, or
-dependency attestation. The project must not claim resistance to those threats
-yet.
+dependency attestation. M4.2 adds bounded Rust-owned active-clipboard handling,
+but it does not eliminate clipboard snooping/history or the other threats in
+that list.
 
 M2.5 confines experimental mutation to an opaque `KdbxDocument` retaining the
 complete `keepass-rs` representation. It never serializes from the incomplete
@@ -347,12 +353,21 @@ must not become a second unlocked-vault owner. Controls are:
   password copy returns only a safe receipt, so copy does not introduce password
   plaintext into React. Browser clipboard APIs and the JavaScript clipboard
   plugin are rejected by ESLint and the repository security guard.
+- Copy Username, Copy Password, and Lock share one secret-operation lifecycle
+  gate. The order is gate, then vault-service mutex; the service mutex is
+  released before clipboard I/O, and clipboard state never acquires the gate.
+  If copy wins, Lock waits for its write and lease before dropping the session
+  and cleaning up. If Lock wins, it drops the session first and the later copy
+  returns `Locked` without writing. Thus no already-started gated copy can write
+  a vault secret after Lock completes.
 - A clipboard lease contains a monotonic generation, secure-random 32-byte salt,
   and SHA-256 digest only. It contains no plaintext string. Expiration reads the
-  active clipboard off the main thread and clears only if the generation is
-  current and the salted fingerprint matches. If another application replaces
-  the clipboard, Nian Pass drops ownership and preserves that content. An older
-  timer cannot clear a newer Nian Pass copy.
+  active clipboard off the main thread and requests clear only if the generation
+  is current and the salted fingerprint matches. If content already differs,
+  Nian Pass relinquishes ownership and preserves that observed content. Read or
+  clear failure also relinquishes the lease: inability to prove ownership or
+  complete deletion does not confer indefinite future deletion authority. An
+  older timer cannot clear a newer Nian Pass copy.
 - Explicit Lock clears frontend secrets immediately, drops the Rust session
   before clipboard I/O, then attempts conditional clipboard cleanup. Clipboard
   read/clear failure is reported as safe `clear_failed` metadata and can never
@@ -372,7 +387,12 @@ must not become a second unlocked-vault owner. Controls are:
 Residual risks remain. Once explicitly revealed, plaintext in JavaScript/WebView
 strings cannot be deterministically zeroized; a compromised WebView can observe
 it during its bounded lifetime. `keepass-rs` allocations likewise lack a full
-zeroization guarantee. Clearing the active clipboard cannot remove copies held
+zeroization guarantee. The selected cross-platform clipboard API has separate
+read and clear calls, not atomic compare-and-clear. An external application can
+replace the clipboard in the narrow interval after Nian Pass re-reads and
+verifies the salted fingerprint but before the OS processes clear; that content
+could then be cleared. Nian Pass cannot eliminate this residual race with its
+process-local mutex. Clearing the active clipboard also cannot remove copies held
 by OS clipboard history, desktop clipboard managers, cloud clipboard sync, or
 third-party utilities. Auto-clear is best-effort at the OS boundary, not secure
 erasure. Privacy-sensitive metadata remains visible while unlocked, and native

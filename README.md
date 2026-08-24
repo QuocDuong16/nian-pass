@@ -45,12 +45,15 @@ strings cannot be deterministically zeroized. Copy Password and Copy Username
 instead use semantic Rust IPC commands; password plaintext is never returned to
 React by the copy path.
 
-Nian Pass clears the active clipboard after 30 seconds only if it still contains
-the value written by Nian Pass. Ownership uses a per-copy random salt, SHA-256
-fingerprint, and generation in Rust without retaining plaintext solely for
-tracking. A later user copy is preserved, and an old timer cannot clear a newer
-Nian Pass copy. Clipboard history, cloud clipboard sync, and third-party
-clipboard managers may retain copies outside the process's control.
+After 30 seconds Nian Pass re-reads the active clipboard and clears it only if
+it still matches the value written by Nian Pass. Ownership uses a per-copy random
+salt, SHA-256 fingerprint, and generation in Rust without retaining plaintext
+solely for tracking. Already-observed replacement content is preserved, and an
+old timer cannot clear a newer Nian Pass copy. Because the portable clipboard
+API has no atomic compare-and-clear, replacement between the final comparison
+and clear remains a narrow residual race. Clipboard history, cloud clipboard
+sync, and third-party clipboard managers may retain copies outside the process's
+control.
 
 M4.2 still has no editing, save UI, entry/group mutations, password generator,
 TOTP, attachments, custom-field value reveal, URL opening, search, cloud

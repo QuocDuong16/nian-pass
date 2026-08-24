@@ -145,6 +145,7 @@ impl Default for DesktopVaultService {
 pub struct AppState {
     pub service: Arc<Mutex<DesktopVaultService>>,
     pub clipboard: Arc<DesktopClipboardService>,
+    secret_operation_gate: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -153,33 +154,46 @@ impl AppState {
         Self {
             service: Arc::new(Mutex::new(DesktopVaultService::new())),
             clipboard: Arc::new(DesktopClipboardService::new(clipboard)),
+            secret_operation_gate: Arc::new(Mutex::new(())),
         }
     }
 
     pub fn copy_entry_password(&self, entry_id: &str) -> Result<ClipboardCopy, DesktopError> {
-        let secret = self
-            .service
-            .lock()
-            .map_err(|_| DesktopError::Internal)?
-            .entry_password(entry_id)?;
-        self.clipboard.copy(&secret).map_err(map_clipboard_error)
+        self.copy_entry_secret(entry_id, DesktopVaultService::entry_password)
     }
 
     pub fn copy_entry_username(&self, entry_id: &str) -> Result<ClipboardCopy, DesktopError> {
-        let secret = self
-            .service
-            .lock()
-            .map_err(|_| DesktopError::Internal)?
-            .entry_username(entry_id)?;
-        self.clipboard.copy(&secret).map_err(map_clipboard_error)
+        self.copy_entry_secret(entry_id, DesktopVaultService::entry_username)
     }
 
     pub fn lock(&self) -> Result<ClipboardClearStatus, DesktopError> {
-        self.service
+        let _operation = self
+            .secret_operation_gate
             .lock()
-            .map_err(|_| DesktopError::Internal)?
-            .lock()?;
+            .map_err(|_| DesktopError::Internal)?;
+        {
+            let mut service = self.service.lock().map_err(|_| DesktopError::Internal)?;
+            service.lock()?;
+        }
         Ok(self.clipboard.clear_if_owned())
+    }
+
+    fn copy_entry_secret(
+        &self,
+        entry_id: &str,
+        read: fn(&DesktopVaultService, &str) -> Result<SecretString, DesktopError>,
+    ) -> Result<ClipboardCopy, DesktopError> {
+        // Lock order is operation gate -> vault service. Clipboard state is
+        // touched only after the vault-service guard has been released.
+        let _operation = self
+            .secret_operation_gate
+            .lock()
+            .map_err(|_| DesktopError::Internal)?;
+        let secret = {
+            let service = self.service.lock().map_err(|_| DesktopError::Internal)?;
+            read(&service, entry_id)?
+        };
+        self.clipboard.copy(&secret).map_err(map_clipboard_error)
     }
 }
 
@@ -206,8 +220,16 @@ fn map_clipboard_error(_error: ClipboardFailure) -> DesktopError {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex};
+    use std::{
+        path::{Path, PathBuf},
+        sync::{
+            Arc, Mutex, TryLockError,
+            atomic::{AtomicBool, Ordering},
+            mpsc::{Receiver, SyncSender, TryRecvError, sync_channel},
+        },
+        thread,
+        time::Duration,
+    };
 
     use serde_json::{Map, Value, to_value};
     use vault_core::{NewEntry, SecretString};
@@ -217,6 +239,7 @@ mod tests {
 
     const FIXTURE_PASSWORD: &str = "demopass";
     const FIXTURE: &str = "keepassxc-2.7.12-kdbx41.kdbx";
+    const TEST_COORDINATION_TIMEOUT: Duration = Duration::from_secs(3);
 
     fn fixture_path() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -266,9 +289,73 @@ mod tests {
         }
     }
 
-    fn unlocked_app() -> (AppState, Arc<TestClipboard>, String) {
-        let clipboard = Arc::new(TestClipboard::default());
-        let state = AppState::new(clipboard.clone());
+    struct BlockingWriteClipboard {
+        content: Mutex<Option<String>>,
+        write_started: SyncSender<()>,
+        allow_write: Mutex<Receiver<()>>,
+    }
+
+    impl ClipboardPort for BlockingWriteClipboard {
+        fn write_text(&self, value: &str) -> Result<(), ()> {
+            self.write_started.send(()).map_err(|_| ())?;
+            self.allow_write
+                .lock()
+                .map_err(|_| ())?
+                .recv_timeout(TEST_COORDINATION_TIMEOUT)
+                .map_err(|_| ())?;
+            *self.content.lock().map_err(|_| ())? = Some(value.to_owned());
+            Ok(())
+        }
+
+        fn read_text(&self) -> Result<Option<String>, ()> {
+            self.content
+                .lock()
+                .map_err(|_| ())
+                .map(|value| value.clone())
+        }
+
+        fn clear(&self) -> Result<(), ()> {
+            *self.content.lock().map_err(|_| ())? = None;
+            Ok(())
+        }
+    }
+
+    struct BlockingReadClipboard {
+        content: Mutex<Option<String>>,
+        block_read: AtomicBool,
+        read_started: SyncSender<()>,
+        allow_read: Mutex<Receiver<()>>,
+    }
+
+    impl ClipboardPort for BlockingReadClipboard {
+        fn write_text(&self, value: &str) -> Result<(), ()> {
+            *self.content.lock().map_err(|_| ())? = Some(value.to_owned());
+            Ok(())
+        }
+
+        fn read_text(&self) -> Result<Option<String>, ()> {
+            if self.block_read.load(Ordering::SeqCst) {
+                self.read_started.send(()).map_err(|_| ())?;
+                self.allow_read
+                    .lock()
+                    .map_err(|_| ())?
+                    .recv_timeout(TEST_COORDINATION_TIMEOUT)
+                    .map_err(|_| ())?;
+            }
+            self.content
+                .lock()
+                .map_err(|_| ())
+                .map(|value| value.clone())
+        }
+
+        fn clear(&self) -> Result<(), ()> {
+            *self.content.lock().map_err(|_| ())? = None;
+            Ok(())
+        }
+    }
+
+    fn unlocked_state(clipboard: Arc<dyn ClipboardPort>) -> (AppState, String) {
+        let state = AppState::new(clipboard);
         let entry_id = {
             let mut service = state.service.lock().expect("desktop service lock");
             service
@@ -288,6 +375,12 @@ mod tests {
                 .id
                 .clone()
         };
+        (state, entry_id)
+    }
+
+    fn unlocked_app() -> (AppState, Arc<TestClipboard>, String) {
+        let clipboard = Arc::new(TestClipboard::default());
+        let (state, entry_id) = unlocked_state(clipboard.clone());
         (state, clipboard, entry_id)
     }
 
@@ -475,6 +568,153 @@ mod tests {
             clipboard.content.lock().expect("clipboard lock").as_deref(),
             Some(expected_username.as_str())
         );
+    }
+
+    #[test]
+    fn copy_wins_lifecycle_gate_then_lock_clears_the_owned_clipboard() {
+        let (write_started_tx, write_started_rx) = sync_channel(1);
+        let (allow_write_tx, allow_write_rx) = sync_channel(1);
+        let clipboard = Arc::new(BlockingWriteClipboard {
+            content: Mutex::new(None),
+            write_started: write_started_tx,
+            allow_write: Mutex::new(allow_write_rx),
+        });
+        let (state, entry_id) = unlocked_state(clipboard.clone());
+
+        let copy_state = state.clone();
+        let copy_thread = thread::spawn(move || copy_state.copy_entry_password(&entry_id));
+        write_started_rx
+            .recv_timeout(TEST_COORDINATION_TIMEOUT)
+            .expect("copy should reach the controlled clipboard write");
+        assert!(matches!(
+            state.secret_operation_gate.try_lock(),
+            Err(TryLockError::WouldBlock)
+        ));
+        assert!(
+            state
+                .service
+                .try_lock()
+                .expect("copy must release the service mutex before clipboard I/O")
+                .snapshot()
+                .is_ok()
+        );
+
+        let (lock_attempt_tx, lock_attempt_rx) = sync_channel(1);
+        let (lock_done_tx, lock_done_rx) = sync_channel(1);
+        let lock_state = state.clone();
+        let lock_thread = thread::spawn(move || {
+            lock_attempt_tx.send(()).expect("report lock attempt");
+            let result = lock_state.lock();
+            lock_done_tx.send(result).expect("report lock result");
+        });
+        lock_attempt_rx
+            .recv_timeout(TEST_COORDINATION_TIMEOUT)
+            .expect("lock worker should start");
+        assert!(matches!(lock_done_rx.try_recv(), Err(TryRecvError::Empty)));
+
+        allow_write_tx.send(()).expect("release clipboard write");
+        copy_thread
+            .join()
+            .expect("copy worker should not panic")
+            .expect("copy should finish before lock");
+        let lock_status = lock_done_rx
+            .recv_timeout(TEST_COORDINATION_TIMEOUT)
+            .expect("lock should finish after the copy")
+            .expect("lock should succeed");
+        lock_thread.join().expect("lock worker should not panic");
+
+        assert!(lock_status == ClipboardClearStatus::Cleared);
+        assert!(clipboard.content.lock().expect("clipboard lock").is_none());
+        assert!(matches!(
+            state
+                .service
+                .lock()
+                .expect("desktop service lock")
+                .snapshot(),
+            Err(DesktopError::Locked)
+        ));
+    }
+
+    fn assert_lock_wins_before_copy(password: bool) {
+        let (read_started_tx, read_started_rx) = sync_channel(1);
+        let (allow_read_tx, allow_read_rx) = sync_channel(1);
+        let clipboard = Arc::new(BlockingReadClipboard {
+            content: Mutex::new(None),
+            block_read: AtomicBool::new(false),
+            read_started: read_started_tx,
+            allow_read: Mutex::new(allow_read_rx),
+        });
+        let (state, entry_id) = unlocked_state(clipboard.clone());
+        state
+            .copy_entry_password(&entry_id)
+            .expect("initial copy should install an owned lease");
+        clipboard.block_read.store(true, Ordering::SeqCst);
+
+        let (lock_done_tx, lock_done_rx) = sync_channel(1);
+        let lock_state = state.clone();
+        let lock_thread = thread::spawn(move || {
+            lock_done_tx
+                .send(lock_state.lock())
+                .expect("report lock result");
+        });
+        read_started_rx
+            .recv_timeout(TEST_COORDINATION_TIMEOUT)
+            .expect("lock should drop the session and reach clipboard verification");
+        assert!(matches!(
+            state.secret_operation_gate.try_lock(),
+            Err(TryLockError::WouldBlock)
+        ));
+        assert!(matches!(
+            state
+                .service
+                .try_lock()
+                .expect("lock must release the service mutex before clipboard I/O")
+                .snapshot(),
+            Err(DesktopError::Locked)
+        ));
+
+        let (copy_attempt_tx, copy_attempt_rx) = sync_channel(1);
+        let (copy_done_tx, copy_done_rx) = sync_channel(1);
+        let copy_state = state.clone();
+        let copy_thread = thread::spawn(move || {
+            copy_attempt_tx.send(()).expect("report copy attempt");
+            let result = if password {
+                copy_state.copy_entry_password(&entry_id)
+            } else {
+                copy_state.copy_entry_username(&entry_id)
+            };
+            copy_done_tx.send(result).expect("report copy result");
+        });
+        copy_attempt_rx
+            .recv_timeout(TEST_COORDINATION_TIMEOUT)
+            .expect("copy worker should start");
+        assert!(matches!(copy_done_rx.try_recv(), Err(TryRecvError::Empty)));
+
+        allow_read_tx
+            .send(())
+            .expect("release clipboard verification");
+        assert!(
+            lock_done_rx
+                .recv_timeout(TEST_COORDINATION_TIMEOUT)
+                .expect("lock should finish")
+                .expect("lock should succeed")
+                == ClipboardClearStatus::Cleared
+        );
+        assert!(matches!(
+            copy_done_rx
+                .recv_timeout(TEST_COORDINATION_TIMEOUT)
+                .expect("copy should finish after lock"),
+            Err(DesktopError::Locked)
+        ));
+        lock_thread.join().expect("lock worker should not panic");
+        copy_thread.join().expect("copy worker should not panic");
+        assert!(clipboard.content.lock().expect("clipboard lock").is_none());
+    }
+
+    #[test]
+    fn lock_wins_lifecycle_gate_before_password_and_username_copy() {
+        assert_lock_wins_before_copy(true);
+        assert_lock_wins_before_copy(false);
     }
 
     #[test]

@@ -4,7 +4,7 @@ Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
 the source of truth. M4.0 through M4.2 provide a Tauri 2 + React desktop shell
 for local open, unlock, browse, detail, explicit reveal/copy, and lock. M3 provides the unlocked local session and
 verified filesystem persistence beneath it. M3.5 adds provider-independent,
-synchronous three-way semantic merge; the M4.1 desktop does not call sync or
+synchronous three-way semantic merge; the current desktop does not call sync or
 expose editing/save behavior.
 
 M4.Q adds no product behavior. It makes these boundaries executable through
@@ -119,14 +119,44 @@ A from populating entry B or repopulating a locking view. This minimizes WebView
 plaintext lifetime but cannot provide deterministic JavaScript string
 zeroization.
 
-`DesktopClipboardService` owns an injected `ClipboardPort` and a mutex separate
-from `VaultSession`. Copy extracts one `SecretString` under the session mutex,
-releases that mutex, and then performs clipboard I/O. A lease retains only a
-monotonic generation, 32-byte secure-random salt, and SHA-256 digest. Expiration
-reads the current active clipboard on Tauri's blocking runtime and clears only
-when both generation and fingerprint still match. External replacement is
-preserved; an older timer cannot clear a newer copy. Tests use `FakeClipboard`
-and call expiration directly, so no display server or real clipboard is needed.
+`AppState` owns a dedicated `std::sync::Mutex<()>` secret-operation lifecycle
+gate. Only Copy Password, Copy Username, and Lock use it, with the fixed lock
+order `secret-operation gate -> DesktopVaultService mutex`. Copy extracts one
+`SecretString`, releases the service mutex, writes the clipboard and installs
+the lease, then releases the operation gate. Lock acquires the same gate, drops
+`VaultSession` and the selected path, releases the service mutex, conditionally
+clears the clipboard, and only then releases the operation gate. The service
+mutex is therefore never held across OS clipboard I/O.
+
+```text
+Copy Password / Username       Lock
+  -> secret-operation gate       -> same gate
+  -> extract SecretString        -> drop VaultSession
+  -> release service mutex       -> release service mutex
+  -> clipboard write + lease     -> conditional clipboard cleanup
+  -> release gate                -> release gate
+```
+
+Lock completion is ordered after every earlier gated copy. If Lock wins the gate
+first, a later copy observes `Locked` and cannot write. Clipboard state never
+acquires the lifecycle gate, so there is no inverse lock order.
+
+`DesktopClipboardService` owns an injected `ClipboardPort` and its own mutex. A
+lease retains only a monotonic generation, 32-byte secure-random salt, and
+SHA-256 digest. Expiration reads the current active clipboard on Tauri's blocking
+runtime and requests clear only when both generation and fingerprint still
+match. A detected external replacement is preserved, and an older timer cannot
+clear a newer copy. If read or clear fails, Nian Pass returns `clear_failed` and
+relinquishes the lease because it can no longer justify future deletion
+authority. Tests use controlled fake clipboards and direct expiration calls, so
+no display server, real clipboard, or sleep-based race is needed.
+
+The selected plugin exposes separate cross-platform read and clear operations,
+not atomic compare-and-clear or a portable change counter. An external process
+can therefore replace the clipboard after Nian Pass verifies the fingerprint
+but before the clear operation reaches the OS. This narrow compare-before-clear
+TOCTOU is a residual platform/API risk; M4.2 does not add custom Win32, X11, or
+Wayland clipboard code.
 
 Lock drops `VaultSession` before best-effort conditional clipboard cleanup, so a
 clipboard read/clear failure cannot keep the vault unlocked. Its secret-free
@@ -400,7 +430,8 @@ KDF, cipher, or compression migration.
 29. **The unlocked `VaultSession` must remain Rust-owned; normal browse/detail DTOs stay secret-free and only explicit reveal commands may return one secret string.**
 30. **UI Lock must drop the Rust session, not merely hide the unlocked view.**
 31. **Password copy must remain a semantic Rust command and must not return the password to JavaScript.**
-32. **Clipboard cleanup must match both the current lease generation and salted fingerprint before clearing.**
+32. **Clipboard cleanup must re-read and match both the current lease generation and salted fingerprint immediately before a best-effort clear.**
+33. **Copy Password, Copy Username, and Lock must share one lifecycle gate so no pre-lock copy can write after Lock completes.**
 
 If Nian Pass saves a database that KeePassXC can no longer open, or silently
 loses supported semantic data, treat it as a P0 compatibility bug.

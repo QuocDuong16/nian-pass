@@ -122,22 +122,30 @@ impl DesktopClipboardService {
         let Some(lease) = state.lease.as_ref() else {
             return ClipboardClearStatus::NotOwned;
         };
-        if expected_generation.is_some_and(|expected| expected != lease.generation) {
+        let generation = lease.generation;
+        let salt = lease.salt;
+        let digest = lease.digest;
+        if expected_generation.is_some_and(|expected| expected != generation) {
             return ClipboardClearStatus::NotOwned;
         }
 
-        let Ok(current) = self.port.read_text() else {
-            return ClipboardClearStatus::ClearFailed;
+        let current = match self.port.read_text() {
+            Ok(current) => current,
+            Err(()) => {
+                state.lease = None;
+                return ClipboardClearStatus::ClearFailed;
+            }
         };
         let matches = current.is_some_and(|current| {
             let current = SecretString::new(current);
-            fingerprint(&lease.salt, current.expose_secret()) == lease.digest
+            fingerprint(&salt, current.expose_secret()) == digest
         });
         if !matches {
             state.lease = None;
             return ClipboardClearStatus::NotOwned;
         }
         if self.port.clear().is_err() {
+            state.lease = None;
             return ClipboardClearStatus::ClearFailed;
         }
         state.lease = None;
@@ -277,12 +285,24 @@ mod tests {
     }
 
     #[test]
-    fn clear_failure_is_reported_without_forgetting_ownership() {
+    fn read_failure_relinquishes_ownership() {
+        let (clipboard, service) = setup();
+        copy(&service, "synthetic-password");
+        *clipboard.fail_read.lock().expect("fake clipboard lock") = true;
+        assert!(service.clear_if_owned() == ClipboardClearStatus::ClearFailed);
+        *clipboard.fail_read.lock().expect("fake clipboard lock") = false;
+        assert!(service.clear_if_owned() == ClipboardClearStatus::NotOwned);
+        assert_eq!(clipboard.content().as_deref(), Some("synthetic-password"));
+    }
+
+    #[test]
+    fn clear_failure_relinquishes_ownership() {
         let (clipboard, service) = setup();
         copy(&service, "synthetic-password");
         *clipboard.fail_clear.lock().expect("fake clipboard lock") = true;
         assert!(service.clear_if_owned() == ClipboardClearStatus::ClearFailed);
         *clipboard.fail_clear.lock().expect("fake clipboard lock") = false;
-        assert!(service.clear_if_owned() == ClipboardClearStatus::Cleared);
+        assert!(service.clear_if_owned() == ClipboardClearStatus::NotOwned);
+        assert_eq!(clipboard.content().as_deref(), Some("synthetic-password"));
     }
 }
