@@ -1,18 +1,19 @@
 ---
 type: Architecture Overview
 title: Nian Pass — Architecture
-description: Workspace structure, crate dependency direction, domain model, architecture invariants, security boundaries, KDBX adapter design, three-way sync engine, and verified persistence for Nian Pass.
-tags: [architecture, domain-model, design, security, sync, persistence]
+description: Workspace structure, crate dependency direction, domain model, architecture invariants, security boundaries, KDBX adapter design, desktop app design, three-way sync engine, and verified persistence for Nian Pass.
+tags: [architecture, domain-model, design, security, sync, persistence, desktop]
 ---
 
 # Architecture Overview
 
-Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is the source of truth. The workspace provides read/write KDBX operations, verified local persistence, and a provider-independent three-way semantic merge engine.
+Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is the source of truth. The workspace provides read/write KDBX operations, verified local persistence, a provider-independent three-way semantic merge engine, and a Tauri 2 desktop application.
 
 ## Dependency Direction
 
 ```mermaid
 flowchart TD
+    DESKTOP["Desktop App\napps/desktop/src-tauri"]
     CLI["nian-pass CLI\napps/cli"]
     VS["vault-sync\nvault-sync crate"]
     VSESS["vault-session\nvault-session crate"]
@@ -20,6 +21,8 @@ flowchart TD
     KDBX["KDBX adapter\nkdbx crate"]
     KEEPASS["keepass-rs\nexternal crate"]
 
+    DESKTOP --> VSESS
+    DESKTOP --> VC
     CLI --> KDBX
     CLI --> VC
     VSESS --> KDBX
@@ -35,6 +38,7 @@ flowchart TD
     style CLI fill:#fce4ec,stroke:#c62828
     style VSESS fill:#f3e5f5,stroke:#7b1fa2
     style VS fill:#e0f2f1,stroke:#00695c
+    style DESKTOP fill:#e1f5fe,stroke:#0277bd
 ```
 
 - **`vault-core`** owns KDBX-independent domain types including secret handling. It has no dependency on any KDBX library.
@@ -42,7 +46,7 @@ flowchart TD
 - **`vault-session`** owns filesystem paths and the verified atomic persistence protocol. It depends on `kdbx` and `vault-core` but never exposes `keepass-rs` types.
 - **`vault-sync`** is a thin orchestration layer over the three-way merge engine. It has no filesystem, network, or async responsibility.
 - **`apps/cli`** consumes only the adapter's public API and `vault-core` values. It never imports `keepass` directly.
-- Future UI/platform clients will depend on `vault-core`, never on the KDBX adapter.
+- **`apps/desktop`** depends on `vault-session` and `vault-core` — never on the KDBX adapter directly. The Tauri backend exposes a secret-free IPC surface; the React frontend receives only presentation DTOs.
 
 ## Domain Model
 
@@ -139,6 +143,29 @@ pub fn open_reader(reader, master_password) -> Result<OpenedVault, KdbxError>
 | `VerificationFailed` | Round-trip semantics differ |
 | `SyncInvariant` | Sync candidate violated a required invariant |
 
+## Desktop Application (Tauri 2 + React)
+
+`apps/desktop` is the first visible Nian Pass application: a Tauri 2 shell with React, strict TypeScript, and Vite. The Tauri backend is in `apps/desktop/src-tauri/` and depends on `vault-session` and `vault-core`. The React frontend is in `apps/desktop/src/`.
+
+**Backend (Rust):**
+- 4 Tauri IPC commands: `select_vault`, `unlock_vault`, `vault_snapshot`, `lock_vault`
+- `AppState` holds at most one unlocked `VaultSession` behind `Arc<Mutex<...>>`
+- All errors serialize as `DesktopErrorDto` with stable error codes — no paths, parser details, or secrets leak to IPC
+- Only `tauri-plugin-dialog` is allowed; shell, HTTP, clipboard, fs, updater, and process plugins are forbidden
+
+**Frontend (React/TypeScript):**
+- `lib/desktop.ts` is the sole IPC gateway — all `invoke()` calls are centralized
+- `lib/validation.ts` validates all DTOs from the Rust backend at runtime
+- `features/vault/` renders `GroupTree` + `EntryList` with pure client-side navigation
+- Strict TypeScript: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
+
+**Secret boundary:**
+- `SecretString`, `KdbxDocument`, and `VaultSession` cannot derive `Serialize`
+- IPC DTOs carry `passwordPresent: bool` and `SummaryTextDto` (protected/missing/visible) — never actual secrets
+- No browser persistence (localStorage, sessionStorage, IndexedDB, cookies are forbidden)
+
+**Contract testing:** A committed `contracts/desktop-contract.json` fixture is validated bidirectionally — from a Rust `#[test]` and from TypeScript Vitest — to ensure IPC serialization never silently breaks.
+
 ## Three-Way Sync Engine
 
 The sync engine lives in `kdbx/src/sync.rs` (~1700 lines) and is orchestrated by `vault-sync`. It performs provider-independent, synchronous three-way semantic merge on already-opened `KdbxDocument` triples.
@@ -201,6 +228,11 @@ These invariants are documented in `docs/architecture.md` and enforced by code s
 8. **Saving a vault must not silently discard unsupported/unknown semantic data.**
 9. **Sync conflict descriptors never carry competing plaintext values.**
 10. **Persistence verifies semantic equivalence at every filesystem boundary.**
+11. **`#[tauri::command]` is allowed only in `apps/desktop/src-tauri/src/commands.rs`.**
+12. **`keepass::` types are confined to `crates/kdbx/`.**
+13. **Core crates must not depend on Tauri.**
+14. **`SecretString`, `KdbxDocument`, and `VaultSession` must not derive `Serialize`.**
+15. **The IPC surface carries no secrets — only `passwordPresent` booleans and protection-mode enums.**
 
 ## Security Design
 
@@ -210,14 +242,23 @@ These invariants are documented in `docs/architecture.md` and enforced by code s
 - The projection excludes all secret fields by design — `SecretString` values require explicit `expose_secret()`.
 - `vault-session` never retains the master password; credentials are supplied per-operation.
 - `vault-sync` conflict descriptors identify objects and field categories but never carry competing values.
+- **Desktop IPC** exposes only `passwordPresent: bool` and `SummaryTextDto` (protected/missing/visible) — never actual secret values. The absolute file path stays in Rust; JavaScript receives only the selected filename.
+- **Tauri capabilities** are locked to `core:default` permissions only. CSP prohibits `unsafe-eval`, wildcard sources, and arbitrary remote HTTPS origins.
+- **Browser persistence** (localStorage, sessionStorage, IndexedDB, cookies) is forbidden for vault UI state.
 
-See the [threat model](/docs/threat-model.md) for assets, assumptions, and gaps. See [write safety](/docs/write-safety.md) for persistence guarantees and platform limitations.
+See the [threat model](/docs/threat-model.md) for assets, assumptions, and gaps. See [write safety](/docs/write-safety.md) for persistence guarantees and platform limitations. See [quality policy](/docs/quality.md) for machine-enforced architecture and security guards.
 
 ## Source Map
 
 | Path | Role |
 |---|---|
 | `apps/cli/src/main.rs` | CLI entry point: argument parsing, password prompt, output formatting |
+| `apps/desktop/src-tauri/src/commands.rs` | Tauri IPC commands: select, unlock, snapshot, lock |
+| `apps/desktop/src-tauri/src/state.rs` | `DesktopVaultService` managing one `VaultSession` behind `Arc<Mutex>` |
+| `apps/desktop/src-tauri/src/dto.rs` | IPC DTOs: `VaultSnapshotDto`, `EntrySummaryDto`, `SummaryTextDto` |
+| `apps/desktop/src/lib/desktop.ts` | Frontend IPC gateway — sole `invoke()` call site |
+| `apps/desktop/src/lib/validation.ts` | Runtime contract validators for all DTOs |
+| `apps/desktop/contracts/desktop-contract.json` | Bidirectional IPC contract fixture |
 | `crates/vault-core/src/lib.rs` | Domain model: `Vault`, `Group`, `EntrySummary`, `SecretString`, `SummaryText`, `CustomFieldSummary`, `NewEntry`, identifiers |
 | `crates/kdbx/src/lib.rs` | KDBX adapter: open, mutations, save, verification, `KdbxError` |
 | `crates/kdbx/src/sync.rs` | Three-way merge engine: conflict detection, semantic synthesis, validation |
@@ -225,10 +266,17 @@ See the [threat model](/docs/threat-model.md) for assets, assumptions, and gaps.
 | `crates/vault-session/src/fingerprint.rs` | SHA-256 file fingerprinting |
 | `crates/vault-session/src/platform.rs` | Platform-specific save/replace/sync operations |
 | `crates/vault-sync/src/lib.rs` | Merge orchestrator: `merge()`, `MergeOutcome`, `MergedDocument` |
+| `Makefile` | Single developer/CI interface for all quality gates |
 | `Cargo.toml` | Workspace definition, shared dependencies, lints |
+| `docs/quality.md` | Quality, security, and architecture policy |
 | `docs/architecture.md` | Architecture invariants and compatibility boundary |
 | `docs/kdbx-compatibility.md` | KDBX format compatibility matrix |
 | `docs/write-safety.md` | Persistence guarantees and platform limitations |
 | `docs/threat-model.md` | Threat model, assets, assumptions, gaps |
 | `fixtures/kdbx/` | 4 synthetic test databases with provenance documentation |
+| `scripts/check_architecture.mjs` | Architecture guard: line budgets, dependency boundaries, IPC single-gateway |
+| `scripts/check_security.mjs` | Security guard: forbids secrets in IPC, browser persistence, dangerous DOM APIs |
+| `scripts/check_docs.mjs` | Docs guard: required files and canonical patterns |
+| `scripts/check_diff_coverage.mjs` | Changed-line coverage ratcheting for Rust and TypeScript |
+| `scripts/check_no_eslint_disable.mjs` | Forbids `eslint-disable` comments in production source |
 | `scripts/test-keepassxc-compat.sh` | External KeePassXC round-trip compatibility harness |

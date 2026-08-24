@@ -1,8 +1,8 @@
 ---
 type: Reference
 title: Nian Pass — Testing
-description: Test suite structure, fixture policy, CI pipeline, and testing guidance for Nian Pass across all four crates.
-tags: [testing, ci, fixtures, quality, merge-tests]
+description: Test suite structure, fixture policy, CI pipeline, desktop testing, quality scripts, and testing guidance for Nian Pass.
+tags: [testing, ci, fixtures, quality, merge-tests, desktop, vitest]
 ---
 
 # Testing
@@ -10,11 +10,17 @@ tags: [testing, ci, fixtures, quality, merge-tests]
 ## Running Tests
 
 ```bash
-# Verify fixture integrity first
-sha256sum --check fixtures/kdbx/SHA256SUMS
+# Full quality gate (CI-equivalent)
+make quality-check
 
-# Run all tests
+# Quick feedback during development
+make quick-check
+
+# Rust tests only
 cargo test --locked --workspace
+
+# Desktop frontend tests only (Vitest)
+make desktop-test
 
 # KeePassXC external compatibility (skips if keepassxc-cli absent)
 scripts/test-keepassxc-compat.sh
@@ -94,6 +100,19 @@ Tests in `apps/cli/src/main.rs` validate argument parsing and output safety:
 - Rejects a `--password` argument (security enforcement)
 - `terminal_safe()` replaces control characters with the Unicode replacement character
 
+### `apps/desktop` (Vitest)
+
+Frontend tests use Vitest with jsdom environment and v8 coverage provider. Tests are in `apps/desktop/src/`:
+
+- `App.test.tsx` — top-level rendering and view switching
+- `app/ErrorBoundary.test.tsx` — error boundary behavior
+- `lib/desktop.test.ts` — IPC gateway mocking and contract validation
+- `lib/validation.ts` — runtime DTO validators (tested indirectly through `desktop.test.ts`)
+
+The Tauri backend has a Rust-side contract test in `commands.rs` that validates `desktop-contract.json` serialization matches the committed fixture bidirectionally.
+
+**Coverage thresholds** (Vitest config in `vite.config.ts`): 65% statements, 60% branches, 63% functions, 64% lines. These are ratchets and may only increase.
+
 ## Fixture Policy
 
 All test databases live in `fixtures/kdbx/`. The policy (documented in `fixtures/kdbx/README.md`):
@@ -117,27 +136,41 @@ All fixtures are from `keepass-rs` commit `2f1dd5e0f1a23dc7420c3fa25f434fe362729
 
 ## CI Pipeline
 
-The Forgejo workflow `.forgejo/workflows/quality.yml` runs on every push and pull request with three jobs:
+The Forgejo workflow `.forgejo/workflows/quality.yml` runs on every push, pull request, and manual dispatch with five parallel jobs:
 
 ### Job 1: `rust`
 
-1. **Fixture integrity** — `sha256sum --check fixtures/kdbx/SHA256SUMS`
-2. **Format check** — `cargo fmt --check`
-3. **Clippy lint** — `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
-4. **Tests** — `cargo test --locked --workspace`
+- Runs in `rust:1.97.1-bookworm`
+- Installs Node.js (with SHA-256 checksum verification) for GitHub action compatibility
+- Runs `make tools-install` then `make rust-core-check rust-deps-check rust-security-check`
+- Core Rust checks: format, clippy, tests, doc warnings, unused dependencies, cargo-deny audit, coverage
 
-### Job 2: `windows-cross-check`
+### Job 2: `desktop-frontend`
 
-- Compiles for `x86_64-pc-windows-msvc` target to catch platform-specific compilation issues
+- Runs in `node:24.19.0-bookworm`
+- Activates pinned pnpm via Corepack
+- Runs `make policy-check` (architecture, security, docs guards) then `make desktop-check`
+- Desktop checks: format, ESLint (including no-eslint-disable), typecheck, Vitest tests, coverage, dead code (Knip), contract validation, build, `pnpm audit`
+- Resolves diff coverage base from PR context for changed-line coverage ratcheting
+
+### Job 3: `desktop-native-check`
+
+- Runs in `rust:1.97.1-bookworm` with Tauri headless prerequisites (libwebkit2gtk, libayatana-appindicator, librsvg)
+- Runs `make desktop-native-check` (cargo check/test/clippy/doc for the Tauri crate)
+- Runs `make rust-coverage rust-coverage-check` plus diff coverage
+
+### Job 4: `windows-cross-check`
+
+- Runs in `rust:1.97.1-bookworm` with `gcc-mingw-w64-x86-64`
+- Cross-compiles `vault-session` and `vault-sync` for `x86_64-pc-windows-gnu`
 - Does not run tests (cross-compiled binary)
 
-### Job 3: `keepassxc-compat`
+### Job 5: `keepassxc-compat`
 
+- Runs in `rust:1.97.1-bookworm`
 - Installs pinned KeePassXC 2.7.4 from Debian Bookworm packages
-- Runs `scripts/test-keepassxc-compat.sh --require` (missing binary is a failure, not a skip)
+- Runs `make fixture-check compat-check-required` (missing binary is a failure, not a skip)
 - Tests KDBX round-trip and vault-sync merge output against external KeePassXC
-
-Runs in a `rust:1.97.1-bookworm` Docker container with pinned Node.js 24.19.0 and a 20-minute timeout.
 
 ## KeePassXC Compatibility Script
 
@@ -147,6 +180,20 @@ Runs in a `rust:1.97.1-bookworm` Docker container with pinned Node.js 24.19.0 an
 2. **Merge output**: Open three generations → merge via vault-sync → save → verify KeePassXC can open the result
 
 The script skips clearly when `keepassxc-cli` is absent locally. Use `--require` in CI to make absence a failure.
+
+## Quality Guard Scripts
+
+The `scripts/` directory contains machine-enforced repository policy guards. These are invoked by `make` targets and the CI pipeline:
+
+| Script | Purpose | Make target |
+|---|---|---|
+| `check_architecture.mjs` | Line budgets, dependency boundaries, IPC single-gateway, browser persistence ban, secret type non-serialization | `architecture-check` |
+| `check_security.mjs` | Forbids `console.*`, `dangerouslySetInnerHTML`, `eval`, unapproved Tauri plugins, CSP violations | `security-check` |
+| `check_diff_coverage.mjs` | Computes coverage of changed lines only from LCOV + `git diff` | `rust-coverage-diff`, `desktop-coverage-diff` |
+| `check_docs.mjs` | Ensures required files exist and contain canonical patterns | `docs-check` |
+| `check_no_eslint_disable.mjs` | Forbids `eslint-disable` comments in production frontend source | `desktop-no-eslint-disable` |
+
+Architecture budgets (from `scripts/architecture-budget.json`): TypeScript default 250 lines, Rust default 400 lines with grandfathered exceptions for `kdbx/lib.rs` (992), `kdbx/sync.rs` (1706), `vault-core/lib.rs` (416), and `vault-session/lib.rs` (702).
 
 ## Testing Guidance for Future Contributors
 
@@ -181,6 +228,15 @@ The script skips clearly when `keepassxc-cli` is absent locally. Use `--require`
 - Verify no password argument is accepted (add a test like `rejects_password_argument`)
 - Verify control characters in vault data are sanitized before output
 - Test the `Cli` parser, not the vault-opening logic (that belongs in `kdbx` tests)
+
+### When adding desktop features
+
+- Update `desktop-contract.json` if the IPC serialization shape changes; the Rust and TypeScript contract tests will catch drift
+- Frontend business logic goes in `src/features/vault/` or `src/lib/`; keep IPC calls centralized in `src/lib/desktop.ts`
+- Add Vitest tests for new components and utilities; mock `invoke()` calls through the `desktop.test.ts` pattern
+- New Tauri commands go in `src-tauri/src/commands.rs` only — the architecture guard enforces this
+- Do not add new Tauri plugins without explicit approval; only `tauri-plugin-dialog` is currently allowed
+- Do not use browser persistence APIs (localStorage, sessionStorage, IndexedDB, cookies) — the security guard will reject them
 
 ### Workspace Lints
 
