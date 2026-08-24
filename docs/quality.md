@@ -22,7 +22,9 @@ for feedback but is intentionally not equivalent to the full gate.
 `make tools-install` installs `cargo-deny 0.20.2`, `cargo-machete 0.9.2`, and
 `cargo-llvm-cov 0.9.0` into ignored `.bin/`. `make tools-check` rejects missing
 or different versions. Frontend tools are exact lockfile-managed dependencies.
-No quality target launches a window, X11, Wayland, or a desktop session.
+The root's exact `smol-toml 1.8.0` dependency parses Cargo policy inputs;
+`scripts-check` installs only that locked root tooling before running. No
+quality target launches a window, X11, Wayland, or a desktop session.
 
 ## Gate hierarchy
 
@@ -80,6 +82,13 @@ review. Workspace crates are private and are not assigned an invented project
 license by this milestone. Approved dependency licenses are enumerated in
 `deny.toml`.
 
+Wildcard registry dependency requirements are denied. A declaration such as
+`foo = "*"` is not allowed; dependencies use the repository's existing exact
+or deliberately bounded version policy. `allow-wildcard-paths` applies only to
+private path dependencies, whose Cargo metadata requirement is `*` when no
+publishable version is specified. Workspace/path dependencies therefore remain
+valid. Git sources remain denied independently by the source allowlist.
+
 Every advisory exception must name one exact RUSTSEC ID, explain impact and why
 no safe upgrade exists, and carry a tracking issue or TODO. Wildcard ignores are
 forbidden. Current exceptions are unmaintained-only transitive dependencies:
@@ -105,12 +114,28 @@ sizes of `crates/kdbx/src/lib.rs`, `crates/kdbx/src/sync.rs`,
 `crates/vault-core/src/lib.rs`, and `crates/vault-session/src/lib.rs`. Tests do
 not consume production line budget. TypeScript has no line-budget exceptions.
 
+Cargo dependency boundaries are evaluated with a standards-based TOML parser,
+using the actual `package` identity rather than the local import alias. Normal,
+dev, build, workspace-inherited, and target-specific dependencies all remain in
+the policy model, so renaming `tauri` or `keepass` cannot bypass crate
+boundaries. The parser runs in the existing headless Node policy job and never
+resolves dependencies over the network or mutates `Cargo.lock`.
+
 Lint exceptions belong in centralized configuration or an exact crate/file
 scope with a security reason. Scattered suppressions are not accepted. Coverage
 ignores are limited to generated, test-infrastructure, pure-declaration, or
 binary-composition files. The CSP keeps `style-src 'unsafe-inline'` only for the
 current bundled styling; `unsafe-eval`, wildcard sources, remote connections,
 and remote assets remain forbidden.
+
+The production CSP must explicitly contain `default-src`, `connect-src`,
+`img-src`, `style-src`, `script-src`, `object-src`, `base-uri`, and `frame-src`.
+Their only approved tokens are the current bundled-app values: `default-src`
+and `script-src` allow only `'self'`; `connect-src` allows only `ipc:` and
+`http://ipc.localhost`; `img-src` allows only `'self'`, `asset:`, and `data:`;
+`style-src` allows only `'self'` and `'unsafe-inline'`; and `object-src`,
+`base-uri`, and `frame-src` allow only `'none'`. Duplicate or unknown
+directives and every unapproved token fail the security gate.
 
 The current plugin/capability allowlist is Tauri core, the Rust dialog plugin,
 and `core:default`. A future milestone may intentionally update it with threat

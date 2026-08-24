@@ -26,7 +26,7 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	desktop-coverage-diff desktop-dead-code desktop-build desktop-audit \
 	desktop-contract-rust-check desktop-contract-frontend-check desktop-contract-check \
 	desktop-native-check desktop-check windows-cross-check \
-	architecture-check security-check docs-check scripts-check \
+	architecture-check security-check docs-check scripts-install scripts-check \
 	compat-check compat-check-required policy-check quick-check quality-check
 
 tools-install:
@@ -212,7 +212,11 @@ docs-check:
 	@echo "Check quality and security documentation contracts..."
 	node scripts/check_docs.mjs
 
-scripts-check:
+scripts-install:
+	@echo "Install locked quality script dependencies..."
+	pnpm --filter nian-pass-workspace install --frozen-lockfile
+
+scripts-check: scripts-install
 	@echo "Check quality infrastructure syntax and behavior..."
 	@for script in scripts/*.mjs scripts/lib/*.mjs; do node --check "$$script"; done
 	@for script in scripts/*.sh; do bash -n "$$script"; done

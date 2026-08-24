@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { dependencyLabel, loadWorkspacePackages } from "./lib/cargo_dependencies.mjs";
 import {
   frontendProductionFiles,
   lineNumberAt,
@@ -12,28 +13,6 @@ import {
 } from "./lib/source_policy.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-
-function dependencyNames(manifest) {
-  const names = new Set();
-  let dependencySection = false;
-  for (const line of manifest.split(/\r?\n/)) {
-    const section = line.match(/^\s*\[([^\]]+)\]\s*$/)?.[1];
-    if (section !== undefined) {
-      dependencySection =
-        section === "dependencies" ||
-        section === "dev-dependencies" ||
-        section === "build-dependencies" ||
-        section.endsWith(".dependencies") ||
-        section.endsWith(".dev-dependencies") ||
-        section.endsWith(".build-dependencies");
-      continue;
-    }
-    if (!dependencySection || /^\s*(?:#|$)/.test(line)) continue;
-    const name = line.match(/^\s*["']?([A-Za-z0-9_-]+)["']?\s*=/)?.[1];
-    if (name !== undefined) names.add(name);
-  }
-  return names;
-}
 
 function checkPattern(violations, root, path, source, pattern, message) {
   const name = projectPath(root, path);
@@ -166,27 +145,41 @@ export function runChecks(root, budget) {
     "aws-sdk-s3",
     "object_store",
   ]);
+  const packagesByManifest = new Map(
+    loadWorkspacePackages(root).map((pkg) => [pkg.manifestPath, pkg]),
+  );
   for (const [manifestPath, allowedInternal] of manifests) {
-    const dependencies = dependencyNames(readFileSync(resolve(root, manifestPath), "utf8"));
-    for (const dependency of dependencies) {
-      if (workspaceCrates.has(dependency) && !allowedInternal.has(dependency)) {
-        violations.push(`${manifestPath}: forbidden workspace dependency on ${dependency}`);
+    const pkg = packagesByManifest.get(manifestPath);
+    if (pkg === undefined) {
+      throw new Error(`Cargo dependency inspection omitted workspace manifest ${manifestPath}`);
+    }
+    for (const dependency of pkg.dependencies) {
+      const actualPackage = dependency.packageName;
+      const label = dependencyLabel(dependency);
+      if (workspaceCrates.has(actualPackage) && !allowedInternal.has(actualPackage)) {
+        violations.push(`${manifestPath}: forbidden workspace dependency on ${label}`);
       }
       if (
         manifestPath.startsWith("crates/") &&
         manifestPath !== "crates/kdbx/Cargo.toml" &&
-        dependency === "keepass"
+        actualPackage === "keepass"
       ) {
-        violations.push(`${manifestPath}: keepass dependency is confined to crates/kdbx`);
+        violations.push(
+          `${manifestPath}: forbidden dependency ${label}: keepass is confined to crates/kdbx`,
+        );
       }
-      if (manifestPath.startsWith("crates/") && tauriForbidden.test(dependency)) {
-        violations.push(`${manifestPath}: core crates must not depend on Tauri`);
+      if (manifestPath.startsWith("crates/") && tauriForbidden.test(actualPackage)) {
+        violations.push(
+          `${manifestPath}: forbidden dependency ${label}: core crates must not depend on Tauri`,
+        );
       }
       if (
         manifestPath === "crates/vault-sync/Cargo.toml" &&
-        syncNetworkDependencies.has(dependency)
+        syncNetworkDependencies.has(actualPackage)
       ) {
-        violations.push(`${manifestPath}: vault-sync must remain transport-independent (${dependency})`);
+        violations.push(
+          `${manifestPath}: vault-sync must remain transport-independent (${label})`,
+        );
       }
     }
   }
@@ -225,22 +218,26 @@ export function runChecks(root, budget) {
 }
 
 function main() {
-  const budget = JSON.parse(
-    readFileSync(resolve(repositoryRoot, "scripts/architecture-budget.json"), "utf8"),
-  );
-  const violations = runChecks(repositoryRoot, budget);
-  if (violations.length > 0) {
+  try {
+    const budget = JSON.parse(
+      readFileSync(resolve(repositoryRoot, "scripts/architecture-budget.json"), "utf8"),
+    );
+    const violations = runChecks(repositoryRoot, budget);
+    if (violations.length === 0) {
+      process.stdout.write("Architecture guard passed.\n");
+      return;
+    }
     process.stderr.write(
       `Architecture guard failed:\n${violations.map((item) => `- ${item}`).join("\n")}\n`,
     );
     process.exitCode = 1;
-  } else {
-    process.stdout.write("Architecture guard passed.\n");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`Architecture guard failed:\n- ${message}\n`);
+    process.exitCode = 1;
   }
 }
 
 const isMain =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) main();
-
-export { dependencyNames };

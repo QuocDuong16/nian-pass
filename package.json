@@ -7,5 +7,8 @@
   },
   "scripts": {
     "desktop": "pnpm --filter @nian-pass/desktop"
+  },
+  "devDependencies": {
+    "smol-toml": "1.8.0"
   }
 }

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { dependencyLabel, loadWorkspacePackages } from "./lib/cargo_dependencies.mjs";
 import {
   frontendProductionFiles,
   lineNumberAt,
@@ -26,6 +27,22 @@ const forbiddenPlugins = new Set([
   "@tauri-apps/plugin-fs",
   "@tauri-apps/plugin-updater",
 ]);
+const approvedCsp = new Map([
+  ["default-src", new Set(["'self'"])],
+  ["connect-src", new Set(["ipc:", "http://ipc.localhost"])],
+  ["img-src", new Set(["'self'", "asset:", "data:"])],
+  ["style-src", new Set(["'self'", "'unsafe-inline'"])],
+  ["script-src", new Set(["'self'"])],
+  ["object-src", new Set(["'none'"])],
+  ["base-uri", new Set(["'none'"])],
+  ["frame-src", new Set(["'none'"])],
+]);
+const normalizedKeywords = new Set([
+  "'self'",
+  "'none'",
+  "'unsafe-inline'",
+  "'unsafe-eval'",
+]);
 
 function reportMatches(violations, root, path, source, pattern, message) {
   const name = projectPath(root, path);
@@ -34,30 +51,32 @@ function reportMatches(violations, root, path, source, pattern, message) {
   }
 }
 
-function dependencyKeys(manifest) {
-  const keys = new Set();
-  let inDependencies = false;
-  for (const line of manifest.split(/\r?\n/)) {
-    const section = line.match(/^\s*\[([^\]]+)\]\s*$/)?.[1];
-    if (section !== undefined) {
-      inDependencies = section.includes("dependencies");
-      continue;
-    }
-    if (!inDependencies) continue;
-    const key = line.match(/^\s*["']?([@A-Za-z0-9_\/-]+)["']?\s*=/)?.[1];
-    if (key !== undefined) keys.add(key);
-  }
-  return keys;
+function javascriptDependencyPackage(localName, requirement) {
+  if (typeof requirement !== "string") return localName;
+  const alias = requirement.match(/^npm:((?:@[^/@\s]+\/[^@\s]+)|(?:[^@\s]+))(?:@.+)?$/);
+  return alias?.[1] ?? localName;
+}
+
+function normalizeCspToken(token) {
+  const lowercase = token.toLowerCase();
+  return normalizedKeywords.has(lowercase) ? lowercase : token;
 }
 
 function cspDirectives(csp) {
   const directives = new Map();
+  const duplicates = [];
   for (const segment of csp.split(";")) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
-    const [name, ...values] = tokens;
-    if (name !== undefined) directives.set(name, new Set(values));
+    const [rawName, ...rawValues] = tokens;
+    if (rawName === undefined) continue;
+    const name = rawName.toLowerCase();
+    if (directives.has(name)) {
+      duplicates.push(name);
+      continue;
+    }
+    directives.set(name, new Set(rawValues.map(normalizeCspToken)));
   }
-  return directives;
+  return { directives, duplicates };
 }
 
 export function runChecks(root) {
@@ -117,25 +136,20 @@ export function runChecks(root) {
     readFileSync(resolve(root, "apps/desktop/package.json"), "utf8"),
   );
   for (const group of [desktopPackage.dependencies, desktopPackage.devDependencies]) {
-    for (const dependency of Object.keys(group ?? {})) {
-      if (forbiddenPlugins.has(dependency)) {
-        violations.push(`apps/desktop/package.json: forbidden current-milestone plugin ${dependency}`);
+    for (const [localName, requirement] of Object.entries(group ?? {})) {
+      const actualPackage = javascriptDependencyPackage(localName, requirement);
+      if (forbiddenPlugins.has(actualPackage)) {
+        const label = localName === actualPackage ? actualPackage : `${localName} (package ${actualPackage})`;
+        violations.push(`apps/desktop/package.json: forbidden current-milestone plugin ${label}`);
       }
     }
   }
-  const rustManifests = [
-    "Cargo.toml",
-    "apps/desktop/src-tauri/Cargo.toml",
-    "apps/cli/Cargo.toml",
-    "crates/kdbx/Cargo.toml",
-    "crates/vault-core/Cargo.toml",
-    "crates/vault-session/Cargo.toml",
-    "crates/vault-sync/Cargo.toml",
-  ];
-  for (const manifest of rustManifests) {
-    for (const dependency of dependencyKeys(readFileSync(resolve(root, manifest), "utf8"))) {
-      if (forbiddenPlugins.has(dependency)) {
-        violations.push(`${manifest}: forbidden current-milestone plugin ${dependency}`);
+  for (const pkg of loadWorkspacePackages(root)) {
+    for (const dependency of pkg.dependencies) {
+      if (forbiddenPlugins.has(dependency.packageName)) {
+        violations.push(
+          `${pkg.manifestPath}: forbidden current-milestone plugin ${dependencyLabel(dependency)}`,
+        );
       }
     }
   }
@@ -165,15 +179,30 @@ export function runChecks(root) {
     if (typeof csp !== "string" || csp.trim() === "") {
       violations.push("apps/desktop/src-tauri/tauri.conf.json: production CSP must be explicit");
     } else {
-      const directives = cspDirectives(csp);
-      const script = directives.get("script-src") ?? new Set();
-      const defaults = directives.get("default-src") ?? new Set();
-      const connect = directives.get("connect-src") ?? new Set();
-      if (script.has("'unsafe-eval'")) violations.push("Tauri CSP: script-src must not allow unsafe-eval");
-      if (script.has("*")) violations.push("Tauri CSP: script-src must not allow *");
-      if (defaults.has("*")) violations.push("Tauri CSP: default-src must not allow *");
-      if (connect.has("*") || connect.has("https:")) {
-        violations.push("Tauri CSP: connect-src must not allow arbitrary remote HTTPS origins");
+      const { directives, duplicates } = cspDirectives(csp);
+      for (const directive of duplicates) {
+        violations.push(`Tauri CSP: duplicate ${directive} directive is forbidden`);
+      }
+      for (const directive of directives.keys()) {
+        if (!approvedCsp.has(directive)) {
+          violations.push(`Tauri CSP: directive ${directive} is not approved for M4.Q`);
+        }
+      }
+      for (const [directive, allowedTokens] of approvedCsp) {
+        const actualTokens = directives.get(directive);
+        if (actualTokens === undefined) {
+          violations.push(`Tauri CSP: required directive ${directive} is missing`);
+          continue;
+        }
+        if (actualTokens.size === 0) {
+          violations.push(`Tauri CSP: ${directive} must have an explicit source list`);
+          continue;
+        }
+        for (const token of actualTokens) {
+          if (!allowedTokens.has(token)) {
+            violations.push(`Tauri CSP: ${directive} token ${token} is not approved for M4.Q`);
+          }
+        }
       }
     }
   }
@@ -182,14 +211,20 @@ export function runChecks(root) {
 }
 
 function main() {
-  const violations = runChecks(repositoryRoot);
-  if (violations.length > 0) {
+  try {
+    const violations = runChecks(repositoryRoot);
+    if (violations.length === 0) {
+      process.stdout.write("Security policy check passed.\n");
+      return;
+    }
     process.stderr.write(
       `Security policy check failed:\n${violations.map((item) => `- ${item}`).join("\n")}\n`,
     );
     process.exitCode = 1;
-  } else {
-    process.stdout.write("Security policy check passed.\n");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`Security policy check failed:\n- ${message}\n`);
+    process.exitCode = 1;
   }
 }
 
@@ -197,4 +232,4 @@ const isMain =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) main();
 
-export { cspDirectives, dependencyKeys };
+export { cspDirectives, javascriptDependencyPackage };

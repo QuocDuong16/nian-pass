@@ -6,16 +6,43 @@ import { test } from "node:test";
 
 import { runChecks } from "../check_security.mjs";
 
+const approvedCsp = "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'";
+const workspaceMembers = [
+  "apps/cli",
+  "apps/desktop/src-tauri",
+  "crates/kdbx",
+  "crates/vault-core",
+  "crates/vault-session",
+  "crates/vault-sync",
+];
+
 function write(root, name, content) {
   const path = join(root, name);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
 }
 
+function packageManifest(name, dependencies = "") {
+  return `[package]\nname = "${name}"\nversion = "0.1.0"\nedition = "2024"\npublish = false\n\n${dependencies}`;
+}
+
+function writeCsp(root, csp) {
+  write(
+    root,
+    "apps/desktop/src-tauri/tauri.conf.json",
+    JSON.stringify({ app: { security: { csp } } }),
+  );
+}
+
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "nian-pass-security-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   write(root, "apps/desktop/src/App.tsx", "export const App = () => null;\n");
+  write(
+    root,
+    "Cargo.toml",
+    `[workspace]\nmembers = ${JSON.stringify(workspaceMembers)}\nexclude = ["support/tauri-plugin-shell"]\nresolver = "3"\n`,
+  );
   for (const path of [
     "apps/cli/src/main.rs",
     "apps/desktop/src-tauri/src/lib.rs",
@@ -27,33 +54,23 @@ function fixture(t) {
     write(root, path, "pub fn safe() {}\n");
   }
   write(root, "apps/desktop/package.json", '{"dependencies":{"@tauri-apps/api":"2.11.1"}}\n');
-  for (const path of [
-    "Cargo.toml",
-    "apps/desktop/src-tauri/Cargo.toml",
-    "apps/cli/Cargo.toml",
-    "crates/kdbx/Cargo.toml",
-    "crates/vault-core/Cargo.toml",
-    "crates/vault-session/Cargo.toml",
-    "crates/vault-sync/Cargo.toml",
-  ]) {
-    write(root, path, "[dependencies]\nserde = \"1\"\n");
+  const manifests = {
+    "apps/desktop/src-tauri/Cargo.toml": "nian-pass-desktop",
+    "apps/cli/Cargo.toml": "nian-pass-cli",
+    "crates/kdbx/Cargo.toml": "kdbx",
+    "crates/vault-core/Cargo.toml": "vault-core",
+    "crates/vault-session/Cargo.toml": "vault-session",
+    "crates/vault-sync/Cargo.toml": "vault-sync",
+  };
+  for (const [path, packageName] of Object.entries(manifests)) {
+    write(root, path, packageManifest(packageName));
   }
   write(
     root,
     "apps/desktop/src-tauri/capabilities/main.json",
     '{"permissions":["core:default"]}\n',
   );
-  write(
-    root,
-    "apps/desktop/src-tauri/tauri.conf.json",
-    JSON.stringify({
-      app: {
-        security: {
-          csp: "default-src 'self'; connect-src ipc: http://ipc.localhost; script-src 'self'",
-        },
-      },
-    }),
-  );
+  writeCsp(root, approvedCsp);
   return root;
 }
 
@@ -69,17 +86,84 @@ test("browser storage and console output are rejected", (t) => {
   assert.match(violations, /browser persistence/);
 });
 
-test("dangerous CSP directives are rejected", (t) => {
+test("remote script origin is rejected", (t) => {
   const root = fixture(t);
-  write(
+  writeCsp(root, approvedCsp.replace("script-src 'self'", "script-src 'self' https://evil.example"));
+  assert.match(runChecks(root).join("\n"), /script-src token https:\/\/evil\.example is not approved/);
+});
+
+test("unsafe-inline script behavior is rejected", (t) => {
+  const root = fixture(t);
+  writeCsp(root, approvedCsp.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'"));
+  assert.match(runChecks(root).join("\n"), /script-src token 'unsafe-inline' is not approved/);
+});
+
+test("unsafe-eval, wildcard script, and wildcard default sources are rejected", (t) => {
+  const root = fixture(t);
+  writeCsp(
     root,
-    "apps/desktop/src-tauri/tauri.conf.json",
-    JSON.stringify({ app: { security: { csp: "default-src *; script-src 'unsafe-eval' *; connect-src https:" } } }),
+    approvedCsp
+      .replace("default-src 'self'", "default-src *")
+      .replace("script-src 'self'", "script-src 'unsafe-eval' *"),
   );
   const violations = runChecks(root).join("\n");
-  assert.match(violations, /unsafe-eval/);
-  assert.match(violations, /default-src/);
-  assert.match(violations, /remote HTTPS/);
+  assert.match(violations, /default-src token \* is not approved/);
+  assert.match(violations, /script-src token 'unsafe-eval' is not approved/);
+  assert.match(violations, /script-src token \* is not approved/);
+});
+
+test("specific remote connect origin is rejected", (t) => {
+  const root = fixture(t);
+  writeCsp(
+    root,
+    approvedCsp.replace(
+      "connect-src ipc: http://ipc.localhost",
+      "connect-src ipc: http://ipc.localhost https://evil.example",
+    ),
+  );
+  assert.match(runChecks(root).join("\n"), /connect-src token https:\/\/evil\.example is not approved/);
+});
+
+test("scheme-wide HTTP connect source is rejected", (t) => {
+  const root = fixture(t);
+  writeCsp(root, approvedCsp.replace("http://ipc.localhost", "http:"));
+  assert.match(runChecks(root).join("\n"), /connect-src token http: is not approved/);
+});
+
+test("other remote connect schemes and wildcards are rejected", (t) => {
+  for (const token of ["https:", "ws:", "wss:", "*"]) {
+    const root = fixture(t);
+    writeCsp(root, approvedCsp.replace("http://ipc.localhost", token));
+    assert.ok(
+      runChecks(root).some((violation) =>
+        violation.includes(`connect-src token ${token} is not approved`),
+      ),
+    );
+  }
+});
+
+test("duplicate script-src directive is rejected", (t) => {
+  const root = fixture(t);
+  writeCsp(root, `${approvedCsp}; script-src https://evil.example`);
+  assert.match(runChecks(root).join("\n"), /duplicate script-src directive is forbidden/);
+});
+
+test("object-src must use its approved none source", (t) => {
+  const root = fixture(t);
+  writeCsp(root, approvedCsp.replace("object-src 'none'", "object-src 'self'"));
+  assert.match(runChecks(root).join("\n"), /object-src token 'self' is not approved/);
+});
+
+test("required CSP directives may not be omitted", (t) => {
+  const root = fixture(t);
+  writeCsp(root, approvedCsp.replace("; object-src 'none'", ""));
+  assert.match(runChecks(root).join("\n"), /required directive object-src is missing/);
+});
+
+test("unknown CSP directives require policy review", (t) => {
+  const root = fixture(t);
+  writeCsp(root, `${approvedCsp}; worker-src 'self'`);
+  assert.match(runChecks(root).join("\n"), /directive worker-src is not approved/);
 });
 
 test("unapproved Tauri capability and plugin are rejected", (t) => {
@@ -97,6 +181,41 @@ test("unapproved Tauri capability and plugin are rejected", (t) => {
   const violations = runChecks(root).join("\n");
   assert.match(violations, /plugin-shell/);
   assert.match(violations, /shell:default/);
+});
+
+test("renamed forbidden Rust Tauri plugin is rejected by actual package name", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "support/tauri-plugin-shell/Cargo.toml",
+    packageManifest("tauri-plugin-shell"),
+  );
+  write(root, "support/tauri-plugin-shell/src/lib.rs", "pub fn support() {}\n");
+  write(
+    root,
+    "apps/desktop/src-tauri/Cargo.toml",
+    packageManifest(
+      "nian-pass-desktop",
+      '[dependencies]\nshell-runtime = { package = "tauri-plugin-shell", path = "../../../support/tauri-plugin-shell" }\n',
+    ),
+  );
+  assert.match(
+    runChecks(root).join("\n"),
+    /shell-runtime \(package tauri-plugin-shell\)/,
+  );
+});
+
+test("npm alias of a forbidden Tauri plugin is rejected", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/package.json",
+    '{"dependencies":{"shell-runtime":"npm:@tauri-apps/plugin-shell@2.0.0"}}\n',
+  );
+  assert.match(
+    runChecks(root).join("\n"),
+    /shell-runtime \(package @tauri-apps\/plugin-shell\)/,
+  );
 });
 
 test("Rust debug placeholders are rejected outside cfg(test)", (t) => {
