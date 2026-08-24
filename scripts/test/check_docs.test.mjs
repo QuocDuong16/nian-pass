@@ -28,7 +28,7 @@ function fixture(t) {
     "docs/quality.md",
     "Coverage ratchet. Lowering requires architecture or security review. eslint-disable is forbidden. " +
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
-      "OpenWiki is not the source of truth.\n",
+      "Corepack 0.35.0. OpenWiki is not the source of truth.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");
@@ -37,7 +37,11 @@ function fixture(t) {
     "package.json",
     '{"engines":{"node":"26.7.0"},"packageManager":"pnpm@11.22.0"}\n',
   );
-  write(root, ".forgejo/workflows/quality.yml", "node:26.7.0\npnpm@11.22.0\n");
+  write(
+    root,
+    ".forgejo/workflows/quality.yml",
+    "node:26.7.0\nnpm install --global corepack@0.35.0\npnpm@11.22.0\n",
+  );
   return root;
 }
 
@@ -49,6 +53,12 @@ test("runtime version drift is rejected", (t) => {
   const root = fixture(t);
   write(root, ".node-version", "26.7.1\n");
   assert.match(runChecks(root).join("\n"), /same exact version/);
+});
+
+test("missing explicit Corepack bootstrap is rejected", (t) => {
+  const root = fixture(t);
+  write(root, ".forgejo/workflows/quality.yml", "node:26.7.0\npnpm@11.22.0\n");
+  assert.match(runChecks(root).join("\n"), /Corepack 0\.35\.0 must be installed explicitly/);
 });
 
 test("missing quality policy is reported", (t) => {

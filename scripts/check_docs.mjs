@@ -66,6 +66,14 @@ export function runChecks(root) {
   if (nodeVersion !== "" && !workflow.includes(nodeVersion)) {
     violations.push(`.forgejo/workflows/quality.yml: pinned Node ${nodeVersion} is not reused`);
   }
+  const corepackVersion = quality.match(/\bCorepack\s+(\d+\.\d+\.\d+)\b/i)?.[1];
+  if (corepackVersion === undefined) {
+    violations.push("docs/quality.md: Corepack must be pinned explicitly for Node 26");
+  } else if (!workflow.includes(`npm install --global corepack@${corepackVersion}`)) {
+    violations.push(
+      `.forgejo/workflows/quality.yml: pinned Corepack ${corepackVersion} must be installed explicitly`,
+    );
+  }
   const pnpmVersion =
     typeof packageManager === "string" ? packageManager.match(/^pnpm@(\d+\.\d+\.\d+)$/)?.[1] : undefined;
   if (pnpmVersion === undefined) {

@@ -15,6 +15,7 @@ for feedback but is intentionally not equivalent to the full gate.
 
 - Rust 1.97.1 with rustfmt, Clippy, and `llvm-tools-preview`
 - Node 26.7.0 from `.node-version`
+- Corepack 0.35.0, installed explicitly in Forgejo because Node 26 does not bundle it
 - pnpm 11.22.0 from the root `packageManager`
 - GNU Make
 - Tauri's documented headless GTK/WebKit development packages
@@ -22,6 +23,8 @@ for feedback but is intentionally not equivalent to the full gate.
 `make tools-install` installs `cargo-deny 0.20.2`, `cargo-machete 0.9.2`, and
 `cargo-llvm-cov 0.9.0` into ignored `.bin/`. `make tools-check` rejects missing
 or different versions. Frontend tools are exact lockfile-managed dependencies.
+Forgejo installs the exact Corepack version before enabling and installing the
+pinned pnpm release; it does not assume Corepack is bundled with Node.
 The root's exact `smol-toml 1.8.0` dependency parses Cargo policy inputs;
 `scripts-check` installs only that locked root tooling before running. No
 quality target launches a window, X11, Wayland, or a desktop session.
