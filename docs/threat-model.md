@@ -248,10 +248,11 @@ because switching to a target application is the expected copy/paste flow.
 Focus restores content only if the absolute elapsed-time check is still below
 the deadline; otherwise clean state locks or dirty/draft state remains
 shielded. This mitigates throttled WebView timers but does not claim exact timer
-wakeups. Foreground state is owned only by fresh-unlock initialization and the
-window focus lifecycle. Generic activity, including an asynchronous Save
-completion, refreshes the inactivity deadline but cannot clear a background
-privacy shield.
+wakeups. Foreground state is owned by the actual window lifecycle, which is
+tracked while Locked and Unlocked and initialized through the narrow Tauri
+adapter's current-focus query. Generic activity and asynchronous Save or Unlock
+completion cannot clear a background privacy shield. This prevents a pending
+Unlock from exposing newly decrypted content after a background transition.
 
 Rust dirty state and frontend-only drafts are independent safety signals. A
 dirty timeout never calls `discard_changes_and_lock` automatically. It offers

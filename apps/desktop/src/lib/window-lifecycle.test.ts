@@ -5,10 +5,16 @@ const onFocusChanged =
   vi.fn<
     (handler: (event: { payload: boolean }) => void) => Promise<() => void>
   >();
+const isFocused = vi.fn<() => Promise<boolean>>();
 const close = vi.fn();
 
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ onCloseRequested, onFocusChanged, close }),
+  getCurrentWindow: () => ({
+    onCloseRequested,
+    onFocusChanged,
+    isFocused,
+    close,
+  }),
 }));
 
 import { desktopWindowLifecycle } from "./window-lifecycle";
@@ -49,4 +55,11 @@ test("desktop lifecycle exposes only the boolean focus payload", async () => {
   rawHandler({ payload: true });
   expect(handler).toHaveBeenNthCalledWith(1, false);
   expect(handler).toHaveBeenNthCalledWith(2, true);
+});
+
+test("desktop lifecycle queries the current focus state", async () => {
+  isFocused.mockResolvedValue(false);
+
+  await expect(desktopWindowLifecycle.isFocused?.()).resolves.toBe(false);
+  expect(isFocused).toHaveBeenCalledOnce();
 });

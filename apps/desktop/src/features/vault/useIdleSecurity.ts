@@ -29,13 +29,14 @@ export function useIdleSecurity({
   windowLifecycle,
   onExpired,
 }: IdleSecurityOptions) {
-  const [backgrounded, setBackgrounded] = useState(false);
+  const [backgrounded, setBackgrounded] = useState(
+    () => windowLifecycle?.isFocused !== undefined,
+  );
   const [privacyVersion, setPrivacyVersion] = useState(0);
   const [expiryPending, setExpiryPending] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityAt = useRef(0);
   const handled = useRef(false);
-  const wasUnlocked = useRef(false);
   const options = useRef({ unlocked, timeoutMs, blocked, paused, onExpired });
 
   useEffect(() => {
@@ -86,14 +87,11 @@ export function useIdleSecurity({
   }, [reconcile]);
 
   useEffect(() => {
-    const freshUnlock = unlocked && !wasUnlocked.current;
-    wasUnlocked.current = unlocked;
     if (!unlocked) {
       clearTimer();
       handled.current = false;
       return;
     }
-    if (freshUnlock) setBackgrounded(false);
     recordActivity();
   }, [clearTimer, recordActivity, timeoutMs, unlocked]);
 
@@ -122,34 +120,46 @@ export function useIdleSecurity({
   }, [recordActivity, unlocked]);
 
   useEffect(() => {
-    if (!unlocked || windowLifecycle?.onFocusChanged === undefined) return;
+    if (windowLifecycle?.onFocusChanged === undefined) return;
     let active = true;
     let unlisten: (() => void) | null = null;
-    void windowLifecycle
-      .onFocusChanged((focused) => {
-        if (!active) return;
-        if (!focused) {
-          setBackgrounded(true);
+    let focusVersion = 0;
+    const applyFocus = (focused: boolean) => {
+      if (!active) return;
+      focusVersion += 1;
+      const current = options.current;
+      if (!focused) {
+        setBackgrounded(true);
+        if (current.unlocked) {
           setPrivacyVersion((value) => value + 1);
-          return;
         }
-        setBackgrounded(false);
-        const current = options.current;
-        const expired =
-          current.timeoutMs !== null &&
-          Date.now() - lastActivityAt.current >= current.timeoutMs;
-        if (expired) reconcile();
-        else if (!current.paused) recordActivity();
-      })
-      .then((stop) => {
-        if (active) unlisten = stop;
-        else stop();
+        return;
+      }
+      setBackgrounded(false);
+      if (!current.unlocked) return;
+      const expired =
+        current.timeoutMs !== null &&
+        Date.now() - lastActivityAt.current >= current.timeoutMs;
+      if (expired) reconcile();
+      else if (!current.paused) recordActivity();
+    };
+    void windowLifecycle.onFocusChanged(applyFocus).then((stop) => {
+      if (!active) {
+        stop();
+        return;
+      }
+      unlisten = stop;
+      if (windowLifecycle.isFocused === undefined) return;
+      const versionBeforeQuery = focusVersion;
+      void windowLifecycle.isFocused().then((focused) => {
+        if (active && focusVersion === versionBeforeQuery) applyFocus(focused);
       });
+    });
     return () => {
       active = false;
       unlisten?.();
     };
-  }, [reconcile, recordActivity, unlocked, windowLifecycle]);
+  }, [reconcile, recordActivity, windowLifecycle]);
 
   useEffect(() => clearTimer, [clearTimer]);
 

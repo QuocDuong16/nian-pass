@@ -36,19 +36,22 @@ function deferred<T>() {
 
 function lifecycleHarness() {
   let focusHandler: ((focused: boolean) => void) | null = null;
+  let focused = true;
   const lifecycle: DesktopWindowLifecycle = {
     onCloseRequested: () => Promise.resolve(vi.fn()),
     onFocusChanged: (handler: (focused: boolean) => void) => {
       focusHandler = handler;
       return Promise.resolve(vi.fn());
     },
+    isFocused: () => Promise.resolve(focused),
     requestClose: vi.fn().mockResolvedValue(undefined),
   };
   return {
     lifecycle,
-    focus: async (focused: boolean) => {
+    focus: async (nextFocused: boolean) => {
       await act(async () => {
-        focusHandler?.(focused);
+        focused = nextFocused;
+        focusHandler?.(nextFocused);
         await Promise.resolve();
       });
     },
@@ -145,6 +148,37 @@ test("blur hides vault content, focus restores it, and elapsed background time i
   await harness.focus(true);
   await flush();
   expect(api.lockVault).toHaveBeenCalledOnce();
+});
+
+test("Unlock completion while backgrounded keeps the privacy shield", async () => {
+  const harness = lifecycleHarness();
+  const pending = deferred<VaultSnapshotDto>();
+  const api = mutationApi({
+    unlockVault: vi.fn().mockReturnValue(pending.promise),
+  });
+  render(<App api={api} windowLifecycle={harness.lifecycle} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose KDBX file" }));
+  await flush();
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+  await harness.focus(false);
+  await act(async () => {
+    pending.resolve(cleanSnapshot);
+    await pending.promise;
+  });
+  expect(screen.getByText("Content hidden")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: /Account A/ }),
+  ).not.toBeInTheDocument();
+  expect(api.lockVault).not.toHaveBeenCalled();
+  expect(api.discardChangesAndLock).not.toHaveBeenCalled();
+
+  await harness.focus(true);
+  expect(screen.getByRole("button", { name: /Account A/ })).toBeVisible();
+  expect(api.lockVault).not.toHaveBeenCalled();
 });
 
 test("blur clears reveal-only plaintext without clearing or locking the clipboard flow", async () => {

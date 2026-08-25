@@ -9,6 +9,7 @@ export interface DesktopWindowLifecycle {
     handler: (event: CloseRequestEvent) => Promise<void>,
   ) => Promise<() => void>;
   onFocusChanged?: (handler: (focused: boolean) => void) => Promise<() => void>;
+  isFocused?: () => Promise<boolean>;
   requestClose: () => Promise<void>;
 }
 
@@ -18,5 +19,6 @@ export const desktopWindowLifecycle: DesktopWindowLifecycle = {
     getCurrentWindow().onFocusChanged(({ payload }) => {
       handler(payload);
     }),
+  isFocused: () => getCurrentWindow().isFocused(),
   requestClose: () => getCurrentWindow().close(),
 };
