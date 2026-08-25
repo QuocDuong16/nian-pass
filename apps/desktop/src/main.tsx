@@ -1,8 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import App from "./App";
-import { desktopWindowLifecycle } from "./lib/window-lifecycle";
+import { ApplicationRoot } from "./app/ApplicationRoot";
 import { ErrorBoundary } from "./app/ErrorBoundary";
 import "./styles.css";
 
@@ -14,7 +13,7 @@ if (root === null) {
 createRoot(root).render(
   <StrictMode>
     <ErrorBoundary>
-      <App windowLifecycle={desktopWindowLifecycle} />
+      <ApplicationRoot />
     </ErrorBoundary>
   </StrictMode>,
 );

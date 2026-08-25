@@ -26,7 +26,8 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	desktop-coverage-diff desktop-dead-code desktop-build desktop-audit \
 	desktop-contract-rust-check desktop-contract-frontend-check desktop-contract-check \
 	desktop-native-check desktop-check windows-cross-check \
-	architecture-check security-check docs-check scripts-install scripts-check \
+	architecture-check security-check docs-check scripts-install scripts-check mobile-source-check \
+	mobile-tools-check mobile-android-check \
 	compat-check compat-check-required policy-check quick-check quality-check
 
 tools-install:
@@ -200,6 +201,21 @@ windows-cross-check:
 	@echo "Cross-check persistence and sync crates for Windows..."
 	cargo check --locked --all-targets --target x86_64-pc-windows-gnu -p vault-session -p vault-sync
 
+mobile-source-check:
+	@echo "Check deterministic mobile foundation sources..."
+	node scripts/check_mobile_foundation.mjs
+
+mobile-tools-check:
+	@echo "Check Android CLI build prerequisites..."
+	scripts/check_mobile_tools.sh
+
+mobile-android-check: mobile-source-check mobile-tools-check
+	@echo "Build the real Tauri Android application as APKs (arm64 + x86_64)..."
+	pnpm --filter @nian-pass/desktop tauri android build --apk --target aarch64 x86_64 --ci
+	@artifact="$$(find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit 2>/dev/null)"; \
+		test -n "$$artifact" || { echo "Android build completed without an APK artifact." >&2; exit 1; }; \
+		echo "Android APK verified: $$artifact"
+
 architecture-check:
 	@echo "Check architecture boundaries and line budgets..."
 	node scripts/check_architecture.mjs
@@ -234,6 +250,7 @@ policy-check:
 	$(MAKE) fixture-check
 	$(MAKE) scripts-check
 	$(MAKE) architecture-check
+	$(MAKE) mobile-source-check
 	$(MAKE) security-check
 	$(MAKE) docs-check
 
@@ -241,6 +258,7 @@ quick-check:
 	$(MAKE) fixture-check
 	$(MAKE) scripts-check
 	$(MAKE) architecture-check
+	$(MAKE) mobile-source-check
 	$(MAKE) rust-format
 	$(MAKE) rust-lint
 	$(MAKE) rust-test
@@ -257,6 +275,7 @@ quality-check:
 	$(MAKE) fixture-check
 	$(MAKE) scripts-check
 	$(MAKE) architecture-check
+	$(MAKE) mobile-source-check
 	$(MAKE) rust-check
 	$(MAKE) desktop-check
 	$(MAKE) security-check

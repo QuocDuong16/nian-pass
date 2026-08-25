@@ -9,6 +9,7 @@ description = "Tauri desktop shell for Nian Pass"
 [lib]
 name = "nian_pass_desktop_lib"
 path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "nian-pass-desktop"

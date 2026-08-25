@@ -15,8 +15,14 @@ use crate::{
         CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
         RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
     },
+    platform::RuntimeInfoDto,
     state::{AppState, DesktopError},
 };
+
+#[tauri::command]
+pub fn runtime_info() -> RuntimeInfoDto {
+    RuntimeInfoDto::current()
+}
 
 #[tauri::command]
 pub async fn select_vault(
@@ -375,7 +381,8 @@ mod tests {
         delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock,
         entry_detail, lock_vault, move_entry, move_group, reload_vault, rename_group,
         reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
-        reveal_entry_url, reveal_entry_username, save_vault, set_entry_custom_field, update_entry,
+        reveal_entry_url, reveal_entry_username, runtime_info, save_vault, set_entry_custom_field,
+        update_entry,
     };
     use crate::{
         clipboard::ClipboardPort,
@@ -389,6 +396,12 @@ mod tests {
     };
 
     static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn runtime_info_command_exposes_only_the_host_platform() {
+        let encoded = serde_json::to_value(runtime_info()).expect("runtime info should serialize");
+        assert_eq!(encoded, json!({ "platform": "desktop" }));
+    }
 
     struct TestDir(PathBuf);
 

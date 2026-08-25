@@ -29,7 +29,7 @@ export function runChecks(root) {
   const packageSource = readRequired(root, "package.json", violations);
   const nodeVersion = readRequired(root, ".node-version", violations).trim();
 
-  requirePattern(violations, "README.md", readme, /M4\.5\s*[—-]\s*Desktop Security UX/, "current milestone must be M4.5");
+  requirePattern(violations, "README.md", readme, /M5\.0\s*[—-]\s*Mobile Foundation/, "current milestone must be M5.0");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
   requirePattern(violations, "README.md", readme, /external[\s\S]{0,180}(?:refus|not automatically merged)/i, "M4.4 external-conflict boundary is missing");
   requirePattern(violations, "README.md", readme, /no Save As[\s\S]{0,100}(?:force overwrite|autosave)/i, "M4.4 persistence non-goals are missing");
@@ -46,6 +46,12 @@ export function runChecks(root) {
   requirePattern(violations, "README.md", readme, /timeout[\s\S]{0,160}(?:application-)?memory only/i, "M4.5 memory-only timeout setting is missing");
   requirePattern(violations, "docs/threat-model.md", threatModel, /dirty[\s\S]{0,120}timeout[\s\S]{0,240}(?:never|explicit)[\s\S]{0,100}discard/i, "M4.5 dirty-idle non-discard control is missing");
   requirePattern(violations, "AGENTS.md", agents, /Do not hand-edit generated OpenWiki pages/i, "generated OpenWiki ownership rule is missing");
+  requirePattern(violations, "README.md", readme, /Android 8\.0[\s\S]{0,80}API 26/i, "Android API 26 minimum is missing");
+  requirePattern(violations, "README.md", readme, /make mobile-android-check/, "real Android build gate is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /apps\/desktop[\s\S]{0,180}historical/i, "shared Tauri host naming debt is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /content[ -]URI[\s\S]{0,300}(?:not|isn't)[\s\S]{0,80}canonical/i, "Android URI persistence boundary is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /macOS with Xcode[\s\S]{0,180}(?:NOT RUN|not initialized|not.*built)/i, "honest iOS validation boundary is missing");
+  requirePattern(violations, "docs/quality.md", quality, /mobile-tools-check[\s\S]{0,300}mobile-android-check/i, "mobile gate policy is missing");
 
   const qualityRequirements = [
     [/ratchet/i, "coverage ratchet policy is missing"],

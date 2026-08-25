@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import contract from "../../contracts/desktop-contract.json";
-import { DesktopCommandError, desktopApi } from "./desktop";
+import { DesktopCommandError, desktopApi, runtimeApi } from "./desktop";
 import {
   parseClipboardReceipt,
   parseEntryDetail,
@@ -97,6 +97,13 @@ test("desktop adapter validates successful IPC responses", async () => {
   expect(invoke).toHaveBeenNthCalledWith(8, "copy_entry_password", {
     entryId: "entry-example",
   });
+});
+
+test("runtime adapter invokes the narrow platform command and validates it", async () => {
+  invoke.mockResolvedValue({ platform: "desktop" });
+
+  await expect(runtimeApi.getInfo()).resolves.toEqual({ platform: "desktop" });
+  expect(invoke).toHaveBeenCalledWith("runtime_info", undefined);
 });
 
 test("missing rootGroupId becomes a generic internal failure", async () => {

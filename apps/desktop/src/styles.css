@@ -54,6 +54,33 @@ textarea:focus-visible {
   padding: 32px;
 }
 
+.runtime-loading,
+.mobile-foundation-view {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.runtime-loading {
+  color: #587064;
+}
+.mobile-foundation-card {
+  width: min(420px, 100%);
+  border: 1px solid #dbe1dc;
+  border-radius: 16px;
+  padding: 36px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgb(24 39 30 / 8%);
+}
+.mobile-foundation-card h1 {
+  margin-bottom: 12px;
+}
+.mobile-foundation-card p:last-child {
+  margin-bottom: 0;
+  color: #637169;
+  line-height: 1.55;
+}
+
 .unlock-card,
 .fatal-card {
   width: min(440px, 100%);

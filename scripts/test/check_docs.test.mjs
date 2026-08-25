@@ -18,31 +18,39 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M4.5 — Desktop Security UX\nExplicit Save. " +
+    "M5.0 — Mobile Foundation\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
       "The active clipboard clears only if it still contains the value written by Nian Pass. " +
-      "The timeout is application-memory only. The privacy shield is not universal screenshot prevention.\n",
+      "The timeout is application-memory only. The privacy shield is not universal screenshot prevention. " +
+      "Android 8.0 / API 26. make mobile-android-check.\n",
   );
   write(
     root,
     "docs/architecture.md",
-    "M4.Q quality architecture. Clipboard salt then SHA-256 fingerprint then generation.\n",
+    "M4.Q quality architecture. Clipboard salt then SHA-256 fingerprint then generation. " +
+      "apps/desktop remains the historical shared host. Android content URI is not a canonical path.\n",
   );
   write(
     root,
     "docs/threat-model.md",
     "Compromised supply-chain dependencies. OS clipboard history may retain data. " +
-      "A dirty timeout never performs discard without explicit user intent.\n",
+      "A dirty timeout never performs discard without explicit user intent. " +
+      "iOS is not initialized on Linux; macOS with Xcode reports NOT RUN here.\n",
   );
-  write(root, "docs/write-safety.md", "Windows persistence is unsupported and fails closed.\n");
+  write(
+    root,
+    "docs/write-safety.md",
+    "Windows persistence is unsupported and fails closed.\n",
+  );
   write(
     root,
     "docs/quality.md",
     "Coverage ratchet. Lowering requires architecture or security review. eslint-disable is forbidden. " +
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
-      "Corepack 0.35.0. OpenWiki is not the source of truth.\n",
+      "Corepack 0.35.0. OpenWiki is not the source of truth. " +
+      "mobile-tools-check then mobile-android-check.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");
@@ -72,7 +80,10 @@ test("runtime version drift is rejected", (t) => {
 test("missing explicit Corepack bootstrap is rejected", (t) => {
   const root = fixture(t);
   write(root, ".forgejo/workflows/quality.yml", "node:26.7.0\npnpm@11.22.0\n");
-  assert.match(runChecks(root).join("\n"), /Corepack 0\.35\.0 must be installed explicitly/);
+  assert.match(
+    runChecks(root).join("\n"),
+    /Corepack 0\.35\.0 must be installed explicitly/,
+  );
 });
 
 test("missing quality policy is reported", (t) => {

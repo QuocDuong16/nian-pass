@@ -19,7 +19,28 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M4.5 — Desktop Security UX
+M5.0 — Mobile Foundation
+
+The Desktop MVP remains complete through M4.5. M5.0 mobile-enables the existing
+Tauri application host for an Android-first, iOS-ready foundation. It adds a
+real generated Android project, Android 8.0 / API 26 minimum support, a passive
+mobile runtime screen, explicit desktop/mobile bootstrap boundaries, and a
+dedicated CLI-only Android APK build gate. It does not add mobile vault open,
+unlock, browse, save, native document selection, Autofill, Keystore, biometrics,
+sync, or other M5.1+ functionality.
+
+`apps/desktop` remains the historical path for the shared Tauri application
+host. Renaming it is deferred to a dedicated mechanical refactor. Desktop and
+Android both compile the same Rust application package and shared `vault-core`,
+`kdbx`, and `vault-session` dependency graph; there is no Kotlin KDBX parser,
+second persistence algorithm, or separate mobile Rust backend.
+
+The current Linux environment can build Android through command-line tooling
+without Android Studio, an emulator, or a connected device. iOS initialization
+and builds are not performed on Linux: they require macOS with Xcode and will
+use the official Tauri iOS initialization path in that environment.
+
+M4.5 — Desktop Security UX remains complete.
 
 M4.5 makes the experimental Desktop MVP feature-complete by composing explicit
 auto-lock, a background privacy shield, dirty-idle decisions, local-draft
@@ -197,7 +218,45 @@ make rust-check
 make desktop-check
 make security-check
 make docs-check
+make mobile-source-check
 ```
+
+### Android mobile foundation
+
+The committed Tauri-generated project is at
+`apps/desktop/src-tauri/gen/android`. It targets the normal Rust Android ABI
+set (`aarch64`, `armv7`, `i686`, and `x86_64`); the foundation build gate
+prioritizes `aarch64` and `x86_64` for a modern physical device and emulator.
+Future AutofillService work requires Android 8.0, so M5.0 deliberately sets
+`minSdk = 26` without claiming Autofill is implemented.
+
+Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to a CLI SDK containing Android SDK 36,
+Build Tools 36.0.0, and an NDK. Then install the two required Rust targets and
+run the real APK gate:
+
+```bash
+rustup target add aarch64-linux-android x86_64-linux-android
+make mobile-tools-check
+make mobile-android-check
+```
+
+The tool check never downloads components, changes shell profiles, accepts
+licenses, or starts a device. `mobile-android-check` invokes the repository-pinned
+Tauri CLI and validates an APK under
+`apps/desktop/src-tauri/gen/android/app/build/outputs/apk/`; Gradle and Rust
+build outputs remain ignored. Optional device development can use
+`pnpm --filter @nian-pass/desktop tauri android dev` after the separate device
+or emulator setup.
+
+Android document selection and Storage Access Framework integration are not yet
+implemented. A content URI must not be passed to the M3 canonical regular-file
+path contract. M5.1/M5.2 must design URI ownership and a deliberate persistence
+adapter without weakening fingerprints, safe replacement, backups, or external
+modification detection.
+
+A future `make mobile-ios-check` will be a macOS-only gate after the official
+Tauri iOS project is generated with Xcode available. It must fail clearly on an
+unsupported host and is not part of Linux `quality-check`.
 
 ### Headless Linux desktop development
 

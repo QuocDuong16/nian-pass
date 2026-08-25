@@ -20,6 +20,13 @@ for feedback but is intentionally not equivalent to the full gate.
 - GNU Make
 - Tauri's documented headless GTK/WebKit development packages
 
+The dedicated Android gate additionally requires a CLI Android SDK with Android
+SDK 36, Build Tools 36.0.0, an installed NDK, Java/JDK, and the
+`aarch64-linux-android` plus `x86_64-linux-android` Rust targets. The repository
+does not download these large system components, accept licenses, or modify
+developer shell profiles. `ANDROID_HOME` or `ANDROID_SDK_ROOT` must identify the
+SDK; failures are actionable and non-skipping.
+
 `make tools-install` installs `cargo-deny 0.20.2`, `cargo-machete 0.9.2`, and
 `cargo-llvm-cov 0.9.0` into ignored `.bin/`. `make tools-check` rejects missing
 or different versions. Frontend tools are exact lockfile-managed dependencies.
@@ -37,6 +44,23 @@ documentation policy, and the optional local KeePassXC compatibility run.
 Forgejo's compatibility job uses `compat-check-required` so a missing external
 binary fails. Cargo always uses `--locked`; pnpm install always uses
 `--frozen-lockfile`.
+
+`mobile-source-check` is environment-independent and participates in the normal
+policy, quick, and quality gates. It verifies the committed Tauri-generated
+Android project, API 26 minimum, normal generated ABI set, machine-local ignore
+rules, and the narrow `TAURI_DEV_HOST` Vite boundary. It does not claim an
+Android binary was built.
+
+`mobile-tools-check` validates Java, SDK 36, Build Tools 36.0.0, NDK, the two
+priority Rust targets, and the repository-pinned Tauri CLI without installing
+anything. `mobile-android-check` then invokes `tauri android build --apk` for
+aarch64 and x86_64 and requires a real APK artifact. It needs neither an
+emulator nor a device and remains separate from `quality-check`, so ordinary
+Linux/desktop CI never silently skips or unexpectedly requires an Android SDK.
+
+iOS validation is explicitly separate. A future `mobile-ios-check` must run on
+macOS with Xcode after official Tauri iOS initialization. Linux does not fabricate
+an Xcode project or report an iOS pass.
 
 Rust policy keeps `unsafe_code = forbid` unchanged and denies warnings,
 unused must-use values, `dbg!`, `todo!`, `unimplemented!`, production unwraps,
@@ -155,6 +179,12 @@ npm aliases. No clipboard permission is granted to the WebView; Rust calls the
 plugin behind Nian Pass semantic commands. CSP tokens are unchanged. A future
 milestone may intentionally update this policy only with threat-model,
 capability, CSP, and regression-test review.
+
+M5.0 does not expand that capability or dependency allowlist. Mobile bootstrap
+uses compile-time Rust target information instead of `plugin-os`; Android and
+future iOS register only the exact runtime-info command until later milestones
+provide reviewed native storage and lifecycle integrations. Production CSP
+tokens remain unchanged.
 
 ## IPC and OpenWiki
 

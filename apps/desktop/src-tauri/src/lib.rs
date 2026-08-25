@@ -4,6 +4,7 @@ mod dto;
 mod errors;
 mod mutations;
 mod persistence;
+mod platform;
 mod state;
 
 use std::sync::Arc;
@@ -14,8 +15,8 @@ use commands::{
     delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock, entry_detail,
     lock_vault, move_entry, move_group, reload_vault, rename_group, reveal_entry_custom_field,
     reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
-    reveal_entry_username, save_vault, select_vault, set_entry_custom_field, unlock_vault,
-    update_entry, vault_snapshot,
+    reveal_entry_username, runtime_info, save_vault, select_vault, set_entry_custom_field,
+    unlock_vault, update_entry, vault_snapshot,
 };
 use state::AppState;
 use tauri::{Manager, Runtime};
@@ -38,10 +39,11 @@ fn install_app_state<R: Runtime>(app: &mut tauri::App<R>) {
     ))));
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run() {
     with_desktop_plugins(tauri::Builder::default())
         .invoke_handler(tauri::generate_handler![
+            runtime_info,
             select_vault,
             unlock_vault,
             vault_snapshot,
@@ -72,6 +74,15 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Nian Pass desktop runtime failed");
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::mobile_entry_point]
+pub fn run() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![runtime_info])
+        .run(tauri::generate_context!())
+        .expect("Nian Pass mobile runtime failed");
 }
 
 #[cfg(test)]

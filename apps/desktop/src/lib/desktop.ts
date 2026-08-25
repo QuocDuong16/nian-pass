@@ -16,6 +16,7 @@ import type {
   UpdateEntryRequest,
   VaultSnapshotDto,
 } from "../types/desktop";
+import type { RuntimeInfoDto } from "../types/runtime";
 import {
   parseClipboardReceipt,
   parseEntryDetail,
@@ -31,6 +32,11 @@ import {
   parseSelectedVault,
   parseVaultSnapshot,
 } from "./validation";
+import { parseRuntimeInfo } from "./runtime-validation";
+
+export interface RuntimeApi {
+  getInfo: () => Promise<RuntimeInfoDto>;
+}
 
 export interface DesktopApi {
   selectVault: () => Promise<SelectedVaultDto | null>;
@@ -178,4 +184,8 @@ export const desktopApi: DesktopApi = {
   lockVault: () => call("lock_vault", parseLockResult),
   discardChangesAndLock: () =>
     call("discard_changes_and_lock", parseLockResult),
+};
+
+export const runtimeApi: RuntimeApi = {
+  getInfo: () => call("runtime_info", parseRuntimeInfo),
 };

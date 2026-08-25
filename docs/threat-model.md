@@ -2,8 +2,8 @@
 
 This is the threat model for the M3 local vault session/filesystem foundation,
 the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
-M4.3 mutation UI, the M4.4 save/conflict flow, and the M4.Q quality/security
-gates. It records boundaries and assumptions; it is not a
+M4.3 mutation UI, the M4.4 save/conflict flow, the M4.Q quality/security gates,
+and the M5.0 mobile foundation. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
@@ -125,6 +125,13 @@ information to an attacker even when their plaintext remains unavailable.
 - Blur clearing the clipboard before the user can paste into another application
 - Manual Lock and idle expiry issuing duplicate backend Lock requests
 - Auto-lock bypassing Save failure or external-conflict UX
+- Native Kotlin/Swift code duplicating cryptographic, KDBX, or persistence logic
+- Broad mobile Tauri capabilities exposing filesystem, shell, process, or network access
+- Android content URIs being treated as ordinary canonical filesystem paths
+- Platform bootstrap leaking device or environment identifiers
+- Mobile signing keys or signing passwords entering version control
+- A mobile development server being exposed outside its required development boundary
+- A Linux build being misreported as iOS validation
 
 ## M4.Q desktop and repository controls
 
@@ -151,6 +158,41 @@ Rust advisory, license, source, duplicate-version, and unused-dependency policy
 is machine checked. npm production dependencies are audited separately from
 dev-only tooling. Coverage is a regression guard, not proof of security; exact
 DTO whitelist and state-transition assertions remain required.
+
+## M5.0 mobile foundation controls
+
+M5.0 adds no mobile vault workflow and no native business logic. Android uses
+the existing Tauri Rust package and shared vault crates; generated Kotlin is
+runtime glue only. Android and future iOS builds register only the secret-free
+`runtime_info` command, while desktop-only dialog, clipboard, close/focus
+lifecycle, and vault commands remain on the desktop bootstrap path.
+
+The runtime DTO contains exactly one coarse enum (`desktop`, `android`, or
+`ios`). Exact frontend validation rejects missing keys, extra keys, unknown
+platform strings, device identifiers, and future metadata until separately
+reviewed. No plugin is added to derive this compile-time value.
+
+The checked-in Android capability posture remains `core:default`; no filesystem,
+shell, process, HTTP, updater, or broad dialog permission is added. No analytics,
+telemetry, remote logging, browser storage, credentials, or signing configuration
+is introduced. Generated `.gitignore` rules exclude local SDK paths, Gradle
+state/build outputs, signing property files, and native build products.
+
+Vite binds to loopback in ordinary development. It uses `TAURI_DEV_HOST` only
+when Tauri mobile development explicitly supplies that host, with a scoped HMR
+configuration. This network-accessible development server is development-only;
+production uses bundled assets and the production CSP is unchanged. M5.0's
+mobile view contains no vault data or credential and exposes no debug endpoint.
+
+Android Storage Access Framework and document-provider URIs remain unimplemented.
+They must not be converted into strings and passed to `VaultSession` as if they
+were canonical regular files. Later picker/persistence design must preserve the
+M3 fingerprint, safe replacement, backup, and external-change invariants.
+
+Android signing relies only on standard local/debug tooling; no keystore or
+password belongs in the repository. iOS is not initialized or built on Linux.
+Only macOS with Xcode may supply future iOS build evidence, so Linux results
+must state iOS NOT RUN rather than iOS PASS.
 
 ## M4.3 mutation controls
 
