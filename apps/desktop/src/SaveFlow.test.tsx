@@ -150,6 +150,76 @@ test("save authentication failure clears the password and keeps dirty state", as
   expect(api.lockVault).not.toHaveBeenCalled();
 });
 
+test("save uncertainty refreshes canonical state without showing a false success", async () => {
+  const api = mutationApi({
+    unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
+    saveVault: vi
+      .fn()
+      .mockRejectedValue(new DesktopCommandError("save_uncertain")),
+    getVaultSnapshot: vi.fn().mockResolvedValue(cleanSnapshot),
+  });
+  await unlock(api);
+  fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
+  enterCredential("temporary-save-password");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(
+    await screen.findByText(/could not verify the final on-disk state/),
+  ).toBeVisible();
+  expect(api.getVaultSnapshot).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("Master password")).toHaveValue("");
+  expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
+  expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
+  expect(api.lockVault).not.toHaveBeenCalled();
+  expect(api.discardChangesAndLock).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["Lock", "Save changes and lock"],
+  ["Close", "Save changes and close"],
+] as const)(
+  "save uncertainty refreshes clean state but never continues pending %s",
+  async (intent, actionLabel) => {
+    const harness = lifecycleHarness();
+    const api = mutationApi({
+      unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
+      closePolicy: vi.fn().mockResolvedValue({ policy: "confirm_discard" }),
+      saveVault: vi
+        .fn()
+        .mockRejectedValue(new DesktopCommandError("save_uncertain")),
+      getVaultSnapshot: vi.fn().mockResolvedValue(cleanSnapshot),
+    });
+    await unlock(api, harness.lifecycle);
+
+    if (intent === "Lock") {
+      fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+    } else {
+      await waitFor(() => {
+        expect(harness.registered()).toBe(true);
+      });
+      await act(async () => {
+        await harness.triggerClose();
+      });
+    }
+    fireEvent.click(screen.getByRole("button", { name: actionLabel }));
+    enterCredential("temporary-save-password");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText(/could not verify the final on-disk state/),
+    ).toBeVisible();
+    expect(api.getVaultSnapshot).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Master password")).toHaveValue("");
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
+    expect(api.lockVault).not.toHaveBeenCalled();
+    expect(api.discardChangesAndLock).not.toHaveBeenCalled();
+    expect(harness.requestClose).not.toHaveBeenCalled();
+  },
+);
+
 test("external conflict keeps local dirty state and explicit Cancel does no discard", async () => {
   const api = mutationApi({
     unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),

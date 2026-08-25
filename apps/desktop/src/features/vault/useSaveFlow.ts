@@ -92,7 +92,7 @@ export function useSaveFlow({
           kind: "credential",
           intent,
           error:
-            "The vault content may have been saved, but Nian Pass could not confirm the full durability result. Review the vault before trying again.",
+            "The vault may have been written, but Nian Pass could not verify the final on-disk state. Your unlocked session remains available. Review the vault before trying again.",
         });
         return;
       }

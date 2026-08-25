@@ -23,9 +23,11 @@ M4.4 — Desktop Save / External Modification / Conflict UX
 
 M4.4 connects the desktop's explicit Save action to the existing M3
 `VaultSession::save` transaction. A dirty vault requests the master password
-for that attempt, detects a changed or missing source through the M3 encrypted
-fingerprint baseline, refuses overwrite, and retains the dirty in-memory
-session. Explicit destructive reload opens and projects a candidate session
+for that attempt, detects a changed or missing pre-commit source through the M3
+encrypted fingerprint baseline, refuses overwrite, and retains the dirty
+in-memory session. Post-commit final-state uncertainty refreshes the canonical
+Rust snapshot without continuing a pending Lock or close. Explicit destructive
+reload opens and projects a candidate session
 before replacing the local session, so a wrong password or corrupt external
 file cannot destroy local edits. M4.Q remains complete: the root
 `Makefile` is still the single developer/CI interface for formatting, typed

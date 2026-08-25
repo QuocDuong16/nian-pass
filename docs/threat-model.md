@@ -192,14 +192,20 @@ when an external editor changes the file after the credential dialog opened.
 Fingerprint mismatch, source deletion, or unsupported path maps to the stable
 `external_change` code without paths or digest data. There is no force-save,
 ignore-fingerprint, overwrite-anyway, autosave, or automatic M3.5 merge command.
-The external bytes and local dirty session are both retained.
+Before replacement, the external bytes and local dirty session are both
+retained. `FinalExternalModificationDetected` also maps to `external_change`,
+but only claims that another writer changed the target after Nian Pass installed
+its candidate; it does not claim that Nian Pass never modified the primary.
 
 Successful Save returns a newly projected Rust snapshot and the frontend
 accepts it only when exact-key runtime validation proves `dirty=false`. Ordinary
-pre-commit Save failure leaves the session dirty and never shows Saved. M3's
-explicit post-commit durability/backup uncertainty remains distinct:
-`save_uncertain` causes a fresh snapshot request and never continues a pending
-Lock or close intent.
+pre-commit Save failure leaves the session dirty and never shows Saved.
+Post-commit final read/verification and durability/backup uncertainty map to
+`save_uncertain`: the frontend requests a fresh Rust snapshot, shows a final
+on-disk verification warning, and never continues a pending Lock or close
+intent. The refreshed session may be dirty or clean depending on how far M3
+reconciled the canonical baseline; the frontend does not infer dirty state from
+the presence of an error and never shows Saved for uncertainty.
 
 Destructive reload opens and projects the current canonical file into a
 candidate session before swapping it into service state. Wrong credentials,
@@ -213,7 +219,11 @@ cannot introduce the inverse `service -> secret-operation gate` order. While
 Save is pending, React disables mutation and Lock actions and synchronously
 prevents close requests. Dirty Lock/close offers Save, explicit discard, or
 Cancel. Ordinary Lock and native close execute only after Save returns a clean
-snapshot; any Save error or external conflict leaves the vault open and dirty.
+snapshot. Any Save error or external conflict keeps the application open and
+never automatically continues pending Lock or close. Pre-commit failures and
+ordinary external conflicts leave the local session dirty; some post-commit
+uncertainty states may already have a clean Rust session, which the frontend
+reflects only after refreshing the canonical snapshot.
 
 ## Security assumptions
 

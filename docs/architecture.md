@@ -250,11 +250,20 @@ request completes. Save and reload responses use the existing exact-key,
 secret-free snapshot validator and additionally require `dirty=false`.
 
 At actual Save execution, M3 compares the complete encrypted source fingerprint
-to the session baseline. A mismatch, missing target, or path substitution maps
-to `external_change`; no temp is installed, no force command exists, the
-external source remains untouched, and the local dirty session remains active.
+to the session baseline. A pre-commit mismatch, missing target, or path
+substitution maps to `external_change`; no temp is installed, no force command
+exists, the external source remains untouched, and the local dirty session
+remains active. `FinalExternalModificationDetected` also maps to
+`external_change` when another writer changes the target after Nian Pass's
+replacement; that classification does not claim the pre-Save primary remains.
 M4.4 does not invoke M3.5 automatically. The user may keep working or explicitly
 choose **Discard local changes and reload**.
+
+Post-replacement `FinalReadFailed`, `FinalVerificationFailed`, backup failures,
+and durability uncertainty map to `save_uncertain`. React refreshes the
+Rust-authoritative snapshot because the session may be dirty or may already be
+clean, shows no Saved status, and stops pending Save-and-Lock/Save-and-Close even
+when the refreshed snapshot is clean.
 
 Reload obtains the canonical path from the active Rust session, opens and
 projects a candidate `VaultSession`, and swaps it into the service only after

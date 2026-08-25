@@ -313,10 +313,13 @@ pub(crate) fn map_mutation_error(error: SessionError) -> DesktopError {
 fn map_save_error(error: SessionError) -> DesktopError {
     match error {
         SessionError::ExternalModificationDetected
+        | SessionError::FinalExternalModificationDetected
         | SessionError::UnsupportedPath
         | SessionError::ReadSource(_) => DesktopError::ExternalChange,
         SessionError::CredentialMismatch => DesktopError::SaveAuthenticationFailed,
-        SessionError::SavedButBackupUpdateFailed(_)
+        SessionError::FinalVerificationFailed(_)
+        | SessionError::FinalReadFailed(_)
+        | SessionError::SavedButBackupUpdateFailed(_)
         | SessionError::SavedButBackupDurabilityUncertain(_)
         | SessionError::DurabilityUncertain(_) => DesktopError::SaveUncertain,
         _ => DesktopError::SaveFailed,
@@ -615,18 +618,55 @@ mod tests {
             DesktopError::ExternalChange
         );
         assert_eq!(
+            map_save_error(SessionError::FinalExternalModificationDetected),
+            DesktopError::ExternalChange
+        );
+        assert_eq!(
             map_save_error(SessionError::CredentialMismatch),
             DesktopError::SaveAuthenticationFailed
         );
         assert_eq!(
-            map_save_error(SessionError::UnsupportedPersistencePlatform),
-            DesktopError::SaveFailed
+            map_save_error(SessionError::FinalReadFailed(io::Error::other(
+                "synthetic final read failure"
+            ))),
+            DesktopError::SaveUncertain
+        );
+        let final_verification_error = match VaultSession::open(
+            fixture_path(),
+            &SecretString::new("synthetic-wrong-password".to_owned()),
+        ) {
+            Err(SessionError::Kdbx(error)) => error,
+            _ => panic!("wrong fixture credential should produce a KDBX error"),
+        };
+        assert_eq!(
+            map_save_error(SessionError::FinalVerificationFailed(
+                final_verification_error
+            )),
+            DesktopError::SaveUncertain
+        );
+        assert_eq!(
+            map_save_error(SessionError::SavedButBackupUpdateFailed(io::Error::other(
+                "synthetic backup update failure"
+            ))),
+            DesktopError::SaveUncertain
+        );
+        assert_eq!(
+            map_save_error(SessionError::SavedButBackupDurabilityUncertain(
+                io::Error::other("synthetic backup durability uncertainty")
+            )),
+            DesktopError::SaveUncertain
         );
         assert_eq!(
             map_save_error(SessionError::DurabilityUncertain(io::Error::other(
                 "synthetic post-commit uncertainty"
             ))),
             DesktopError::SaveUncertain
+        );
+        assert_eq!(
+            map_save_error(SessionError::AtomicReplaceFailed(io::Error::other(
+                "synthetic pre-commit replacement failure"
+            ))),
+            DesktopError::SaveFailed
         );
     }
 

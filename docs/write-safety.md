@@ -200,6 +200,25 @@ power loss is uncertain; the session is clean because disk currently matches
 memory. A final-generation conflict or verification failure is also explicitly
 post-commit: no baseline is accepted and the session remains dirty/unreconciled.
 
+The desktop preserves that commit-boundary distinction with a small stable
+error surface:
+
+| Session failure | Desktop code | Session state implication |
+|---|---|---|
+| Ordinary pre-commit failure | `save_failed` | Normally remains dirty; the primary was not replaced |
+| `CredentialMismatch` | `save_authentication_failed` | Remains dirty; credential validation precedes replacement |
+| `ExternalModificationDetected` | `external_change` | The pre-commit external generation is retained and the session remains dirty |
+| `FinalExternalModificationDetected` | `external_change` | Another writer changed the target after Nian Pass replaced it; no final generation is accepted |
+| `FinalReadFailed` or `FinalVerificationFailed` | `save_uncertain` | Replacement occurred before final verification and baseline reconciliation; the session remains dirty/unreconciled |
+| Backup update/durability failure or `DurabilityUncertain` | `save_uncertain` | The canonical baseline may already be updated and the session may be clean |
+
+`save_uncertain` therefore does not imply either success or failure, and it does
+not imply a particular dirty value. The frontend refreshes `vault_snapshot`,
+keeps the unlocked application open, stops any pending Save-and-Lock or
+Save-and-Close intent, and shows a final on-disk verification warning. A clean
+refreshed snapshot disables Save but is never converted into a successful Save
+notification.
+
 ## Desktop mapping and lifecycle limitations
 
 M4.3 mutation commands still change only the Rust-owned unlocked
@@ -214,9 +233,11 @@ The desktop service mutex serializes Save with in-memory mutations and Lock.
 Save does not acquire the separate Copy/Lock lifecycle gate, avoiding inverse
 lock order. The frontend disables mutation and Lock while Save is pending and
 prevents a native close request. Save-and-Lock and Save-and-Close call ordinary
-clean Lock only after Rust returns an exact validated clean snapshot. Any
-pre-commit failure or external conflict leaves the dirty session unlocked and
-does not close the application.
+clean Lock only after Rust returns an exact validated clean snapshot. A
+pre-commit failure leaves the dirty session unlocked. Every Save error or
+external conflict keeps the application open and stops pending Lock/close;
+post-commit uncertainty refreshes Rust state because that state may already be
+clean.
 
 When the source baseline differs, ordinary Save returns `external_change` and
 never offers an overwrite bypass. Explicit **Discard local changes and reload**
@@ -229,8 +250,10 @@ Fingerprint validation is optimistic external-modification detection. KeePassXC,
 OneDrive, Google Drive, Dropbox, and other writers do not honor a Nian-specific
 lock, so an unavoidable race remains between the last fingerprint check and the
 filesystem replacement operation. M3 adds no naive `.lock` file and makes no
-multi-writer or merge guarantee. A detected conflict keeps both external bytes
-and dirty in-memory edits; it does not auto-reload or merge.
+multi-writer or merge guarantee. A pre-commit conflict keeps both the external
+bytes and dirty in-memory edits. A post-replacement final-generation race maps
+to the same fail-closed conflict UX but does not imply that Nian Pass never
+installed a generation. Neither case auto-reloads, force-overwrites, or merges.
 
 `VaultSession::lock(self)` and ordinary drop release the decrypted
 `KdbxDocument`; neither autosaves. Dropping a dirty session discards its
