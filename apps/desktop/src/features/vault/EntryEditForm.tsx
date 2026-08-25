@@ -150,9 +150,11 @@ export function EntryEditForm({
           >
             {notes.loading
               ? "Loading notes…"
-              : detail.notesPresent
-                ? "Load notes for editing"
-                : "Add notes"}
+              : notes.failed
+                ? "Retry loading notes"
+                : detail.notesPresent
+                  ? "Load notes for editing"
+                  : "Add notes"}
           </button>
         ) : (
           <textarea
@@ -164,6 +166,9 @@ export function EntryEditForm({
             }}
           />
         )}
+        {notes.failed ? (
+          <p role="alert">Could not load notes for editing.</p>
+        ) : null}
       </div>
       {failed ? <p role="alert">Could not update this entry.</p> : null}
       <div className="dialog-actions">

@@ -279,3 +279,27 @@ test("M4.3 response validators reject expansion and malformed dirty state", () =
     /invalid desktop contract/,
   );
 });
+
+test("created entry receipt accepts only an ID contained in its snapshot", () => {
+  expect(parseCreatedEntry(contract.createdEntry)).toEqual(
+    contract.createdEntry,
+  );
+  expect(() =>
+    parseCreatedEntry({
+      ...contract.createdEntry,
+      createdEntryId: "ghost-entry",
+    }),
+  ).toThrow(/invalid desktop contract/);
+});
+
+test("created group receipt accepts only an ID contained in its snapshot", () => {
+  expect(parseCreatedGroup(contract.createdGroup)).toEqual(
+    contract.createdGroup,
+  );
+  expect(() =>
+    parseCreatedGroup({
+      ...contract.createdGroup,
+      createdGroupId: "ghost-group",
+    }),
+  ).toThrow(/invalid desktop contract/);
+});

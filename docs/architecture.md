@@ -203,6 +203,14 @@ and URL values also require an explicit narrow load before editing. No draft is
 written to browser storage, and JavaScript strings cannot be deterministically
 zeroized.
 
+An existing custom-field edit distinguishes not-loaded, load-failed,
+loaded-empty, and loaded-nonempty states. The textarea and mutation path remain
+unavailable until a successful load, while Retry reuses the generation-guarded
+secret loader. Existing empty or whitespace-only KDBX field names remain exact
+identities for read/update/delete; only creation of a new blank name is rejected
+by desktop policy. Creation receipts are accepted only when their returned ID
+is present in the same canonical snapshot.
+
 `VaultSnapshotDto.dirty` is computed from `VaultSession::is_dirty`; React only
 mirrors it. Plain `lock_vault` rejects a dirty session with
 `unsaved_changes` and leaves it unlocked. `discard_changes_and_lock` is the
@@ -210,6 +218,9 @@ only desktop command that expresses destructive intent and shares the M4.2
 secret-operation gate and lock order. Tauri close-request handling calls the
 Rust `close_policy`; a dirty session is prevented from closing until the user
 explicitly discards, while locked and clean sessions may close.
+If the explicit discard succeeds but the follow-up native close request fails,
+the locked screen remains authoritative and reports that only window closing
+failed; it never claims that the destroyed session is still active.
 
 M4.3 never calls `VaultSession::save`, `save_to_writer`, atomic replacement, or
 backup code. Mutation responses are fresh projections only. The encrypted KDBX

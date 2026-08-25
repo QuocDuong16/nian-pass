@@ -64,6 +64,12 @@ attachments, URL opening, search, cloud transport, auto-lock, biometrics, or
 updater. Applying a form mutates only the unlocked in-memory document. Plain
 Lock refuses a dirty session; only an explicit discard confirmation may drop
 it. The main-window close request uses the same Rust-authoritative dirty policy.
+Existing custom-field values must load successfully before editing; load
+failure is retryable and cannot be converted into an empty overwrite. Existing
+empty-name KDBX fields remain editable/deletable by exact identity, although the
+normal new-field form rejects blank names. Failed Notes loads remain omitted
+from entry updates. Creation receipts are accepted only when their IDs belong
+to the returned canonical snapshot.
 Nian Pass remains experimental and is not a user-ready product.
 
 M3.5 remains complete as the underlying conflict-safe sync engine.

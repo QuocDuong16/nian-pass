@@ -170,6 +170,10 @@ close-policy samples. Password, notes, and custom-field request plaintext is
 tested separately with synthetic values and is never committed to the shared
 contract fixture. Every mutation response passes the same exact-key snapshot or
 creation-receipt validators before replacing React state.
+Creation-receipt validation also requires `createdEntryId` or `createdGroupId`
+to be a member of the returned snapshot. Frontend regression tests distinguish
+failed, empty, and non-empty custom-field loads and prove failed loads cannot
+issue a mutation.
 
 Files under `openwiki/` are generated navigation material, not the source of
 truth for M4.Q policy. Update source code, README, and `docs/`; let the scheduled

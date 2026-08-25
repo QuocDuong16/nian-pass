@@ -209,18 +209,22 @@ export function parseVaultSnapshot(value: unknown): VaultSnapshotDto {
 
 export function parseCreatedEntry(value: unknown): CreatedEntryDto {
   const object = record(value, ["createdEntryId", "snapshot"]);
-  return {
-    createdEntryId: nonEmptyString(object["createdEntryId"]),
-    snapshot: parseVaultSnapshot(object["snapshot"]),
-  };
+  const createdEntryId = nonEmptyString(object["createdEntryId"]);
+  const snapshot = parseVaultSnapshot(object["snapshot"]);
+  if (!snapshot.entries.some((entry) => entry.id === createdEntryId)) {
+    return invalidContract();
+  }
+  return { createdEntryId, snapshot };
 }
 
 export function parseCreatedGroup(value: unknown): CreatedGroupDto {
   const object = record(value, ["createdGroupId", "snapshot"]);
-  return {
-    createdGroupId: nonEmptyString(object["createdGroupId"]),
-    snapshot: parseVaultSnapshot(object["snapshot"]),
-  };
+  const createdGroupId = nonEmptyString(object["createdGroupId"]);
+  const snapshot = parseVaultSnapshot(object["snapshot"]);
+  if (!snapshot.groups.some((group) => group.id === createdGroupId)) {
+    return invalidContract();
+  }
+  return { createdGroupId, snapshot };
 }
 
 export function parseClosePolicy(value: unknown): ClosePolicyDto {

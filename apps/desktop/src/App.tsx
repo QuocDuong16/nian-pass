@@ -8,7 +8,7 @@ import {
   desktopApi,
   type DesktopApi,
 } from "./lib/desktop";
-import type { VaultSnapshotDto } from "./types/desktop";
+import type { LockResultDto, VaultSnapshotDto } from "./types/desktop";
 import type { DesktopWindowLifecycle } from "./lib/window-lifecycle";
 
 interface AppProps {
@@ -88,15 +88,11 @@ export default function App({
     }
     setLocking(true);
     setLockError(null);
+    let result: LockResultDto;
     try {
-      const result = discard
+      result = discard
         ? await api.discardChangesAndLock()
         : await api.lockVault();
-      finishLocked(result.clipboard);
-      if (discardIntent === "close" && windowLifecycle !== null) {
-        await windowLifecycle.requestClose();
-      }
-      setDiscardIntent(null);
     } catch (error) {
       if (
         error instanceof DesktopCommandError &&
@@ -108,9 +104,21 @@ export default function App({
       setLockError(
         "Nian Pass could not lock the vault. The unlocked session remains active.",
       );
-    } finally {
       setLocking(false);
+      return;
     }
+
+    const closing = discardIntent === "close" && windowLifecycle !== null;
+    finishLocked(result.clipboard);
+    setDiscardIntent(null);
+    if (closing) {
+      try {
+        await windowLifecycle.requestClose();
+      } catch {
+        setLockError("Vault locked, but Nian Pass could not close the window.");
+      }
+    }
+    setLocking(false);
   };
 
   return (

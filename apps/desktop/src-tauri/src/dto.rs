@@ -312,30 +312,60 @@ mod tests {
             contract["snapshot"],
             to_value(snapshot).expect("snapshot DTO should serialize")
         );
-        let mutation_snapshot = VaultSnapshotDto {
+        let created_entry_snapshot = VaultSnapshotDto {
             dirty: true,
             root_group_id: "group-root".to_owned(),
             groups: vec![GroupDto {
                 id: "group-root".to_owned(),
                 name: "Root".to_owned(),
                 child_group_ids: Vec::new(),
-                entry_ids: Vec::new(),
+                entry_ids: vec!["entry-created".to_owned()],
             }],
-            entries: Vec::new(),
+            entries: vec![EntrySummaryDto {
+                id: "entry-created".to_owned(),
+                group_id: "group-root".to_owned(),
+                title: SummaryTextDto::Visible {
+                    value: "Created".to_owned(),
+                },
+                username: SummaryTextDto::Missing,
+                url: SummaryTextDto::Missing,
+                password_present: false,
+                notes_present: false,
+                tags: Vec::new(),
+            }],
         };
         assert_eq!(
             contract["createdEntry"],
             to_value(CreatedEntryDto {
                 created_entry_id: "entry-created".to_owned(),
-                snapshot: mutation_snapshot.clone(),
+                snapshot: created_entry_snapshot,
             })
             .expect("created entry DTO should serialize")
         );
+        let created_group_snapshot = VaultSnapshotDto {
+            dirty: true,
+            root_group_id: "group-root".to_owned(),
+            groups: vec![
+                GroupDto {
+                    id: "group-root".to_owned(),
+                    name: "Root".to_owned(),
+                    child_group_ids: vec!["group-created".to_owned()],
+                    entry_ids: Vec::new(),
+                },
+                GroupDto {
+                    id: "group-created".to_owned(),
+                    name: "Created".to_owned(),
+                    child_group_ids: Vec::new(),
+                    entry_ids: Vec::new(),
+                },
+            ],
+            entries: Vec::new(),
+        };
         assert_eq!(
             contract["createdGroup"],
             to_value(CreatedGroupDto {
                 created_group_id: "group-created".to_owned(),
-                snapshot: mutation_snapshot,
+                snapshot: created_group_snapshot,
             })
             .expect("created group DTO should serialize")
         );

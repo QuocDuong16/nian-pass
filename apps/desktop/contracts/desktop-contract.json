@@ -36,10 +36,21 @@
           "id": "group-root",
           "name": "Root",
           "childGroupIds": [],
-          "entryIds": []
+          "entryIds": ["entry-created"]
         }
       ],
-      "entries": []
+      "entries": [
+        {
+          "id": "entry-created",
+          "groupId": "group-root",
+          "title": { "kind": "visible", "value": "Created" },
+          "username": { "kind": "missing" },
+          "url": { "kind": "missing" },
+          "passwordPresent": false,
+          "notesPresent": false,
+          "tags": []
+        }
+      ]
     }
   },
   "createdGroup": {
@@ -51,6 +62,12 @@
         {
           "id": "group-root",
           "name": "Root",
+          "childGroupIds": ["group-created"],
+          "entryIds": []
+        },
+        {
+          "id": "group-created",
+          "name": "Created",
           "childGroupIds": [],
           "entryIds": []
         }

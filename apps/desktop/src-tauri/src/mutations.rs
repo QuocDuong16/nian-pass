@@ -200,19 +200,21 @@ impl DesktopVaultService {
         request: SetCustomFieldRequestDto,
     ) -> Result<VaultSnapshotDto, DesktopError> {
         require_id(&request.entry_id)?;
-        require_name(&request.name)?;
+        let entry_id = EntryId::new(request.entry_id);
+        let exists = self
+            .session_mut()?
+            .has_entry_custom_field(&entry_id, &request.name)
+            .map_err(map_mutation_error)?;
+        if !exists {
+            require_name(&request.name)?;
+        }
         let value = SecretString::new(request.value);
         let protection = match request.protection {
             FieldProtectionRequestDto::Protected => FieldProtection::Protected,
             FieldProtectionRequestDto::Unprotected => FieldProtection::Unprotected,
         };
         self.session_mut()?
-            .set_entry_custom_field(
-                &EntryId::new(request.entry_id),
-                &request.name,
-                &value,
-                protection,
-            )
+            .set_entry_custom_field(&entry_id, &request.name, &value, protection)
             .map_err(map_mutation_error)?;
         self.snapshot()
     }
@@ -223,7 +225,6 @@ impl DesktopVaultService {
         name: String,
     ) -> Result<VaultSnapshotDto, DesktopError> {
         require_id(&entry_id)?;
-        require_name(&name)?;
         self.session_mut()?
             .delete_entry_custom_field(&EntryId::new(entry_id), &name)
             .map_err(map_mutation_error)?;
@@ -256,7 +257,7 @@ mod tests {
     };
 
     use serde_json::{from_value, json, to_string};
-    use vault_core::SecretString;
+    use vault_core::{EntryId, FieldProtection, SecretString};
 
     use super::{
         CreateEntryRequestDto, CreateGroupRequestDto, FieldProtectionRequestDto,
@@ -560,6 +561,99 @@ mod tests {
             Err(DesktopError::ReservedField)
         ));
         assert!(!service.snapshot().expect("snapshot should exist").dirty);
+    }
+
+    #[test]
+    fn existing_empty_name_custom_field_can_be_read_updated_and_deleted_exactly() {
+        let mut service = unlocked_service();
+        let entry_id = service
+            .snapshot()
+            .expect("snapshot should exist")
+            .entries
+            .first()
+            .expect("fixture entry")
+            .id
+            .clone();
+        let original = SecretString::new("synthetic-empty-name-value".to_owned());
+        service
+            .session_mut()
+            .expect("session should remain unlocked")
+            .set_entry_custom_field(
+                &EntryId::new(entry_id.clone()),
+                "",
+                &original,
+                FieldProtection::Protected,
+            )
+            .expect("domain API should prepare an existing empty-name field");
+        assert_eq!(
+            service
+                .entry_custom_field(&entry_id, "")
+                .expect("empty-name value should be readable")
+                .expose_secret(),
+            "synthetic-empty-name-value"
+        );
+
+        service
+            .set_custom_field(SetCustomFieldRequestDto {
+                entry_id: entry_id.clone(),
+                name: String::new(),
+                value: "updated-empty-name-value".to_owned(),
+                protection: FieldProtectionRequestDto::Unprotected,
+            })
+            .expect("existing empty-name field should update");
+        let detail = service
+            .entry_detail(&entry_id)
+            .expect("entry detail should remain available");
+        assert!(detail.custom_fields.iter().any(|field| {
+            field.name.is_empty()
+                && matches!(field.protection, crate::dto::FieldProtectionDto::Protected)
+        }));
+        assert_eq!(
+            service
+                .entry_custom_field(&entry_id, "")
+                .expect("updated value should be readable")
+                .expose_secret(),
+            "updated-empty-name-value"
+        );
+
+        let revision = service
+            .session_mut()
+            .expect("session should remain unlocked")
+            .document()
+            .revision();
+        service
+            .set_custom_field(SetCustomFieldRequestDto {
+                entry_id: entry_id.clone(),
+                name: String::new(),
+                value: "updated-empty-name-value".to_owned(),
+                protection: FieldProtectionRequestDto::Unprotected,
+            })
+            .expect("same value should remain a no-op");
+        assert_eq!(
+            service
+                .session_mut()
+                .expect("session should remain unlocked")
+                .document()
+                .revision(),
+            revision
+        );
+
+        service
+            .delete_custom_field(entry_id.clone(), String::new())
+            .expect("existing empty-name field should delete");
+        assert!(matches!(
+            service.entry_custom_field(&entry_id, ""),
+            Err(DesktopError::SecretUnavailable)
+        ));
+        assert!(matches!(
+            service.set_custom_field(SetCustomFieldRequestDto {
+                entry_id,
+                name: String::new(),
+                value: "must-not-create".to_owned(),
+                protection: FieldProtectionRequestDto::Protected,
+            }),
+            Err(DesktopError::InvalidRequest)
+        ));
     }
 
     #[test]

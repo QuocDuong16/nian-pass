@@ -131,6 +131,48 @@ test("dirty window close is prevented until explicit discard then requested agai
   expect(api.discardChangesAndLock).toHaveBeenCalledOnce();
 });
 
+test("post-discard close failure reports the already-locked state accurately", async () => {
+  let closeHandler: ((event: CloseRequestEvent) => Promise<void>) | null = null;
+  const lifecycle: DesktopWindowLifecycle = {
+    onCloseRequested: vi
+      .fn()
+      .mockImplementation(
+        (handler: (event: CloseRequestEvent) => Promise<void>) => {
+          closeHandler = handler;
+          return Promise.resolve(vi.fn());
+        },
+      ),
+    requestClose: vi.fn().mockRejectedValue(new Error("synthetic")),
+  };
+  const api = mutationApi({
+    unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
+    closePolicy: vi.fn().mockResolvedValue({ policy: "confirm_discard" }),
+  });
+  render(<App api={api} windowLifecycle={lifecycle} />);
+  await unlock();
+  await waitFor(() => {
+    expect(closeHandler).not.toBeNull();
+  });
+  await act(async () => {
+    if (closeHandler === null) throw new Error("close handler missing");
+    await closeHandler({ preventDefault: vi.fn() });
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Discard changes and lock" }),
+  );
+  expect(
+    await screen.findByText(
+      "Vault locked, but Nian Pass could not close the window.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Choose KDBX file" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(/unlocked session remains active/i),
+  ).not.toBeInTheDocument();
+});
+
 test("backend unsaved protection opens discard UI even from a stale clean snapshot", async () => {
   const api = mutationApi({
     unlockVault: vi

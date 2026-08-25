@@ -143,11 +143,21 @@ success; no optimistic tree mutation occurs. Existing custom fields preserve
 their protection state, new custom fields default protected in the UI, and the
 adapter remains authoritative for reserved names.
 
+Existing custom-field edits fail closed until the exact value has loaded:
+load failure cannot be converted into an empty-string mutation, while a
+successfully loaded empty string remains a valid value. Retry uses the same
+generation-guarded loader. Existing empty and whitespace-only names remain
+manageable by exact identity, while the ordinary new-field UI rejects blank
+names. Creation receipts must name an entry/group contained in their returned
+snapshot, preventing stale post-create selection.
+
 Password editing never preloads the existing password. Notes, custom values,
 and protected metadata require explicit narrow loads. Drafts are component-local
 and clear on Apply, Cancel, failure, navigation, Lock, and unmount; browser
 persistence and logging remain forbidden. Mutation receipts and bulk/detail
 DTOs carry no password, notes, or custom value.
+Failed Notes loads display a generic alert and leave Notes absent from an entry
+update request, so unrelated metadata may still be applied safely.
 
 Rust is authoritative for dirty state. Plain Lock refuses dirty sessions and
 does not drop them; explicit discard-lock shares the Copy/Lock lifecycle gate,

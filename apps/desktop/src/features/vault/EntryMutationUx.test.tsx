@@ -234,6 +234,94 @@ test("custom field edit is explicit, preserves protection, and ignores a late lo
   });
 });
 
+test("custom field load failure cannot mutate and leaves Apply disabled", async () => {
+  const api = mutationApi({
+    revealEntryCustomField: vi.fn().mockRejectedValue(new Error("synthetic")),
+  });
+  render(
+    <CustomFieldsEditor
+      api={api}
+      entryId="entry-a"
+      fields={mutationDetail.customFields}
+      disabled={false}
+      onApplied={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit Private" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Could not load this custom field value",
+  );
+  const apply = screen.getByRole("button", { name: "Apply" });
+  expect(apply).toBeDisabled();
+  fireEvent.click(apply);
+  expect(api.setEntryCustomField).not.toHaveBeenCalled();
+});
+
+test("custom field retry loads the value before permitting mutation", async () => {
+  const api = mutationApi({
+    revealEntryCustomField: vi
+      .fn()
+      .mockRejectedValueOnce(new Error("synthetic"))
+      .mockResolvedValueOnce("custom secret"),
+  });
+  render(
+    <CustomFieldsEditor
+      api={api}
+      entryId="entry-a"
+      fields={mutationDetail.customFields}
+      disabled={false}
+      onApplied={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit Private" }));
+  await screen.findByRole("alert");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Retry loading custom field value" }),
+  );
+  expect(await screen.findByDisplayValue("custom secret")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Value"), {
+    target: { value: "updated secret" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => {
+    expect(api.setEntryCustomField).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      name: "Private",
+      value: "updated secret",
+      protection: "protected",
+    });
+  });
+});
+
+test("loaded empty existing custom value remains a legitimate editable value", async () => {
+  const api = mutationApi({
+    revealEntryCustomField: vi.fn().mockResolvedValue(""),
+  });
+  render(
+    <CustomFieldsEditor
+      api={api}
+      entryId="entry-a"
+      fields={mutationDetail.customFields}
+      disabled={false}
+      onApplied={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit Private" }));
+  const textarea = await screen.findByLabelText("Value");
+  expect(textarea).toHaveValue("");
+  const apply = screen.getByRole("button", { name: "Apply" });
+  expect(apply).toBeEnabled();
+  fireEvent.click(apply);
+  await waitFor(() => {
+    expect(api.setEntryCustomField).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      name: "Private",
+      value: "",
+      protection: "protected",
+    });
+  });
+});
+
 test("custom field add chooses protection and delete failures clear value state", async () => {
   const api = mutationApi({
     deleteEntryCustomField: vi.fn().mockRejectedValue(new Error("synthetic")),
@@ -268,12 +356,101 @@ test("custom field add chooses protection and delete failures clear value state"
     });
   });
 
+  fireEvent.click(screen.getByRole("button", { name: "Add custom field" }));
+  fireEvent.change(screen.getByLabelText("Field name"), {
+    target: { value: "Protected value" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => {
+    expect(api.setEntryCustomField).toHaveBeenLastCalledWith({
+      entryId: "entry-a",
+      name: "Protected value",
+      value: "",
+      protection: "protected",
+    });
+  });
+
   fireEvent.click(screen.getByRole("button", { name: "Delete Private" }));
   fireEvent.click(screen.getByRole("button", { name: "Delete field" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Could not change",
   );
   expect(api.deleteEntryCustomField).toHaveBeenCalledWith("entry-a", "Private");
+});
+
+test("existing unnamed custom field remains editable and deletable by its exact key", async () => {
+  const api = mutationApi();
+  render(
+    <CustomFieldsEditor
+      api={api}
+      entryId="entry-a"
+      fields={[{ name: "", protection: "protected" }]}
+      disabled={false}
+      onApplied={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("Unnamed custom field")).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Edit unnamed custom field" }),
+  );
+  expect(await screen.findByDisplayValue("custom secret")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Value"), {
+    target: { value: "updated unnamed" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => {
+    expect(api.setEntryCustomField).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      name: "",
+      value: "updated unnamed",
+      protection: "protected",
+    });
+  });
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Delete unnamed custom field" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Delete field" }));
+  await waitFor(() => {
+    expect(api.deleteEntryCustomField).toHaveBeenCalledWith("entry-a", "");
+  });
+});
+
+test("notes load failure is visible and omits notes from metadata update", async () => {
+  const api = mutationApi({
+    revealEntryNotes: vi.fn().mockRejectedValue(new Error("synthetic")),
+  });
+  render(
+    <EntryEditForm
+      api={api}
+      detail={mutationDetail}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "Updated without notes" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Load notes for editing" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Could not load notes for editing",
+  );
+  expect(
+    screen.getByRole("button", { name: "Retry loading notes" }),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledOnce();
+  });
+  const request = vi.mocked(api.updateEntry).mock.calls[0]?.[0];
+  expect(request).toMatchObject({
+    entryId: "entry-a",
+    title: "Updated without notes",
+  });
+  expect(request).not.toHaveProperty("notes");
 });
 
 test("protected metadata enters the edit draft only after explicit load", async () => {

@@ -90,6 +90,18 @@ impl VaultSession {
             .map_err(SessionError::Kdbx)
     }
 
+    /// Checks exact custom-field identity without reading its value.
+    pub fn has_entry_custom_field(
+        &self,
+        entry: &EntryId,
+        name: &str,
+    ) -> Result<bool, SessionError> {
+        self.document
+            .custom_fields(entry)
+            .map(|fields| fields.iter().any(|field| field.name() == name))
+            .map_err(SessionError::Kdbx)
+    }
+
     /// Deletes one custom field in memory.
     pub fn delete_entry_custom_field(
         &mut self,

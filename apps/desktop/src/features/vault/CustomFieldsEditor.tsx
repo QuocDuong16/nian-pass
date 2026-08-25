@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { DesktopApi } from "../../lib/desktop";
 import type {
@@ -21,6 +21,18 @@ interface CustomFieldsEditorProps {
   onApplied: (snapshot: VaultSnapshotDto) => void;
 }
 
+function fieldLabel(name: string): string {
+  return name.trim() === "" ? "Unnamed custom field" : name;
+}
+function fieldActionLabel(action: "Edit" | "Delete", name: string): string {
+  return `${action} ${name.trim() === "" ? "unnamed custom field" : name}`;
+}
+
+function requireLoaded(value: string | null): string {
+  if (value === null) throw new Error("Custom field value was not loaded");
+  return value;
+}
+
 export function CustomFieldsEditor({
   api,
   entryId,
@@ -38,13 +50,17 @@ export function CustomFieldsEditor({
   const value = useSecretDraft();
   const loadValue = value.load;
 
+  const loadExistingValue = useCallback(
+    (field: CustomFieldSummaryDto) =>
+      loadValue(() => api.revealEntryCustomField(entryId, field.name)),
+    [api, entryId, loadValue],
+  );
+
   useEffect(() => {
     if (action?.kind === "edit") {
-      void loadValue(() =>
-        api.revealEntryCustomField(entryId, action.field.name),
-      );
+      void loadExistingValue(action.field);
     }
-  }, [action, api, entryId, loadValue]);
+  }, [action, loadExistingValue]);
 
   const close = () => {
     value.clear();
@@ -55,16 +71,19 @@ export function CustomFieldsEditor({
 
   const apply = async () => {
     if (action === null || disabled || busy) return;
+    const draftValue = value.value;
+    if (action.kind === "edit" && draftValue === null) return;
     setBusy(true);
     setFailed(false);
     try {
+      const nextValue = action.kind === "add" ? (draftValue ?? "") : draftValue;
       const snapshot =
         action.kind === "delete"
           ? await api.deleteEntryCustomField(entryId, action.field.name)
           : await api.setEntryCustomField({
               entryId,
               name: action.kind === "add" ? name : action.field.name,
-              value: value.value ?? "",
+              value: requireLoaded(nextValue),
               protection:
                 action.kind === "add" ? protection : action.field.protection,
             });
@@ -98,7 +117,7 @@ export function CustomFieldsEditor({
       <ul className="custom-field-list">
         {fields.map((field) => (
           <li key={`${field.name}:${field.protection}`}>
-            <span>{field.name}</span>
+            <span>{fieldLabel(field.name)}</span>
             <span>
               {field.protection === "protected" ? "Protected" : "Unprotected"}
             </span>
@@ -109,7 +128,7 @@ export function CustomFieldsEditor({
                 setAction({ kind: "edit", field });
               }}
             >
-              Edit {field.name}
+              {fieldActionLabel("Edit", field.name)}
             </button>
             <button
               type="button"
@@ -118,7 +137,7 @@ export function CustomFieldsEditor({
                 setAction({ kind: "delete", field });
               }}
             >
-              Delete {field.name}
+              {fieldActionLabel("Delete", field.name)}
             </button>
           </li>
         ))}
@@ -171,19 +190,32 @@ export function CustomFieldsEditor({
                     </select>
                   </>
                 ) : null}
-                <label htmlFor="custom-field-value">Value</label>
-                <textarea
-                  id="custom-field-value"
-                  value={value.value ?? ""}
-                  disabled={value.loading}
-                  spellCheck={false}
-                  onChange={(event) => {
-                    value.set(event.currentTarget.value);
-                  }}
-                />
+                {action.kind === "add" || value.value !== null ? (
+                  <>
+                    <label htmlFor="custom-field-value">Value</label>
+                    <textarea
+                      id="custom-field-value"
+                      value={requireLoaded(value.value)}
+                      spellCheck={false}
+                      onChange={(event) => {
+                        value.set(event.currentTarget.value);
+                      }}
+                    />
+                  </>
+                ) : null}
                 {value.loading ? <p>Loading value…</p> : null}
                 {value.failed ? (
-                  <p role="alert">Could not load this value.</p>
+                  <>
+                    <p role="alert">Could not load this custom field value.</p>
+                    {action.kind === "edit" ? (
+                      <button
+                        type="button"
+                        onClick={() => void loadExistingValue(action.field)}
+                      >
+                        Retry loading custom field value
+                      </button>
+                    ) : null}
+                  </>
                 ) : null}
               </>
             )}
@@ -197,6 +229,7 @@ export function CustomFieldsEditor({
                 disabled={
                   busy ||
                   value.loading ||
+                  (action.kind === "edit" && value.value === null) ||
                   (action.kind === "add" && name.trim() === "")
                 }
                 onClick={() => void apply()}
