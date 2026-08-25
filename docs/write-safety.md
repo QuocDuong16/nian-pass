@@ -202,6 +202,15 @@ post-commit: no baseline is accepted and the session remains dirty/unreconciled.
 
 ## Concurrency and lifecycle limitations
 
+M4.3 desktop mutations are deliberately volatile. They change only the
+Rust-owned unlocked `KdbxDocument`, advance its logical revision, and surface
+`VaultSession::is_dirty` through a fresh snapshot. No M4.3 desktop command calls
+`save`, `save_to_writer`, atomic replacement, or backup code, and there is no
+autosave or save-before-lock/close behavior. Tests mutate and explicitly
+discard a session while proving the checked-in source fixture bytes remain
+identical. M4.4 will connect a reviewed desktop Save UX to the existing M3
+transaction and external-change handling.
+
 Fingerprint validation is optimistic external-modification detection. KeePassXC,
 OneDrive, Google Drive, Dropbox, and other writers do not honor a Nian-specific
 lock, so an unavoidable race remains between the last fingerprint check and the

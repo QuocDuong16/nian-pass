@@ -18,7 +18,8 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M4.2 — Entry Detail\nmake quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
+    "M4.3 — Desktop Mutation UX\nUnsaved changes\nM4.3 is in-memory only with no filesystem Save.\n" +
+      "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
       "The active clipboard clears only if it still contains the value written by Nian Pass.\n",
   );
   write(

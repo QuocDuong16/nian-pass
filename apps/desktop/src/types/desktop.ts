@@ -4,6 +4,7 @@ export type SummaryTextDto =
   | { kind: "protected" };
 
 export type EntryId = string;
+export type GroupId = string;
 
 export interface SelectedVaultDto {
   fileName: string;
@@ -52,9 +53,49 @@ export interface LockResultDto {
 }
 
 export interface VaultSnapshotDto {
+  dirty: boolean;
   rootGroupId: string;
   groups: GroupDto[];
   entries: EntrySummaryDto[];
+}
+
+export interface CreatedEntryDto {
+  createdEntryId: EntryId;
+  snapshot: VaultSnapshotDto;
+}
+
+export interface CreatedGroupDto {
+  createdGroupId: GroupId;
+  snapshot: VaultSnapshotDto;
+}
+
+export interface UpdateEntryRequest {
+  entryId: EntryId;
+  title?: string;
+  username?: string;
+  url?: string;
+  password?: string;
+  notes?: string;
+}
+
+export interface CreateEntryRequest {
+  groupId: GroupId;
+  title: string;
+  username: string;
+  url: string;
+  password: string | null;
+  notes: string | null;
+}
+
+export interface SetCustomFieldRequest {
+  entryId: EntryId;
+  name: string;
+  value: string;
+  protection: "protected" | "unprotected";
+}
+
+export interface ClosePolicyDto {
+  policy: "allow" | "confirm_discard";
 }
 
 export type DesktopErrorCode =
@@ -64,6 +105,11 @@ export type DesktopErrorCode =
   | "unlock_failed"
   | "unsupported_vault"
   | "entry_not_found"
+  | "group_not_found"
+  | "invalid_request"
+  | "invalid_move"
+  | "reserved_field"
   | "secret_unavailable"
+  | "unsaved_changes"
   | "clipboard_failed"
   | "internal";

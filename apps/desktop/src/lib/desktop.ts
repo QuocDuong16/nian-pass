@@ -2,11 +2,18 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   ClipboardReceiptDto,
+  ClosePolicyDto,
+  CreateEntryRequest,
+  CreatedEntryDto,
+  CreatedGroupDto,
   DesktopErrorCode,
   EntryDetailDto,
   EntryId,
+  GroupId,
   LockResultDto,
   SelectedVaultDto,
+  SetCustomFieldRequest,
+  UpdateEntryRequest,
   VaultSnapshotDto,
 } from "../types/desktop";
 import {
@@ -16,6 +23,9 @@ import {
   parseSecretString,
 } from "./entry-validation";
 import {
+  parseClosePolicy,
+  parseCreatedEntry,
+  parseCreatedGroup,
   parseDesktopErrorCode,
   parseSelectedVault,
   parseVaultSnapshot,
@@ -28,9 +38,39 @@ export interface DesktopApi {
   getEntryDetail: (entryId: EntryId) => Promise<EntryDetailDto>;
   revealEntryPassword: (entryId: EntryId) => Promise<string>;
   revealEntryNotes: (entryId: EntryId) => Promise<string>;
+  revealEntryTitle: (entryId: EntryId) => Promise<string>;
+  revealEntryUsername: (entryId: EntryId) => Promise<string>;
+  revealEntryUrl: (entryId: EntryId) => Promise<string>;
+  revealEntryCustomField: (entryId: EntryId, name: string) => Promise<string>;
   copyEntryUsername: (entryId: EntryId) => Promise<ClipboardReceiptDto>;
   copyEntryPassword: (entryId: EntryId) => Promise<ClipboardReceiptDto>;
+  updateEntry: (request: UpdateEntryRequest) => Promise<VaultSnapshotDto>;
+  createEntry: (request: CreateEntryRequest) => Promise<CreatedEntryDto>;
+  deleteEntry: (entryId: EntryId) => Promise<VaultSnapshotDto>;
+  moveEntry: (
+    entryId: EntryId,
+    destinationGroupId: GroupId,
+  ) => Promise<VaultSnapshotDto>;
+  createGroup: (
+    parentGroupId: GroupId,
+    name: string,
+  ) => Promise<CreatedGroupDto>;
+  renameGroup: (groupId: GroupId, name: string) => Promise<VaultSnapshotDto>;
+  moveGroup: (
+    groupId: GroupId,
+    destinationGroupId: GroupId,
+  ) => Promise<VaultSnapshotDto>;
+  deleteGroup: (groupId: GroupId) => Promise<VaultSnapshotDto>;
+  setEntryCustomField: (
+    request: SetCustomFieldRequest,
+  ) => Promise<VaultSnapshotDto>;
+  deleteEntryCustomField: (
+    entryId: EntryId,
+    name: string,
+  ) => Promise<VaultSnapshotDto>;
+  closePolicy: () => Promise<ClosePolicyDto>;
   lockVault: () => Promise<LockResultDto>;
+  discardChangesAndLock: () => Promise<LockResultDto>;
 }
 
 export class DesktopCommandError extends Error {
@@ -89,9 +129,46 @@ export const desktopApi: DesktopApi = {
     call("reveal_entry_password", parseSecretString, { entryId }),
   revealEntryNotes: (entryId) =>
     call("reveal_entry_notes", parseSecretString, { entryId }),
+  revealEntryTitle: (entryId) =>
+    call("reveal_entry_title", parseSecretString, { entryId }),
+  revealEntryUsername: (entryId) =>
+    call("reveal_entry_username", parseSecretString, { entryId }),
+  revealEntryUrl: (entryId) =>
+    call("reveal_entry_url", parseSecretString, { entryId }),
+  revealEntryCustomField: (entryId, name) =>
+    call("reveal_entry_custom_field", parseSecretString, { entryId, name }),
   copyEntryUsername: (entryId) =>
     call("copy_entry_username", parseClipboardReceipt, { entryId }),
   copyEntryPassword: (entryId) =>
     call("copy_entry_password", parseClipboardReceipt, { entryId }),
+  updateEntry: (request) =>
+    call("update_entry", parseVaultSnapshot, { request }),
+  createEntry: (request) =>
+    call("create_entry", parseCreatedEntry, { request }),
+  deleteEntry: (entryId) =>
+    call("delete_entry", parseVaultSnapshot, { entryId }),
+  moveEntry: (entryId, destinationGroupId) =>
+    call("move_entry", parseVaultSnapshot, {
+      request: { entryId, destinationGroupId },
+    }),
+  createGroup: (parentGroupId, name) =>
+    call("create_group", parseCreatedGroup, {
+      request: { parentGroupId, name },
+    }),
+  renameGroup: (groupId, name) =>
+    call("rename_group", parseVaultSnapshot, { request: { groupId, name } }),
+  moveGroup: (groupId, destinationGroupId) =>
+    call("move_group", parseVaultSnapshot, {
+      request: { groupId, destinationGroupId },
+    }),
+  deleteGroup: (groupId) =>
+    call("delete_group", parseVaultSnapshot, { groupId }),
+  setEntryCustomField: (request) =>
+    call("set_entry_custom_field", parseVaultSnapshot, { request }),
+  deleteEntryCustomField: (entryId, name) =>
+    call("delete_entry_custom_field", parseVaultSnapshot, { entryId, name }),
+  closePolicy: () => call("close_policy", parseClosePolicy),
   lockVault: () => call("lock_vault", parseLockResult),
+  discardChangesAndLock: () =>
+    call("discard_changes_and_lock", parseLockResult),
 };

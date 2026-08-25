@@ -7,6 +7,7 @@
 // External compatibility tests surface child-process diagnostics on failure only.
 #![cfg_attr(test, allow(clippy::print_stderr))]
 
+mod entry_mutations;
 mod entry_reads;
 mod sync;
 
@@ -49,6 +50,7 @@ enum MissingFieldProtection {
     DatabaseTitlePolicy,
     DatabaseUsernamePolicy,
     DatabaseUrlPolicy,
+    DatabaseNotesPolicy,
     AlwaysProtected,
 }
 
@@ -248,6 +250,16 @@ impl KdbxDocument {
         group: &GroupId,
         input: NewEntry<'_>,
     ) -> Result<EntryId, KdbxError> {
+        self.create_entry_with_notes(group, input, None)
+    }
+
+    /// Creates an entry with optional secret-bearing notes in one mutation.
+    pub fn create_entry_with_notes(
+        &mut self,
+        group: &GroupId,
+        input: NewEntry<'_>,
+        notes: Option<&SecretString>,
+    ) -> Result<EntryId, KdbxError> {
         let group_id = self.find_group_id(group)?;
         let protect_title =
             self.missing_field_is_protected(MissingFieldProtection::DatabaseTitlePolicy);
@@ -255,6 +267,8 @@ impl KdbxDocument {
             self.missing_field_is_protected(MissingFieldProtection::DatabaseUsernamePolicy);
         let protect_url =
             self.missing_field_is_protected(MissingFieldProtection::DatabaseUrlPolicy);
+        let protect_notes =
+            self.missing_field_is_protected(MissingFieldProtection::DatabaseNotesPolicy);
 
         let mut parent = self
             .database
@@ -273,6 +287,13 @@ impl KdbxDocument {
         set_new_field(&mut entry, fields::URL, input.url, protect_url);
         if let Some(password) = input.password {
             entry.set_protected(fields::PASSWORD, password.expose_secret());
+        }
+        if let Some(notes) = notes {
+            if protect_notes {
+                entry.set_protected(fields::NOTES, notes.expose_secret());
+            } else {
+                entry.set_unprotected(fields::NOTES, notes.expose_secret());
+            }
         }
 
         self.mark_changed();
@@ -685,6 +706,9 @@ impl KdbxDocument {
             MissingFieldProtection::DatabaseUrlPolicy => {
                 memory_protection.is_some_and(|policy| policy.protect_url)
             }
+            MissingFieldProtection::DatabaseNotesPolicy => {
+                memory_protection.is_some_and(|policy| policy.protect_notes)
+            }
             MissingFieldProtection::AlwaysProtected => true,
         }
     }
@@ -983,7 +1007,7 @@ mod tests {
         db::{MemoryProtection, Times, Value, fields},
     };
     use vault_core::{
-        EntryId, FieldProtection, Group, GroupId, NewEntry, SecretString, SummaryText,
+        EntryId, EntryUpdate, FieldProtection, Group, GroupId, NewEntry, SecretString, SummaryText,
     };
 
     use super::{KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
@@ -4722,5 +4746,101 @@ mod tests {
                 && !xml.contains("<DataTransferObfuscation>True</DataTransferObfuscation>"),
             "DataTransferObfuscation used a KeePassXC-incompatible boolean encoding"
         );
+    }
+
+    #[test]
+    fn atomic_entry_update_records_one_history_revision_and_preserves_failure_state() {
+        let mut document = kdbx41_document();
+        let (entry_id, upstream_id) = first_entry_ids(&document);
+        let history_before = history_len(
+            &document
+                .database
+                .entry(upstream_id)
+                .expect("fixture entry should exist"),
+        );
+        let revision_before = document.revision();
+        let password = SecretString::new("M4.3-SECRET-PASSWORD".to_owned());
+        let notes = SecretString::new("M4.3-SECRET-NOTES".to_owned());
+
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: Some("M4.3 title"),
+                    username: Some("M4.3 username"),
+                    url: Some("m4.3://local"),
+                    password: Some(&password),
+                    notes: Some(&notes),
+                },
+            )
+            .expect("atomic update should succeed");
+        let updated = document
+            .database
+            .entry(upstream_id)
+            .expect("updated entry should exist");
+        assert_eq!(history_len(&updated), history_before + 1);
+        assert_eq!(document.revision(), revision_before + 1);
+        for (field, expected) in [
+            (fields::TITLE, "M4.3 title"),
+            (fields::USERNAME, "M4.3 username"),
+            (fields::URL, "m4.3://local"),
+            (fields::PASSWORD, "M4.3-SECRET-PASSWORD"),
+            (fields::NOTES, "M4.3-SECRET-NOTES"),
+        ] {
+            assert!(
+                updated
+                    .fields
+                    .get(field)
+                    .is_some_and(|value| value.get() == expected)
+            );
+        }
+
+        let database_after = document.database.clone();
+        let revision_after = document.revision();
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: Some("M4.3 title"),
+                    username: Some("M4.3 username"),
+                    url: Some("m4.3://local"),
+                    password: Some(&password),
+                    notes: Some(&notes),
+                },
+            )
+            .expect("same-value update should be a no-op");
+        assert!(document.database == database_after);
+        assert_eq!(document.revision(), revision_after);
+
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                },
+            )
+            .expect("empty update should be a no-op");
+        assert!(document.database == database_after);
+        assert_eq!(document.revision(), revision_after);
+
+        assert!(matches!(
+            document.update_entry(
+                &unknown_entry_id(),
+                EntryUpdate {
+                    title: Some("must not apply"),
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                }
+            ),
+            Err(KdbxError::EntryNotFound)
+        ));
+        assert!(document.database == database_after);
+        assert_eq!(document.revision(), revision_after);
     }
 }

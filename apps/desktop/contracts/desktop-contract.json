@@ -3,6 +3,7 @@
     "fileName": "example.kdbx"
   },
   "snapshot": {
+    "dirty": false,
     "rootGroupId": "group-root",
     "groups": [
       {
@@ -25,6 +26,39 @@
       }
     ]
   },
+  "createdEntry": {
+    "createdEntryId": "entry-created",
+    "snapshot": {
+      "dirty": true,
+      "rootGroupId": "group-root",
+      "groups": [
+        {
+          "id": "group-root",
+          "name": "Root",
+          "childGroupIds": [],
+          "entryIds": []
+        }
+      ],
+      "entries": []
+    }
+  },
+  "createdGroup": {
+    "createdGroupId": "group-created",
+    "snapshot": {
+      "dirty": true,
+      "rootGroupId": "group-root",
+      "groups": [
+        {
+          "id": "group-root",
+          "name": "Root",
+          "childGroupIds": [],
+          "entryIds": []
+        }
+      ],
+      "entries": []
+    }
+  },
+  "closePolicies": [{ "policy": "allow" }, { "policy": "confirm_discard" }],
   "entryDetail": {
     "id": "entry-example",
     "title": { "kind": "visible", "value": "Example" },
@@ -50,7 +84,12 @@
     "unlock_failed",
     "unsupported_vault",
     "entry_not_found",
+    "group_not_found",
+    "invalid_request",
+    "invalid_move",
+    "reserved_field",
     "secret_unavailable",
+    "unsaved_changes",
     "clipboard_failed",
     "internal"
   ]

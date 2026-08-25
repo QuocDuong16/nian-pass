@@ -14,9 +14,34 @@ pub struct SelectedVaultDto {
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultSnapshotDto {
+    pub dirty: bool,
     pub root_group_id: String,
     pub groups: Vec<GroupDto>,
     pub entries: Vec<EntrySummaryDto>,
+}
+
+/// Secret-free result of entry creation.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedEntryDto {
+    pub created_entry_id: String,
+    pub snapshot: VaultSnapshotDto,
+}
+
+/// Secret-free result of group creation.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedGroupDto {
+    pub created_group_id: String,
+    pub snapshot: VaultSnapshotDto,
+}
+
+/// Rust-authoritative decision for a main-window close request.
+#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "policy")]
+pub enum ClosePolicyDto {
+    Allow,
+    ConfirmDiscard,
 }
 
 /// One group in the normalized browser tree.
@@ -111,12 +136,13 @@ impl From<&SummaryText> for SummaryTextDto {
 
 impl VaultSnapshotDto {
     #[must_use]
-    pub fn from_vault(vault: &Vault) -> Self {
+    pub fn from_vault(vault: &Vault, dirty: bool) -> Self {
         let mut groups = Vec::with_capacity(vault.group_count());
         let mut entries = Vec::with_capacity(vault.entry_count());
         collect_group(vault.root(), &mut groups, &mut entries);
 
         Self {
+            dirty,
             root_group_id: vault.root().id().as_str().to_owned(),
             groups,
             entries,
@@ -220,8 +246,9 @@ mod tests {
     use vault_core::{CustomFieldSummary, EntryId, EntrySummary, FieldProtection, SummaryText};
 
     use super::{
-        ClipboardReceiptDto, EntryDetailDto, EntrySummaryDto, GroupDto, LockResultDto,
-        SelectedVaultDto, SummaryTextDto, VaultSnapshotDto,
+        ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, EntryDetailDto,
+        EntrySummaryDto, GroupDto, LockResultDto, SelectedVaultDto, SummaryTextDto,
+        VaultSnapshotDto,
     };
     use crate::clipboard::{CLIPBOARD_CLEAR_MS, ClipboardClearStatus, ClipboardCopy};
 
@@ -255,6 +282,7 @@ mod tests {
             file_name: "example.kdbx".to_owned(),
         };
         let snapshot = VaultSnapshotDto {
+            dirty: false,
             root_group_id: "group-root".to_owned(),
             groups: vec![GroupDto {
                 id: "group-root".to_owned(),
@@ -283,6 +311,38 @@ mod tests {
         assert_eq!(
             contract["snapshot"],
             to_value(snapshot).expect("snapshot DTO should serialize")
+        );
+        let mutation_snapshot = VaultSnapshotDto {
+            dirty: true,
+            root_group_id: "group-root".to_owned(),
+            groups: vec![GroupDto {
+                id: "group-root".to_owned(),
+                name: "Root".to_owned(),
+                child_group_ids: Vec::new(),
+                entry_ids: Vec::new(),
+            }],
+            entries: Vec::new(),
+        };
+        assert_eq!(
+            contract["createdEntry"],
+            to_value(CreatedEntryDto {
+                created_entry_id: "entry-created".to_owned(),
+                snapshot: mutation_snapshot.clone(),
+            })
+            .expect("created entry DTO should serialize")
+        );
+        assert_eq!(
+            contract["createdGroup"],
+            to_value(CreatedGroupDto {
+                created_group_id: "group-created".to_owned(),
+                snapshot: mutation_snapshot,
+            })
+            .expect("created group DTO should serialize")
+        );
+        assert_eq!(
+            contract["closePolicies"],
+            to_value([ClosePolicyDto::Allow, ClosePolicyDto::ConfirmDiscard])
+                .expect("close policies should serialize")
         );
 
         let entry = EntrySummary::new(

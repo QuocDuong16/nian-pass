@@ -1,18 +1,64 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { DiscardDialog } from "./features/vault/DiscardDialog";
 import { LockedView } from "./features/vault/LockedView";
 import { UnlockedView } from "./features/vault/UnlockedView";
-import { desktopApi, type DesktopApi } from "./lib/desktop";
+import {
+  DesktopCommandError,
+  desktopApi,
+  type DesktopApi,
+} from "./lib/desktop";
 import type { VaultSnapshotDto } from "./types/desktop";
+import type { DesktopWindowLifecycle } from "./lib/window-lifecycle";
 
 interface AppProps {
   api?: DesktopApi;
+  windowLifecycle?: DesktopWindowLifecycle | null;
 }
 
-export default function App({ api = desktopApi }: AppProps) {
+type DiscardIntent = "lock" | "close";
+
+export default function App({
+  api = desktopApi,
+  windowLifecycle = null,
+}: AppProps) {
   const [snapshot, setSnapshot] = useState<VaultSnapshotDto | null>(null);
   const [locking, setLocking] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
+  const [discardIntent, setDiscardIntent] = useState<DiscardIntent | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (windowLifecycle === null) return;
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void windowLifecycle
+      .onCloseRequested(async (event) => {
+        try {
+          const policy = await api.closePolicy();
+          if (policy.policy === "confirm_discard") {
+            event.preventDefault();
+            if (active) setDiscardIntent("close");
+          }
+        } catch {
+          event.preventDefault();
+          if (active) {
+            setLockError(
+              "Nian Pass could not verify whether it is safe to close.",
+            );
+          }
+        }
+      })
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [api, windowLifecycle]);
 
   if (snapshot === null) {
     return (
@@ -27,23 +73,40 @@ export default function App({ api = desktopApi }: AppProps) {
     );
   }
 
-  const lock = async () => {
+  const finishLocked = (clipboard: string) => {
+    if (clipboard === "clear_failed") {
+      setLockError(
+        "Vault locked, but Nian Pass could not clear the clipboard.",
+      );
+    }
+    setSnapshot(null);
+  };
+
+  const lock = async (discard = false) => {
     if (locking) {
       return;
     }
     setLocking(true);
     setLockError(null);
     try {
-      const result = await api.lockVault();
-      if (result.clipboard === "clear_failed") {
-        setLockError(
-          "Vault locked, but Nian Pass could not clear the clipboard.",
-        );
+      const result = discard
+        ? await api.discardChangesAndLock()
+        : await api.lockVault();
+      finishLocked(result.clipboard);
+      if (discardIntent === "close" && windowLifecycle !== null) {
+        await windowLifecycle.requestClose();
       }
-      setSnapshot(null);
-    } catch {
+      setDiscardIntent(null);
+    } catch (error) {
+      if (
+        error instanceof DesktopCommandError &&
+        error.code === "unsaved_changes"
+      ) {
+        setDiscardIntent("lock");
+        return;
+      }
       setLockError(
-        "Nian Pass could not lock the vault. Close the application to drop the session.",
+        "Nian Pass could not lock the vault. The unlocked session remains active.",
       );
     } finally {
       setLocking(false);
@@ -51,12 +114,28 @@ export default function App({ api = desktopApi }: AppProps) {
   };
 
   return (
-    <UnlockedView
-      api={api}
-      snapshot={snapshot}
-      locking={locking}
-      lockError={lockError}
-      onLock={lock}
-    />
+    <>
+      <UnlockedView
+        api={api}
+        snapshot={snapshot}
+        locking={locking}
+        lockError={lockError}
+        onSnapshot={setSnapshot}
+        onLock={() => {
+          if (snapshot.dirty) setDiscardIntent("lock");
+          else void lock();
+        }}
+      />
+      {discardIntent !== null ? (
+        <DiscardDialog
+          closing={discardIntent === "close"}
+          busy={locking}
+          onCancel={() => {
+            setDiscardIntent(null);
+          }}
+          onConfirm={() => void lock(true)}
+        />
+      ) : null}
+    </>
   );
 }

@@ -1,11 +1,12 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M4.0 through M4.2 provide a Tauri 2 + React desktop shell
-for local open, unlock, browse, detail, explicit reveal/copy, and lock. M3 provides the unlocked local session and
+the source of truth. M4.0 through M4.3 provide a Tauri 2 + React desktop shell
+for local open, unlock, browse, detail, explicit reveal/copy, memory-only
+mutation, and lock. M3 provides the unlocked local session and
 verified filesystem persistence beneath it. M3.5 adds provider-independent,
 synchronous three-way semantic merge; the current desktop does not call sync or
-expose editing/save behavior.
+expose filesystem save behavior.
 
 M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
@@ -167,6 +168,53 @@ plugin clipboard permission and has no JavaScript clipboard package or browser
 clipboard API. The CSP is unchanged and still permits only bundled local assets
 and Tauri IPC. Dialog and clipboard are the only approved Rust plugins; shell,
 HTTP, filesystem, process, updater, and remote-content capabilities remain absent.
+
+## M4.3 desktop mutation boundary
+
+React owns only short-lived form drafts, selected stable IDs, and validation
+state. Canonical mutation remains entirely below the semantic IPC boundary:
+
+```text
+React component-local draft
+  -> semantic mutation IPC using EntryId / GroupId
+  -> DesktopVaultService mutex
+  -> VaultSession
+  -> complete KdbxDocument mutation API
+  -> VaultSession dirty revision
+  -> fresh secret-free VaultSnapshotDto
+  -> exact-key validation
+  -> replace React snapshot
+```
+
+`update_entry` prevalidates the stable entry ID and applies every requested
+standard field through one tracked adapter mutation. One UI Apply therefore
+creates one prior-state history item and one logical revision, while same-value
+and missing-plus-empty changes remain no-ops. Structural and custom-field
+commands reuse the M2.5 tombstone, cycle, reserved-field, and protection
+semantics. React never reconstructs, optimistically splices, or owns the mutable
+KDBX document.
+
+Password replacement starts with an empty input and never fetches the old
+password. Notes and existing custom-field values enter React only after an
+explicit edit/load action. Edit drafts do not use the 15-second reveal timer so
+typing is not silently destroyed; they clear on Apply, Cancel, operation
+failure, entry/group navigation, Lock, and unmount. Protected title, username,
+and URL values also require an explicit narrow load before editing. No draft is
+written to browser storage, and JavaScript strings cannot be deterministically
+zeroized.
+
+`VaultSnapshotDto.dirty` is computed from `VaultSession::is_dirty`; React only
+mirrors it. Plain `lock_vault` rejects a dirty session with
+`unsaved_changes` and leaves it unlocked. `discard_changes_and_lock` is the
+only desktop command that expresses destructive intent and shares the M4.2
+secret-operation gate and lock order. Tauri close-request handling calls the
+Rust `close_policy`; a dirty session is prevented from closing until the user
+explicitly discards, while locked and clean sessions may close.
+
+M4.3 never calls `VaultSession::save`, `save_to_writer`, atomic replacement, or
+backup code. Mutation responses are fresh projections only. The encrypted KDBX
+file and its fingerprint baseline remain unchanged; M4.4 owns future Save and
+external-change/conflict UX.
 
 `vault-core` owns KDBX-independent domain types. `crates/kdbx` is the adapter
 that contains all `keepass-rs` types and converts them to the domain model. The

@@ -7,7 +7,14 @@ use vault_core::SecretString;
 
 use crate::{
     clipboard::{CLIPBOARD_CLEAR_MS, DesktopClipboardService},
-    dto::{ClipboardReceiptDto, EntryDetailDto, LockResultDto, SelectedVaultDto, VaultSnapshotDto},
+    dto::{
+        ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, EntryDetailDto,
+        LockResultDto, SelectedVaultDto, VaultSnapshotDto,
+    },
+    mutations::{
+        CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
+        RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
+    },
     state::{AppState, DesktopError},
 };
 
@@ -20,7 +27,12 @@ enum DesktopErrorCode {
     UnlockFailed,
     UnsupportedVault,
     EntryNotFound,
+    GroupNotFound,
+    InvalidRequest,
+    InvalidMove,
+    ReservedField,
     SecretUnavailable,
+    UnsavedChanges,
     ClipboardFailed,
     Internal,
 }
@@ -40,7 +52,12 @@ impl From<DesktopError> for DesktopErrorDto {
             DesktopError::UnlockFailed => DesktopErrorCode::UnlockFailed,
             DesktopError::UnsupportedVault => DesktopErrorCode::UnsupportedVault,
             DesktopError::EntryNotFound => DesktopErrorCode::EntryNotFound,
+            DesktopError::GroupNotFound => DesktopErrorCode::GroupNotFound,
+            DesktopError::InvalidRequest => DesktopErrorCode::InvalidRequest,
+            DesktopError::InvalidMove => DesktopErrorCode::InvalidMove,
+            DesktopError::ReservedField => DesktopErrorCode::ReservedField,
             DesktopError::SecretUnavailable => DesktopErrorCode::SecretUnavailable,
+            DesktopError::UnsavedChanges => DesktopErrorCode::UnsavedChanges,
             DesktopError::ClipboardFailed => DesktopErrorCode::ClipboardFailed,
             DesktopError::Internal => DesktopErrorCode::Internal,
         };
@@ -140,6 +157,170 @@ pub fn reveal_entry_notes(
 }
 
 #[tauri::command]
+pub fn reveal_entry_title(
+    entry_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, DesktopErrorDto> {
+    reveal_entry_value(
+        entry_id,
+        state,
+        crate::state::DesktopVaultService::entry_title,
+    )
+}
+
+#[tauri::command]
+pub fn reveal_entry_username(
+    entry_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, DesktopErrorDto> {
+    reveal_entry_value(
+        entry_id,
+        state,
+        crate::state::DesktopVaultService::entry_username,
+    )
+}
+
+#[tauri::command]
+pub fn reveal_entry_url(
+    entry_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, DesktopErrorDto> {
+    reveal_entry_value(
+        entry_id,
+        state,
+        crate::state::DesktopVaultService::entry_url,
+    )
+}
+
+#[tauri::command]
+pub fn reveal_entry_custom_field(
+    entry_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<String, DesktopErrorDto> {
+    let service = state
+        .service
+        .lock()
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
+    let secret = service.entry_custom_field(&entry_id, &name)?;
+    Ok(secret.expose_secret().to_owned())
+}
+
+fn reveal_entry_value(
+    entry_id: String,
+    state: State<'_, AppState>,
+    read: fn(&crate::state::DesktopVaultService, &str) -> Result<SecretString, DesktopError>,
+) -> Result<String, DesktopErrorDto> {
+    let service = state
+        .service
+        .lock()
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
+    let secret = read(&service, &entry_id)?;
+    Ok(secret.expose_secret().to_owned())
+}
+
+#[tauri::command]
+pub fn update_entry(
+    request: UpdateEntryRequestDto,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.update_entry(request))
+}
+
+#[tauri::command]
+pub fn create_entry(
+    request: CreateEntryRequestDto,
+    state: State<'_, AppState>,
+) -> Result<CreatedEntryDto, DesktopErrorDto> {
+    with_service(state, |service| service.create_entry(request))
+}
+
+#[tauri::command]
+pub fn delete_entry(
+    entry_id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.delete_entry(entry_id))
+}
+
+#[tauri::command]
+pub fn move_entry(
+    request: MoveEntryRequestDto,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.move_entry(request))
+}
+
+#[tauri::command]
+pub fn create_group(
+    request: CreateGroupRequestDto,
+    state: State<'_, AppState>,
+) -> Result<CreatedGroupDto, DesktopErrorDto> {
+    with_service(state, |service| service.create_group(request))
+}
+
+#[tauri::command]
+pub fn rename_group(
+    request: RenameGroupRequestDto,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.rename_group(request))
+}
+
+#[tauri::command]
+pub fn move_group(
+    request: MoveGroupRequestDto,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.move_group(request))
+}
+
+#[tauri::command]
+pub fn delete_group(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.delete_group(group_id))
+}
+
+#[tauri::command]
+pub fn set_entry_custom_field(
+    request: SetCustomFieldRequestDto,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.set_custom_field(request))
+}
+
+#[tauri::command]
+pub fn delete_entry_custom_field(
+    entry_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    with_service(state, |service| service.delete_custom_field(entry_id, name))
+}
+
+fn with_service<T>(
+    state: State<'_, AppState>,
+    operation: impl FnOnce(&mut crate::state::DesktopVaultService) -> Result<T, DesktopError>,
+) -> Result<T, DesktopErrorDto> {
+    let mut service = state
+        .service
+        .lock()
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
+    operation(&mut service).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn close_policy(state: State<'_, AppState>) -> Result<ClosePolicyDto, DesktopErrorDto> {
+    let service = state
+        .service
+        .lock()
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
+    Ok(service.close_policy())
+}
+
+#[tauri::command]
 pub async fn copy_entry_username(
     entry_id: String,
     state: State<'_, AppState>,
@@ -192,6 +373,17 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<LockResultDto, Des
         .map_err(Into::into)
 }
 
+#[tauri::command]
+pub async fn discard_changes_and_lock(
+    state: State<'_, AppState>,
+) -> Result<LockResultDto, DesktopErrorDto> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.discard_changes_and_lock().map(Into::into))
+        .await
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?
+        .map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -199,16 +391,25 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use serde_json::{Value, from_str, to_value};
+    use serde::de::DeserializeOwned;
+    use serde_json::{Value, from_str, from_value, json, to_value};
     use tauri::{Manager, test::mock_app};
     use vault_core::SecretString;
 
     use super::{
-        DesktopErrorDto, copy_entry_password, copy_entry_username, entry_detail, lock_vault,
-        reveal_entry_notes, reveal_entry_password,
+        DesktopErrorDto, close_policy, copy_entry_password, copy_entry_username, create_entry,
+        create_group, delete_entry, delete_entry_custom_field, delete_group,
+        discard_changes_and_lock, entry_detail, lock_vault, move_entry, move_group, rename_group,
+        reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
+        reveal_entry_url, reveal_entry_username, set_entry_custom_field, update_entry,
     };
     use crate::{
         clipboard::ClipboardPort,
+        dto::ClosePolicyDto,
+        mutations::{
+            CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
+            RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
+        },
         state::{AppState, DesktopError},
     };
 
@@ -248,6 +449,10 @@ mod tests {
         app
     }
 
+    fn request<T: DeserializeOwned>(value: Value) -> T {
+        from_value(value).expect("synthetic command request should deserialize")
+    }
+
     #[test]
     fn committed_contract_fixture_matches_all_error_codes() {
         let contract: Value = from_str(include_str!("../../contracts/desktop-contract.json"))
@@ -259,7 +464,12 @@ mod tests {
             DesktopError::UnlockFailed,
             DesktopError::UnsupportedVault,
             DesktopError::EntryNotFound,
+            DesktopError::GroupNotFound,
+            DesktopError::InvalidRequest,
+            DesktopError::InvalidMove,
+            DesktopError::ReservedField,
             DesktopError::SecretUnavailable,
+            DesktopError::UnsavedChanges,
             DesktopError::ClipboardFailed,
             DesktopError::Internal,
         ];
@@ -329,5 +539,165 @@ mod tests {
             tauri::async_runtime::block_on(copy_entry_username(username_id, state.clone())).is_ok()
         );
         assert!(tauri::async_runtime::block_on(lock_vault(state)).is_ok());
+    }
+
+    #[test]
+    fn m43_semantic_commands_refresh_canonical_state_and_require_explicit_discard() {
+        let app = unlocked_app();
+        let state = app.state::<AppState>();
+        let snapshot = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should exist");
+        let root = snapshot.root_group_id.clone();
+        let destination = snapshot
+            .groups
+            .iter()
+            .find(|group| group.id != root)
+            .expect("fixture child group")
+            .id
+            .clone();
+        let entry = snapshot.entries.first().expect("fixture entry").id.clone();
+        assert!(matches!(
+            close_policy(state.clone()),
+            Ok(ClosePolicyDto::Allow)
+        ));
+
+        let updated = update_entry(
+            request::<UpdateEntryRequestDto>(json!({
+                "entryId": entry,
+                "title": "M4.3 command title",
+                "username": "M4.3 command user",
+                "url": "m4.3://command",
+                "password": "M4.3-COMMAND-PASSWORD",
+                "notes": "M4.3-COMMAND-NOTES"
+            })),
+            state.clone(),
+        );
+        assert!(updated.is_ok());
+        assert_eq!(
+            reveal_entry_title(entry.clone(), state.clone())
+                .ok()
+                .as_deref(),
+            Some("M4.3 command title")
+        );
+        assert_eq!(
+            reveal_entry_username(entry.clone(), state.clone())
+                .ok()
+                .as_deref(),
+            Some("M4.3 command user")
+        );
+        assert_eq!(
+            reveal_entry_url(entry.clone(), state.clone())
+                .ok()
+                .as_deref(),
+            Some("m4.3://command")
+        );
+
+        assert!(
+            set_entry_custom_field(
+                request::<SetCustomFieldRequestDto>(json!({
+                    "entryId": entry,
+                    "name": "M4.3 command custom",
+                    "value": "M4.3-COMMAND-CUSTOM",
+                    "protection": "protected"
+                })),
+                state.clone(),
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            reveal_entry_custom_field(
+                entry.clone(),
+                "M4.3 command custom".to_owned(),
+                state.clone(),
+            )
+            .ok()
+            .as_deref(),
+            Some("M4.3-COMMAND-CUSTOM")
+        );
+        assert!(
+            delete_entry_custom_field(
+                entry.clone(),
+                "M4.3 command custom".to_owned(),
+                state.clone(),
+            )
+            .is_ok()
+        );
+
+        let Ok(created) = create_entry(
+            request::<CreateEntryRequestDto>(json!({
+                "groupId": root,
+                "title": "M4.3 command entry",
+                "username": "",
+                "url": "",
+                "password": null,
+                "notes": null
+            })),
+            state.clone(),
+        ) else {
+            panic!("entry command should create");
+        };
+        assert!(
+            move_entry(
+                request::<MoveEntryRequestDto>(json!({
+                    "entryId": created.created_entry_id,
+                    "destinationGroupId": destination
+                })),
+                state.clone(),
+            )
+            .is_ok()
+        );
+        assert!(delete_entry(created.created_entry_id, state.clone()).is_ok());
+
+        let Ok(group) = create_group(
+            request::<CreateGroupRequestDto>(json!({
+                "parentGroupId": root,
+                "name": "M4.3 command group"
+            })),
+            state.clone(),
+        ) else {
+            panic!("group command should create");
+        };
+        let Ok(group_destination) = create_group(
+            request::<CreateGroupRequestDto>(json!({
+                "parentGroupId": root,
+                "name": "M4.3 command destination"
+            })),
+            state.clone(),
+        ) else {
+            panic!("destination group command should create");
+        };
+        assert!(
+            rename_group(
+                request::<RenameGroupRequestDto>(json!({
+                    "groupId": group.created_group_id,
+                    "name": "M4.3 command renamed"
+                })),
+                state.clone(),
+            )
+            .is_ok()
+        );
+        assert!(
+            move_group(
+                request::<MoveGroupRequestDto>(json!({
+                    "groupId": group.created_group_id,
+                    "destinationGroupId": group_destination.created_group_id
+                })),
+                state.clone(),
+            )
+            .is_ok()
+        );
+        assert!(delete_group(group_destination.created_group_id, state.clone()).is_ok());
+
+        assert!(matches!(
+            close_policy(state.clone()),
+            Ok(ClosePolicyDto::ConfirmDiscard)
+        ));
+        assert!(tauri::async_runtime::block_on(lock_vault(state.clone())).is_err());
+        assert!(tauri::async_runtime::block_on(discard_changes_and_lock(state.clone())).is_ok());
+        assert!(matches!(close_policy(state), Ok(ClosePolicyDto::Allow)));
     }
 }

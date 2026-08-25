@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 import type { DesktopApi } from "../../lib/desktop";
 import type { EntryId, VaultSnapshotDto } from "../../types/desktop";
 import { EntryDetail } from "./EntryDetail";
+import { EntryCreateDialog } from "./EntryCreateDialog";
 import { EntryList } from "./EntryList";
+import { GroupActions } from "./GroupActions";
 import { GroupTree } from "./GroupTree";
 
 interface UnlockedViewProps {
@@ -11,7 +13,8 @@ interface UnlockedViewProps {
   snapshot: VaultSnapshotDto;
   locking: boolean;
   lockError: string | null;
-  onLock: () => Promise<void>;
+  onSnapshot: (snapshot: VaultSnapshotDto) => void;
+  onLock: () => void;
 }
 
 export function UnlockedView({
@@ -19,10 +22,12 @@ export function UnlockedView({
   snapshot,
   locking,
   lockError,
+  onSnapshot,
   onLock,
 }: UnlockedViewProps) {
   const [selectedGroupId, setSelectedGroupId] = useState(snapshot.rootGroupId);
   const [selectedEntryId, setSelectedEntryId] = useState<EntryId | null>(null);
+  const [creatingEntry, setCreatingEntry] = useState(false);
   const groupsById = useMemo(
     () => new Map(snapshot.groups.map((group) => [group.id, group])),
     [snapshot.groups],
@@ -61,13 +66,18 @@ export function UnlockedView({
           <div>
             <p className="eyebrow">Nian Pass</p>
             <h1>Vault browser</h1>
+            {snapshot.dirty ? (
+              <p className="dirty-indicator" role="status">
+                Unsaved changes
+              </p>
+            ) : null}
           </div>
         </div>
         <button
           className="secondary-button lock-button"
           type="button"
           disabled={locking}
-          onClick={() => void onLock()}
+          onClick={onLock}
         >
           {locking ? "Locking…" : "Lock"}
         </button>
@@ -76,18 +86,42 @@ export function UnlockedView({
         {lockError ?? ""}
       </p>
       <div className="vault-layout">
-        <GroupTree
-          rootGroupId={snapshot.rootGroupId}
-          groupsById={groupsById}
-          selectedGroupId={selectedGroup.id}
-          onSelect={chooseGroup}
-        />
-        <EntryList
-          group={selectedGroup}
-          entries={entries}
-          selectedEntryId={selectedEntryId}
-          onSelect={setSelectedEntryId}
-        />
+        <div className="group-pane">
+          <GroupTree
+            rootGroupId={snapshot.rootGroupId}
+            groupsById={groupsById}
+            selectedGroupId={selectedGroup.id}
+            onSelect={chooseGroup}
+          />
+          <GroupActions
+            api={api}
+            group={selectedGroup}
+            snapshot={snapshot}
+            disabled={locking}
+            onChanged={(next, nextGroupId) => {
+              setSelectedEntryId(null);
+              setSelectedGroupId(nextGroupId);
+              onSnapshot(next);
+            }}
+          />
+        </div>
+        <div className="entry-column">
+          <button
+            type="button"
+            disabled={locking}
+            onClick={() => {
+              setCreatingEntry(true);
+            }}
+          >
+            New entry
+          </button>
+          <EntryList
+            group={selectedGroup}
+            entries={entries}
+            selectedEntryId={selectedEntryId}
+            onSelect={setSelectedEntryId}
+          />
+        </div>
         {selectedEntryId === null ? (
           <aside className="detail-pane detail-empty" aria-label="Entry detail">
             Select an entry to view its safe details.
@@ -97,10 +131,34 @@ export function UnlockedView({
             key={selectedEntryId}
             api={api}
             entryId={selectedEntryId}
+            groups={snapshot.groups}
             disabled={locking}
+            onSnapshot={onSnapshot}
+            onDeleted={(next) => {
+              setSelectedEntryId(null);
+              onSnapshot(next);
+            }}
+            onMoved={(next, destination) => {
+              setSelectedGroupId(destination);
+              onSnapshot(next);
+            }}
           />
         )}
       </div>
+      {creatingEntry && !locking ? (
+        <EntryCreateDialog
+          api={api}
+          groupId={selectedGroup.id}
+          onCancel={() => {
+            setCreatingEntry(false);
+          }}
+          onCreated={(result) => {
+            setCreatingEntry(false);
+            setSelectedEntryId(result.createdEntryId);
+            onSnapshot(result.snapshot);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

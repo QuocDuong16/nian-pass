@@ -9,6 +9,10 @@
 
 use zeroize::Zeroizing;
 
+mod entry_mutation;
+
+pub use entry_mutation::{EntryUpdate, NewEntry};
+
 /// An owned secret whose backing string is zeroized when dropped.
 ///
 /// Plaintext access is deliberately explicit. This type does not implement
@@ -113,22 +117,6 @@ impl CustomFieldSummary {
     pub const fn protection(&self) -> FieldProtection {
         self.protection
     }
-}
-
-/// Input for creating one entry without exposing adapter-specific types.
-///
-/// Empty title, username, and URL values are omitted rather than materialized
-/// as empty KDBX fields. `None` omits Password, while `Some` represents an
-/// explicitly present password, including an explicitly empty one.
-pub struct NewEntry<'a> {
-    /// Entry title metadata.
-    pub title: &'a str,
-    /// Entry username metadata.
-    pub username: &'a str,
-    /// Entry URL metadata, stored without normalization.
-    pub url: &'a str,
-    /// Optional password, always protected when newly created.
-    pub password: Option<&'a SecretString>,
 }
 
 /// A read-only view containing privacy-sensitive, non-secret vault metadata.

@@ -9,7 +9,7 @@ use crate::{
         ClipboardClearStatus, ClipboardCopy, ClipboardFailure, ClipboardPort,
         DesktopClipboardService,
     },
-    dto::{EntryDetailDto, SelectedVaultDto, VaultSnapshotDto},
+    dto::{ClosePolicyDto, EntryDetailDto, SelectedVaultDto, VaultSnapshotDto},
 };
 
 /// Stable public failures. No variant carries a path, parser detail, or secret.
@@ -21,7 +21,12 @@ pub enum DesktopError {
     UnlockFailed,
     UnsupportedVault,
     EntryNotFound,
+    GroupNotFound,
+    InvalidRequest,
+    InvalidMove,
+    ReservedField,
     SecretUnavailable,
+    UnsavedChanges,
     ClipboardFailed,
     Internal,
 }
@@ -63,7 +68,7 @@ impl DesktopVaultService {
         let session = VaultSession::open(path, &credential).map_err(map_open_error)?;
         let snapshot = session
             .projection()
-            .map(|vault| VaultSnapshotDto::from_vault(&vault))
+            .map(|vault| VaultSnapshotDto::from_vault(&vault, session.is_dirty()))
             .map_err(map_open_error)?;
         self.session = Some(session);
         Ok(snapshot)
@@ -73,8 +78,12 @@ impl DesktopVaultService {
         let session = self.session.as_ref().ok_or(DesktopError::Locked)?;
         session
             .projection()
-            .map(|vault| VaultSnapshotDto::from_vault(&vault))
+            .map(|vault| VaultSnapshotDto::from_vault(&vault, session.is_dirty()))
             .map_err(|_| DesktopError::Internal)
+    }
+
+    pub(crate) fn session_mut(&mut self) -> Result<&mut VaultSession, DesktopError> {
+        self.session.as_mut().ok_or(DesktopError::Locked)
     }
 
     pub fn entry_detail(&self, entry_id: &str) -> Result<EntryDetailDto, DesktopError> {
@@ -100,6 +109,36 @@ impl DesktopVaultService {
             .ok_or(DesktopError::SecretUnavailable)
     }
 
+    pub fn entry_title(&self, entry_id: &str) -> Result<SecretString, DesktopError> {
+        let session = self.require_entry(entry_id)?;
+        session
+            .document()
+            .entry_title(&EntryId::new(entry_id))
+            .map_err(|_| DesktopError::Internal)?
+            .ok_or(DesktopError::SecretUnavailable)
+    }
+
+    pub fn entry_url(&self, entry_id: &str) -> Result<SecretString, DesktopError> {
+        let session = self.require_entry(entry_id)?;
+        session
+            .document()
+            .entry_url(&EntryId::new(entry_id))
+            .map_err(|_| DesktopError::Internal)?
+            .ok_or(DesktopError::SecretUnavailable)
+    }
+
+    pub fn entry_custom_field(
+        &self,
+        entry_id: &str,
+        name: &str,
+    ) -> Result<SecretString, DesktopError> {
+        let session = self.require_entry(entry_id)?;
+        session
+            .entry_custom_field(&EntryId::new(entry_id), name)
+            .map_err(map_mutation_error)?
+            .ok_or(DesktopError::SecretUnavailable)
+    }
+
     pub fn entry_notes(&self, entry_id: &str) -> Result<SecretString, DesktopError> {
         let session = self.require_entry(entry_id)?;
         session
@@ -119,10 +158,31 @@ impl DesktopVaultService {
     }
 
     pub fn lock(&mut self) -> Result<(), DesktopError> {
+        if self
+            .session
+            .as_ref()
+            .ok_or(DesktopError::Locked)?
+            .is_dirty()
+        {
+            return Err(DesktopError::UnsavedChanges);
+        }
+        self.discard_and_lock()
+    }
+
+    pub fn discard_and_lock(&mut self) -> Result<(), DesktopError> {
         let session = self.session.take().ok_or(DesktopError::Locked)?;
         session.lock();
         self.selected_path = None;
         Ok(())
+    }
+
+    #[must_use]
+    pub fn close_policy(&self) -> ClosePolicyDto {
+        if self.session.as_ref().is_some_and(VaultSession::is_dirty) {
+            ClosePolicyDto::ConfirmDiscard
+        } else {
+            ClosePolicyDto::Allow
+        }
     }
 
     fn require_entry(&self, entry_id: &str) -> Result<&VaultSession, DesktopError> {
@@ -167,13 +227,24 @@ impl AppState {
     }
 
     pub fn lock(&self) -> Result<ClipboardClearStatus, DesktopError> {
+        self.lock_with(DesktopVaultService::lock)
+    }
+
+    pub fn discard_changes_and_lock(&self) -> Result<ClipboardClearStatus, DesktopError> {
+        self.lock_with(DesktopVaultService::discard_and_lock)
+    }
+
+    fn lock_with(
+        &self,
+        lock: fn(&mut DesktopVaultService) -> Result<(), DesktopError>,
+    ) -> Result<ClipboardClearStatus, DesktopError> {
         let _operation = self
             .secret_operation_gate
             .lock()
             .map_err(|_| DesktopError::Internal)?;
         {
             let mut service = self.service.lock().map_err(|_| DesktopError::Internal)?;
-            service.lock()?;
+            lock(&mut service)?;
         }
         Ok(self.clipboard.clear_if_owned())
     }
@@ -194,6 +265,20 @@ impl AppState {
             read(&service, entry_id)?
         };
         self.clipboard.copy(&secret).map_err(map_clipboard_error)
+    }
+}
+
+pub(crate) fn map_mutation_error(error: SessionError) -> DesktopError {
+    if error.is_entry_not_found() {
+        DesktopError::EntryNotFound
+    } else if error.is_group_not_found() {
+        DesktopError::GroupNotFound
+    } else if error.is_invalid_group_operation() {
+        DesktopError::InvalidMove
+    } else if error.is_reserved_field() {
+        DesktopError::ReservedField
+    } else {
+        DesktopError::Internal
     }
 }
 
@@ -779,7 +864,7 @@ mod tests {
 
     fn assert_reviewed_keys(value: &Value) {
         let root = value.as_object().expect("snapshot should be an object");
-        assert_exact_keys(root, &["rootGroupId", "groups", "entries"]);
+        assert_exact_keys(root, &["dirty", "rootGroupId", "groups", "entries"]);
 
         for group in root["groups"]
             .as_array()

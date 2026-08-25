@@ -1,14 +1,19 @@
 mod clipboard;
 mod commands;
 mod dto;
+mod mutations;
 mod state;
 
 use std::sync::Arc;
 
 use clipboard::TauriClipboard;
 use commands::{
-    copy_entry_password, copy_entry_username, entry_detail, lock_vault, reveal_entry_notes,
-    reveal_entry_password, select_vault, unlock_vault, vault_snapshot,
+    close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
+    delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock, entry_detail,
+    lock_vault, move_entry, move_group, rename_group, reveal_entry_custom_field,
+    reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
+    reveal_entry_username, select_vault, set_entry_custom_field, unlock_vault, update_entry,
+    vault_snapshot,
 };
 use state::AppState;
 use tauri::{Manager, Runtime};
@@ -41,9 +46,25 @@ pub fn run() {
             entry_detail,
             reveal_entry_password,
             reveal_entry_notes,
+            reveal_entry_title,
+            reveal_entry_username,
+            reveal_entry_url,
+            reveal_entry_custom_field,
             copy_entry_username,
             copy_entry_password,
-            lock_vault
+            update_entry,
+            create_entry,
+            delete_entry,
+            move_entry,
+            create_group,
+            rename_group,
+            move_group,
+            delete_group,
+            set_entry_custom_field,
+            delete_entry_custom_field,
+            close_policy,
+            lock_vault,
+            discard_changes_and_lock
         ])
         .run(tauri::generate_context!())
         .expect("Nian Pass desktop runtime failed");

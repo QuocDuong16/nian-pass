@@ -22,7 +22,12 @@ function unlockMessage(code: DesktopErrorCode): string {
     case "already_unlocked":
       return "Lock the current vault before opening another one.";
     case "entry_not_found":
+    case "group_not_found":
+    case "invalid_request":
+    case "invalid_move":
+    case "reserved_field":
     case "secret_unavailable":
+    case "unsaved_changes":
     case "clipboard_failed":
     case "locked":
     case "no_vault_selected":

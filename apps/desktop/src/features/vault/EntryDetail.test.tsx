@@ -28,6 +28,10 @@ const detail: EntryDetailDto = {
   ],
 };
 
+const groups = [
+  { id: "group-root", name: "Root", childGroupIds: [], entryIds: ["entry-a"] },
+];
+
 function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
   return {
     selectVault: vi.fn().mockResolvedValue(null),
@@ -42,20 +46,51 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
     ),
     revealEntryPassword: vi.fn().mockResolvedValue(PASSWORD),
     revealEntryNotes: vi.fn().mockResolvedValue(NOTES),
+    revealEntryTitle: vi.fn().mockResolvedValue("Account A"),
+    revealEntryUsername: vi.fn().mockResolvedValue("protected-user"),
+    revealEntryUrl: vi.fn().mockResolvedValue("https://example.test"),
+    revealEntryCustomField: vi.fn().mockResolvedValue("custom-value"),
     copyEntryUsername: vi
       .fn()
       .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
     copyEntryPassword: vi
       .fn()
       .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    updateEntry: vi.fn().mockResolvedValue({
+      dirty: true,
+      rootGroupId: "group-root",
+      groups,
+      entries: [],
+    }),
+    createEntry: vi.fn().mockRejectedValue(new Error("unused")),
+    deleteEntry: vi.fn().mockRejectedValue(new Error("unused")),
+    moveEntry: vi.fn().mockRejectedValue(new Error("unused")),
+    createGroup: vi.fn().mockRejectedValue(new Error("unused")),
+    renameGroup: vi.fn().mockRejectedValue(new Error("unused")),
+    moveGroup: vi.fn().mockRejectedValue(new Error("unused")),
+    deleteGroup: vi.fn().mockRejectedValue(new Error("unused")),
+    setEntryCustomField: vi.fn().mockRejectedValue(new Error("unused")),
+    deleteEntryCustomField: vi.fn().mockRejectedValue(new Error("unused")),
+    closePolicy: vi.fn().mockResolvedValue({ policy: "allow" }),
     lockVault: vi.fn().mockResolvedValue({ clipboard: "not_owned" }),
+    discardChangesAndLock: vi
+      .fn()
+      .mockResolvedValue({ clipboard: "not_owned" }),
     ...overrides,
   };
 }
 
 async function renderReady(desktop = api(), entryId = "entry-a") {
   const view = render(
-    <EntryDetail api={desktop} entryId={entryId} disabled={false} />,
+    <EntryDetail
+      api={desktop}
+      entryId={entryId}
+      groups={groups}
+      disabled={false}
+      onSnapshot={vi.fn()}
+      onDeleted={vi.fn()}
+      onMoved={vi.fn()}
+    />,
   );
   await screen.findByRole("heading", { name: `Account ${entryId}` });
   return { desktop, ...view };
@@ -133,7 +168,17 @@ test("late reveal for entry A never appears after selection changes to B", async
   });
   const { rerender } = await renderReady(desktop, "entry-a");
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
-  rerender(<EntryDetail api={desktop} entryId="entry-b" disabled={false} />);
+  rerender(
+    <EntryDetail
+      api={desktop}
+      entryId="entry-b"
+      groups={groups}
+      disabled={false}
+      onSnapshot={vi.fn()}
+      onDeleted={vi.fn()}
+      onMoved={vi.fn()}
+    />,
+  );
   await screen.findByRole("heading", { name: "Account entry-b" });
   await act(async () => {
     resolvePassword(PASSWORD);
@@ -148,7 +193,17 @@ test("an already revealed password clears when entry selection changes", async (
   const { rerender } = await renderReady(desktop, "entry-a");
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
   expect(await screen.findByText(PASSWORD)).toBeVisible();
-  rerender(<EntryDetail api={desktop} entryId="entry-b" disabled={false} />);
+  rerender(
+    <EntryDetail
+      api={desktop}
+      entryId="entry-b"
+      groups={groups}
+      disabled={false}
+      onSnapshot={vi.fn()}
+      onDeleted={vi.fn()}
+      onMoved={vi.fn()}
+    />,
+  );
   expect(screen.queryByText(PASSWORD)).not.toBeInTheDocument();
   await screen.findByRole("heading", { name: "Account entry-b" });
   expect(screen.getByText("••••••••")).toBeVisible();
@@ -230,10 +285,46 @@ test("disabling for Lock clears a pending reveal and blocks late completion", as
   });
   const { rerender } = await renderReady(desktop);
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
-  rerender(<EntryDetail api={desktop} entryId="entry-a" disabled />);
+  rerender(
+    <EntryDetail
+      api={desktop}
+      entryId="entry-a"
+      groups={groups}
+      disabled
+      onSnapshot={vi.fn()}
+      onDeleted={vi.fn()}
+      onMoved={vi.fn()}
+    />,
+  );
   await act(async () => {
     resolvePassword(PASSWORD);
     await pending;
   });
   expect(screen.queryByText(PASSWORD)).not.toBeInTheDocument();
+});
+
+test("detail load failure is generic and edit Cancel returns to read-only mode", async () => {
+  const failed = api({
+    getEntryDetail: vi.fn().mockRejectedValue(new Error(PASSWORD)),
+  });
+  render(
+    <EntryDetail
+      api={failed}
+      entryId="entry-a"
+      groups={groups}
+      disabled={false}
+      onSnapshot={vi.fn()}
+      onDeleted={vi.fn()}
+      onMoved={vi.fn()}
+    />,
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Could not load this entry",
+  );
+  cleanup();
+
+  await renderReady();
+  fireEvent.click(screen.getByRole("button", { name: "Edit entry" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Edit entry" })).toBeVisible();
 });

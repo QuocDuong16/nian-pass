@@ -4,12 +4,22 @@ use vault_core::{EntryId, SecretString};
 use crate::{KdbxDocument, KdbxError};
 
 impl KdbxDocument {
+    /// Fetches one entry title explicitly, including protected titles.
+    pub fn entry_title(&self, id: &EntryId) -> Result<Option<SecretString>, KdbxError> {
+        self.entry_secret(id, fields::TITLE)
+    }
+
     /// Fetches one entry username by stable identifier as a secret-bearing value.
     ///
     /// This narrow read handles visible and protected storage identically without
     /// adding plaintext to the bulk projection. Missing and empty stay distinct.
     pub fn entry_username(&self, id: &EntryId) -> Result<Option<SecretString>, KdbxError> {
         self.entry_secret(id, fields::USERNAME)
+    }
+
+    /// Fetches one entry URL explicitly, including protected URLs.
+    pub fn entry_url(&self, id: &EntryId) -> Result<Option<SecretString>, KdbxError> {
+        self.entry_secret(id, fields::URL)
     }
 
     /// Fetches one entry password by stable identifier.

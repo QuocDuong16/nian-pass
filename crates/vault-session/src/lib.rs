@@ -4,6 +4,7 @@
 //! `keepass-rs` types and never retains the master password.
 
 mod fingerprint;
+mod mutations;
 mod platform;
 
 use std::{
@@ -33,7 +34,6 @@ pub struct VaultSession {
 
 impl VaultSession {
     /// Opens an existing regular vault file into a stable unlocked session.
-    ///
     /// Final-component symlinks and non-regular files are rejected. The file is
     /// fingerprinted before and after parsing through one handle, and the path
     /// is fingerprinted once more, so an unstable source cannot seed a session.
@@ -73,7 +73,7 @@ impl VaultSession {
         &self.document
     }
 
-    /// Mutably borrows the document. Every public mutation maintains revision.
+    /// Mutably borrows the document; public mutations maintain revision.
     #[must_use]
     pub const fn document_mut(&mut self) -> &mut KdbxDocument {
         &mut self.document

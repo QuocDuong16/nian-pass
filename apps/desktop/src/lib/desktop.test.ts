@@ -9,6 +9,9 @@ import {
   parseSecretString,
 } from "./entry-validation";
 import {
+  parseClosePolicy,
+  parseCreatedEntry,
+  parseCreatedGroup,
   parseDesktopErrorCode,
   parseSelectedVault,
   parseSummaryText,
@@ -27,6 +30,15 @@ test("committed Rust contract fixture passes runtime validation", () => {
     contract.selectedVault,
   );
   expect(parseVaultSnapshot(contract.snapshot)).toEqual(contract.snapshot);
+  expect(parseCreatedEntry(contract.createdEntry)).toEqual(
+    contract.createdEntry,
+  );
+  expect(parseCreatedGroup(contract.createdGroup)).toEqual(
+    contract.createdGroup,
+  );
+  expect(contract.closePolicies.map(parseClosePolicy)).toEqual(
+    contract.closePolicies,
+  );
   expect(parseEntryDetail(contract.entryDetail)).toEqual(contract.entryDetail);
   expect(parseClipboardReceipt(contract.clipboardReceipt)).toEqual(
     contract.clipboardReceipt,
@@ -162,6 +174,108 @@ test("snapshot relation mismatches fail closed", () => {
   if (entry === undefined) throw new Error("contract fixture entry is missing");
   entry.groupId = "group-other";
   expect(() => parseVaultSnapshot(wrongGroup)).toThrow(
+    /invalid desktop contract/,
+  );
+});
+
+test("M4.3 semantic commands validate every secret-free mutation response", async () => {
+  invoke.mockImplementation((command: string) => {
+    if (command === "create_entry")
+      return Promise.resolve(contract.createdEntry);
+    if (command === "create_group")
+      return Promise.resolve(contract.createdGroup);
+    if (command === "close_policy")
+      return Promise.resolve(contract.closePolicies[1]);
+    if (command === "discard_changes_and_lock") {
+      return Promise.resolve(contract.lockResults[1]);
+    }
+    if (command.startsWith("reveal_entry_"))
+      return Promise.resolve("synthetic-value");
+    return Promise.resolve(contract.snapshot);
+  });
+
+  await expect(
+    desktopApi.updateEntry({
+      entryId: "entry-example",
+      title: "Updated",
+      password: "M4.3-SYNTHETIC-PASSWORD",
+    }),
+  ).resolves.toEqual(contract.snapshot);
+  await expect(
+    desktopApi.createEntry({
+      groupId: "group-root",
+      title: "Created",
+      username: "",
+      url: "",
+      password: null,
+      notes: null,
+    }),
+  ).resolves.toEqual(contract.createdEntry);
+  await expect(desktopApi.deleteEntry("entry-example")).resolves.toEqual(
+    contract.snapshot,
+  );
+  await expect(
+    desktopApi.moveEntry("entry-example", "group-root"),
+  ).resolves.toEqual(contract.snapshot);
+  await expect(desktopApi.createGroup("group-root", "Child")).resolves.toEqual(
+    contract.createdGroup,
+  );
+  await expect(
+    desktopApi.renameGroup("group-root", "Renamed"),
+  ).resolves.toEqual(contract.snapshot);
+  await expect(desktopApi.moveGroup("group-a", "group-root")).resolves.toEqual(
+    contract.snapshot,
+  );
+  await expect(desktopApi.deleteGroup("group-a")).resolves.toEqual(
+    contract.snapshot,
+  );
+  await expect(
+    desktopApi.setEntryCustomField({
+      entryId: "entry-example",
+      name: "Synthetic",
+      value: "M4.3-SYNTHETIC-CUSTOM",
+      protection: "protected",
+    }),
+  ).resolves.toEqual(contract.snapshot);
+  await expect(
+    desktopApi.deleteEntryCustomField("entry-example", "Synthetic"),
+  ).resolves.toEqual(contract.snapshot);
+  await expect(desktopApi.closePolicy()).resolves.toEqual(
+    contract.closePolicies[1],
+  );
+  await expect(desktopApi.discardChangesAndLock()).resolves.toEqual(
+    contract.lockResults[1],
+  );
+  await expect(desktopApi.revealEntryTitle("entry-example")).resolves.toBe(
+    "synthetic-value",
+  );
+  await expect(desktopApi.revealEntryUsername("entry-example")).resolves.toBe(
+    "synthetic-value",
+  );
+  await expect(desktopApi.revealEntryUrl("entry-example")).resolves.toBe(
+    "synthetic-value",
+  );
+  await expect(
+    desktopApi.revealEntryCustomField("entry-example", "Synthetic"),
+  ).resolves.toBe("synthetic-value");
+
+  expect(invoke).toHaveBeenCalledWith("update_entry", {
+    request: {
+      entryId: "entry-example",
+      title: "Updated",
+      password: "M4.3-SYNTHETIC-PASSWORD",
+    },
+  });
+});
+
+test("M4.3 response validators reject expansion and malformed dirty state", () => {
+  expect(() =>
+    parseCreatedEntry({ ...contract.createdEntry, password: "must-not-cross" }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseVaultSnapshot({ ...contract.snapshot, dirty: "yes" }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() => parseClosePolicy({ policy: "save_then_close" })).toThrow(
     /invalid desktop contract/,
   );
 });

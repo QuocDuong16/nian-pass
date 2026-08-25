@@ -165,6 +165,12 @@ fields so future DTO drift cannot silently expose a secret-bearing addition.
 Full type generation is deferred until a maintained generator reduces risk
 without placing export derives on core secret-bearing types.
 
+M4.3 extends that fixture only with secret-free `dirty`, creation receipts, and
+close-policy samples. Password, notes, and custom-field request plaintext is
+tested separately with synthetic values and is never committed to the shared
+contract fixture. Every mutation response passes the same exact-key snapshot or
+creation-receipt validators before replacing React state.
+
 Files under `openwiki/` are generated navigation material, not the source of
 truth for M4.Q policy. Update source code, README, and `docs/`; let the scheduled
 OpenWiki workflow regenerate its pages. Do not hand-edit generated OpenWiki

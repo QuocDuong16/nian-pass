@@ -14,6 +14,7 @@ import type { EntryDetailDto, VaultSnapshotDto } from "./types/desktop";
 afterEach(cleanup);
 
 const snapshot: VaultSnapshotDto = {
+  dirty: false,
   rootGroupId: "group-root",
   groups: [
     {
@@ -80,13 +81,37 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
     ),
     revealEntryPassword: vi.fn().mockResolvedValue("synthetic-password-M4.2"),
     revealEntryNotes: vi.fn().mockResolvedValue("synthetic-notes-M4.2"),
+    revealEntryTitle: vi.fn().mockResolvedValue("Example Account"),
+    revealEntryUsername: vi.fn().mockResolvedValue("user@example.com"),
+    revealEntryUrl: vi.fn().mockResolvedValue("https://example.com"),
+    revealEntryCustomField: vi.fn().mockResolvedValue("synthetic-custom"),
     copyEntryUsername: vi
       .fn()
       .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
     copyEntryPassword: vi
       .fn()
       .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    updateEntry: vi.fn().mockResolvedValue(snapshot),
+    createEntry: vi.fn().mockResolvedValue({
+      createdEntryId: "entry-created",
+      snapshot,
+    }),
+    deleteEntry: vi.fn().mockResolvedValue(snapshot),
+    moveEntry: vi.fn().mockResolvedValue(snapshot),
+    createGroup: vi.fn().mockResolvedValue({
+      createdGroupId: "group-created",
+      snapshot,
+    }),
+    renameGroup: vi.fn().mockResolvedValue(snapshot),
+    moveGroup: vi.fn().mockResolvedValue(snapshot),
+    deleteGroup: vi.fn().mockResolvedValue(snapshot),
+    setEntryCustomField: vi.fn().mockResolvedValue(snapshot),
+    deleteEntryCustomField: vi.fn().mockResolvedValue(snapshot),
+    closePolicy: vi.fn().mockResolvedValue({ policy: "allow" }),
     lockVault: vi.fn().mockResolvedValue({ clipboard: "not_owned" }),
+    discardChangesAndLock: vi
+      .fn()
+      .mockResolvedValue({ clipboard: "not_owned" }),
     ...overrides,
   };
 }
@@ -247,7 +272,7 @@ test("lock failure keeps presentation state and renders only safe guidance", asy
 
   expect(
     await screen.findByText(
-      "Nian Pass could not lock the vault. Close the application to drop the session.",
+      "Nian Pass could not lock the vault. The unlocked session remains active.",
     ),
   ).toBeVisible();
   expect(screen.getByText("Example Account")).toBeVisible();

@@ -1,17 +1,25 @@
 import { useEffect, useState } from "react";
 
 import type { DesktopApi } from "../../lib/desktop";
-import type { EntryDetailDto, EntryId } from "../../types/desktop";
-import { Summary } from "./summary";
-import { useSecretReveal } from "./useSecretReveal";
+import type {
+  EntryDetailDto,
+  EntryId,
+  GroupDto,
+  GroupId,
+  VaultSnapshotDto,
+} from "../../types/desktop";
+import { EntryEditForm } from "./EntryEditForm";
+import { EntryReadView } from "./EntryReadView";
 
 interface EntryDetailProps {
   api: DesktopApi;
   entryId: EntryId;
+  groups: GroupDto[];
   disabled: boolean;
+  onSnapshot: (snapshot: VaultSnapshotDto) => void;
+  onDeleted: (snapshot: VaultSnapshotDto) => void;
+  onMoved: (snapshot: VaultSnapshotDto, destination: GroupId) => void;
 }
-
-type CopyTarget = "username" | "password";
 
 export function EntryDetail(props: EntryDetailProps) {
   return (
@@ -22,21 +30,19 @@ export function EntryDetail(props: EntryDetailProps) {
   );
 }
 
-function EntryDetailContent({ api, entryId, disabled }: EntryDetailProps) {
+function EntryDetailContent({
+  api,
+  entryId,
+  groups,
+  disabled,
+  onSnapshot,
+  onDeleted,
+  onMoved,
+}: EntryDetailProps) {
   const [detail, setDetail] = useState<EntryDetailDto | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
-  const [copying, setCopying] = useState<CopyTarget | null>(null);
-  const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const password = useSecretReveal({
-    entryId,
-    disabled,
-    load: api.revealEntryPassword,
-  });
-  const notes = useSecretReveal({
-    entryId,
-    disabled,
-    load: api.revealEntryNotes,
-  });
+  const [editing, setEditing] = useState(false);
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -51,34 +57,14 @@ function EntryDetailContent({ api, entryId, disabled }: EntryDetailProps) {
     return () => {
       active = false;
     };
-  }, [api, entryId]);
+  }, [api, entryId, refresh]);
 
-  useEffect(() => {
-    if (copyStatus === null) return;
-    const timer = setTimeout(() => {
-      setCopyStatus(null);
-    }, 4_000);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [copyStatus]);
-  const copy = async (target: CopyTarget) => {
-    if (disabled || copying !== null) return;
-    setCopying(target);
-    setCopyStatus(null);
-    try {
-      const receipt =
-        target === "password"
-          ? await api.copyEntryPassword(entryId)
-          : await api.copyEntryUsername(entryId);
-      setCopyStatus(
-        `Copied. Clipboard clears in ${String(receipt.expiresInMs / 1000)}s if unchanged.`,
-      );
-    } catch {
-      setCopyStatus("Could not copy to the clipboard.");
-    } finally {
-      setCopying(null);
-    }
+  const changed = (snapshot: VaultSnapshotDto) => {
+    onSnapshot(snapshot);
+    setEditing(false);
+    setDetail(null);
+    setDetailFailed(false);
+    setRefresh((value) => value + 1);
   };
 
   if (detailFailed) {
@@ -99,151 +85,36 @@ function EntryDetailContent({ api, entryId, disabled }: EntryDetailProps) {
   }
 
   return (
-    <aside className="detail-pane" aria-labelledby="entry-detail-title">
-      <p className="eyebrow">Entry detail</p>
-      <h2 id="entry-detail-title">
-        <Summary
-          value={detail.title}
-          missingLabel="Untitled entry"
-          emptyLabel="Empty title"
-        />
-      </h2>
-
-      <section className="detail-field" aria-labelledby="username-label">
-        <h3 id="username-label">Username</h3>
-        <div className="detail-value-row">
-          <span className="detail-value">
-            <Summary
-              value={detail.username}
-              missingLabel="No username"
-              emptyLabel="Empty username"
-            />
-          </span>
-          <button
-            className="compact-button"
-            type="button"
-            disabled={
-              disabled || detail.username.kind === "missing" || copying !== null
-            }
-            onClick={() => void copy("username")}
-          >
-            {copying === "username" ? "Copying…" : "Copy username"}
-          </button>
-        </div>
-      </section>
-
-      <section className="detail-field" aria-labelledby="url-label">
-        <h3 id="url-label">URL</h3>
-        <div className="detail-value">
-          <Summary
-            value={detail.url}
-            missingLabel="No URL"
-            emptyLabel="Empty URL"
-          />
-        </div>
-      </section>
-
-      <section className="detail-field" aria-labelledby="password-label">
-        <h3 id="password-label">Password</h3>
-        <div className="secret-block">
-          {password.secret === null ? (
-            <span className="secret-placeholder">
-              {detail.passwordPresent ? "••••••••" : "No password"}
-            </span>
-          ) : (
-            <pre className="secret-value">{password.secret}</pre>
-          )}
-          <div className="detail-actions">
-            <button
-              className="compact-button"
-              type="button"
-              disabled={disabled || !detail.passwordPresent || password.loading}
-              onClick={() => {
-                if (password.secret === null) {
-                  void password.reveal();
-                } else {
-                  password.clear();
-                }
-              }}
-            >
-              {password.loading
-                ? "Revealing…"
-                : password.secret === null
-                  ? "Reveal password"
-                  : "Hide password"}
-            </button>
-            <button
-              className="compact-button"
-              type="button"
-              disabled={disabled || !detail.passwordPresent || copying !== null}
-              onClick={() => void copy("password")}
-            >
-              {copying === "password" ? "Copying…" : "Copy password"}
-            </button>
-          </div>
-          {password.failed ? (
-            <p className="detail-error" role="alert">
-              Could not reveal the password.
-            </p>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="detail-field" aria-labelledby="notes-label">
-        <h3 id="notes-label">Notes</h3>
-        {notes.secret === null ? (
-          <p className="notes-presence">
-            {detail.notesPresent ? "Notes present" : "No notes"}
-          </p>
-        ) : (
-          <pre className="notes-value">{notes.secret}</pre>
-        )}
-        <button
-          className="compact-button"
-          type="button"
-          disabled={disabled || !detail.notesPresent || notes.loading}
-          onClick={() => {
-            if (notes.secret === null) {
-              void notes.reveal();
-            } else {
-              notes.clear();
-            }
+    <aside className="detail-pane" aria-label="Entry detail">
+      {editing ? (
+        <EntryEditForm
+          api={api}
+          detail={detail}
+          disabled={disabled}
+          onApplied={changed}
+          onCancel={() => {
+            setEditing(false);
           }}
-        >
-          {notes.loading
-            ? "Revealing…"
-            : notes.secret === null
-              ? "Reveal notes"
-              : "Hide notes"}
-        </button>
-        {notes.failed ? (
-          <p className="detail-error" role="alert">
-            Could not reveal notes.
-          </p>
-        ) : null}
-      </section>
-
-      {detail.customFields.length > 0 ? (
-        <section className="detail-field" aria-labelledby="custom-fields-label">
-          <h3 id="custom-fields-label">Custom fields</h3>
-          <ul className="custom-field-list">
-            {detail.customFields.map((field) => (
-              <li key={`${field.name}:${field.protection}`}>
-                <span>{field.name}</span>
-                <span>
-                  {field.protection === "protected"
-                    ? "Protected"
-                    : "Unprotected"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <p className="copy-status" aria-live="polite">
-        {copyStatus ?? ""}
-      </p>
+        />
+      ) : (
+        <EntryReadView
+          api={api}
+          detail={detail}
+          groups={groups}
+          disabled={disabled}
+          onEdit={() => {
+            setEditing(true);
+          }}
+          onSnapshot={changed}
+          onDeleted={onDeleted}
+          onMoved={(snapshot, destination) => {
+            onMoved(snapshot, destination);
+            setDetail(null);
+            setDetailFailed(false);
+            setRefresh((value) => value + 1);
+          }}
+        />
+      )}
     </aside>
   );
 }

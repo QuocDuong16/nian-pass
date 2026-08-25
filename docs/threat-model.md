@@ -100,6 +100,12 @@ information to an attacker even when their plaintext remains unavailable.
 - Render failures producing a blank screen or exposing raw exception text
 - A copy-versus-Lock race writing a vault secret after Lock completes
 - External clipboard replacement between ownership verification and clear
+- Secret-bearing edit drafts lingering in the WebView
+- Partial multi-field edits or multiple history snapshots for one Apply
+- Dirty in-memory edits silently discarded by Lock or window close
+- Mutation-versus-Lock races and stale selected IDs after structural changes
+- Protected custom fields accidentally downgraded during value updates
+- Mutation responses returning passwords, notes, or custom-field values
 
 ## M4.Q desktop and repository controls
 
@@ -126,6 +132,30 @@ Rust advisory, license, source, duplicate-version, and unused-dependency policy
 is machine checked. npm production dependencies are audited separately from
 dev-only tooling. Coverage is a regression guard, not proof of security; exact
 DTO whitelist and state-transition assertions remain required.
+
+## M4.3 mutation controls
+
+Desktop mutation commands accept stable IDs and semantic request types only.
+One atomic entry update prevalidates before a single tracked edit, so failure
+cannot leave a partially updated entry and one Apply produces one history
+snapshot/revision. Fresh secret-free snapshots replace React state after Rust
+success; no optimistic tree mutation occurs. Existing custom fields preserve
+their protection state, new custom fields default protected in the UI, and the
+adapter remains authoritative for reserved names.
+
+Password editing never preloads the existing password. Notes, custom values,
+and protected metadata require explicit narrow loads. Drafts are component-local
+and clear on Apply, Cancel, failure, navigation, Lock, and unmount; browser
+persistence and logging remain forbidden. Mutation receipts and bulk/detail
+DTOs carry no password, notes, or custom value.
+
+Rust is authoritative for dirty state. Plain Lock refuses dirty sessions and
+does not drop them; explicit discard-lock shares the Copy/Lock lifecycle gate,
+drops the session before best-effort clipboard cleanup, and never saves. Window
+close calls a testable Rust policy and is prevented for dirty sessions until
+explicit discard. Permanent entry and recursive group deletion use explicit
+warnings and remain tombstone-based, not recycle-bin operations. Service tests
+verify mutation/discard leaves the immutable source fixture byte-identical.
 
 ## Security assumptions
 

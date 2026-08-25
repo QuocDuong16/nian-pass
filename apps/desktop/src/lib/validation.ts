@@ -1,4 +1,7 @@
 import type {
+  ClosePolicyDto,
+  CreatedEntryDto,
+  CreatedGroupDto,
   DesktopErrorCode,
   EntrySummaryDto,
   GroupDto,
@@ -53,7 +56,12 @@ export function parseDesktopErrorCode(value: unknown): DesktopErrorCode {
     case "unlock_failed":
     case "unsupported_vault":
     case "entry_not_found":
+    case "group_not_found":
+    case "invalid_request":
+    case "invalid_move":
+    case "reserved_field":
     case "secret_unavailable":
+    case "unsaved_changes":
     case "clipboard_failed":
     case "internal":
       return value;
@@ -181,15 +189,44 @@ function validateRelations(snapshot: VaultSnapshotDto): void {
 }
 
 export function parseVaultSnapshot(value: unknown): VaultSnapshotDto {
-  const object = record(value, ["rootGroupId", "groups", "entries"]);
-  if (!Array.isArray(object["groups"]) || !Array.isArray(object["entries"])) {
+  const object = record(value, ["dirty", "rootGroupId", "groups", "entries"]);
+  if (
+    typeof object["dirty"] !== "boolean" ||
+    !Array.isArray(object["groups"]) ||
+    !Array.isArray(object["entries"])
+  ) {
     return invalidContract();
   }
   const snapshot: VaultSnapshotDto = {
+    dirty: object["dirty"],
     rootGroupId: nonEmptyString(object["rootGroupId"]),
     groups: object["groups"].map(parseGroup),
     entries: object["entries"].map(parseEntry),
   };
   validateRelations(snapshot);
   return snapshot;
+}
+
+export function parseCreatedEntry(value: unknown): CreatedEntryDto {
+  const object = record(value, ["createdEntryId", "snapshot"]);
+  return {
+    createdEntryId: nonEmptyString(object["createdEntryId"]),
+    snapshot: parseVaultSnapshot(object["snapshot"]),
+  };
+}
+
+export function parseCreatedGroup(value: unknown): CreatedGroupDto {
+  const object = record(value, ["createdGroupId", "snapshot"]);
+  return {
+    createdGroupId: nonEmptyString(object["createdGroupId"]),
+    snapshot: parseVaultSnapshot(object["snapshot"]),
+  };
+}
+
+export function parseClosePolicy(value: unknown): ClosePolicyDto {
+  const object = record(value, ["policy"]);
+  if (object["policy"] !== "allow" && object["policy"] !== "confirm_discard") {
+    return invalidContract();
+  }
+  return { policy: object["policy"] };
 }
