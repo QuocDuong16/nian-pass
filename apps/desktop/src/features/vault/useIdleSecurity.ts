@@ -35,6 +35,7 @@ export function useIdleSecurity({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityAt = useRef(0);
   const handled = useRef(false);
+  const wasUnlocked = useRef(false);
   const options = useRef({ unlocked, timeoutMs, blocked, paused, onExpired });
 
   useEffect(() => {
@@ -81,16 +82,18 @@ export function useIdleSecurity({
     lastActivityAt.current = Date.now();
     handled.current = false;
     setExpiryPending(false);
-    setBackgrounded(false);
     reconcile();
   }, [reconcile]);
 
   useEffect(() => {
+    const freshUnlock = unlocked && !wasUnlocked.current;
+    wasUnlocked.current = unlocked;
     if (!unlocked) {
       clearTimer();
       handled.current = false;
       return;
     }
+    if (freshUnlock) setBackgrounded(false);
     recordActivity();
   }, [clearTimer, recordActivity, timeoutMs, unlocked]);
 

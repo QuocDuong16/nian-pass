@@ -168,6 +168,45 @@ test("blur clears reveal-only plaintext without clearing or locking the clipboar
   expect(api.discardChangesAndLock).not.toHaveBeenCalled();
 });
 
+test("Save completion while backgrounded never clears the privacy shield", async () => {
+  const harness = lifecycleHarness();
+  const pending = deferred<VaultSnapshotDto>();
+  const api = mutationApi({
+    unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
+    saveVault: vi.fn().mockReturnValue(pending.promise),
+  });
+  await unlock(api, harness.lifecycle);
+  fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await harness.focus(false);
+  expect(screen.getByText("Content hidden")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: /Account A/ }),
+  ).not.toBeInTheDocument();
+
+  await act(async () => {
+    pending.resolve(cleanSnapshot);
+    await pending.promise;
+  });
+  expect(screen.getByText("Content hidden")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: /Account A/ }),
+  ).not.toBeInTheDocument();
+  expect(api.lockVault).not.toHaveBeenCalled();
+  expect(api.discardChangesAndLock).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_000);
+  });
+  await harness.focus(true);
+  expect(screen.getByRole("button", { name: /Account A/ })).toBeVisible();
+  expect(api.lockVault).not.toHaveBeenCalled();
+});
+
 test("dirty timeout shields data and offers only explicit Save, Discard, or Continue", async () => {
   const api = mutationApi({
     unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
