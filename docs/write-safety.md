@@ -263,3 +263,13 @@ immediate physical erasure of every prior plaintext allocation.
 
 There is no Save As/export, master-password rotation, keyfile support, automatic
 backup recovery, file watcher, autosave timer, cloud merge, or background task.
+
+M4.5 inactivity handling does not alter this persistence contract. Clean idle
+state calls ordinary `lock_vault`; dirty idle state is visually shielded and
+requires explicit Save, discard, or Continue. Frontend-only drafts are not part
+of the Rust document and therefore cannot be included in Save: they must be
+returned to or explicitly discarded first. A dirty-idle shield leaves the Rust
+`VaultSession` unlocked until that decision, and no timeout path autosaves,
+force-locks, or bypasses external-change refusal. Successful explicit Save
+restarts the frontend inactivity deadline; failed, uncertain, or conflicted
+Save never proceeds to Lock.

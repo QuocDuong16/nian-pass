@@ -1,7 +1,7 @@
 import type { SaveIntent } from "./useSaveFlow";
 
 interface DirtyExitDialogProps {
-  intent: Exclude<SaveIntent, "save">;
+  intent: Extract<SaveIntent, "lock" | "close">;
   busy: boolean;
   onCancel: () => void;
   onSave: () => void;

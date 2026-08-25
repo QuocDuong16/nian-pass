@@ -4,9 +4,11 @@ import type { DesktopApi } from "../../lib/desktop";
 import type { EntryId, VaultSnapshotDto } from "../../types/desktop";
 import { EntryDetail } from "./EntryDetail";
 import { EntryCreateDialog } from "./EntryCreateDialog";
+import { AutoLockControl } from "./AutoLockControl";
 import { EntryList } from "./EntryList";
 import { GroupActions } from "./GroupActions";
 import { GroupTree } from "./GroupTree";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 interface UnlockedViewProps {
   api: DesktopApi;
@@ -17,6 +19,11 @@ interface UnlockedViewProps {
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onSave: () => void;
   onLock: () => void;
+  autoLockMs?: number | null;
+  onAutoLockChange?: (timeoutMs: number | null) => void;
+  onDraftStateChange?: (hasDraft: boolean) => void;
+  onMutationPendingChange?: (pending: boolean) => void;
+  clearRevealsVersion?: number;
 }
 
 export function UnlockedView({
@@ -28,11 +35,20 @@ export function UnlockedView({
   onSnapshot,
   onSave,
   onLock,
+  autoLockMs = 5 * 60_000,
+  onAutoLockChange,
+  onDraftStateChange,
+  onMutationPendingChange,
+  clearRevealsVersion = 0,
 }: UnlockedViewProps) {
   const [selectedGroupId, setSelectedGroupId] = useState(snapshot.rootGroupId);
   const [selectedEntryId, setSelectedEntryId] = useState<EntryId | null>(null);
   const [creatingEntry, setCreatingEntry] = useState(false);
-  const [editingEntry, setEditingEntry] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [detailDraft, setDetailDraft] = useState(false);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [groupDraft, setGroupDraft] = useState(false);
+  const [groupBusy, setGroupBusy] = useState(false);
   const groupsById = useMemo(
     () => new Map(snapshot.groups.map((group) => [group.id, group])),
     [snapshot.groups],
@@ -43,6 +59,16 @@ export function UnlockedView({
   );
   const selectedGroup =
     groupsById.get(selectedGroupId) ?? groupsById.get(snapshot.rootGroupId);
+
+  const hasDraft = creatingEntry || detailDraft || groupDraft;
+  const mutationPending = createBusy || detailBusy || groupBusy;
+
+  useSecurityFormTelemetry(
+    hasDraft,
+    mutationPending,
+    onDraftStateChange,
+    onMutationPendingChange,
+  );
 
   if (selectedGroup === undefined) {
     throw new Error("Vault snapshot has no root group");
@@ -59,11 +85,11 @@ export function UnlockedView({
     }
     setSelectedGroupId(groupId);
     setSelectedEntryId(null);
-    setEditingEntry(false);
+    setDetailDraft(false);
   };
 
   const saveUnavailable =
-    disabled || !snapshot.dirty || creatingEntry || editingEntry;
+    disabled || mutationPending || !snapshot.dirty || hasDraft;
 
   return (
     <main className="vault-shell">
@@ -83,6 +109,11 @@ export function UnlockedView({
           </div>
         </div>
         <div className="top-bar-actions">
+          <AutoLockControl
+            timeoutMs={autoLockMs}
+            disabled={disabled}
+            onChange={onAutoLockChange}
+          />
           <span className="save-status" aria-live="polite">
             {saveStatus === "saved" ? "Saved" : ""}
           </span>
@@ -91,7 +122,7 @@ export function UnlockedView({
             aria-label="Save vault"
             disabled={saveUnavailable}
             title={
-              creatingEntry || editingEntry
+              hasDraft
                 ? "Apply or cancel the current draft before saving"
                 : undefined
             }
@@ -106,7 +137,7 @@ export function UnlockedView({
           <button
             className="secondary-button lock-button"
             type="button"
-            disabled={disabled}
+            disabled={disabled || mutationPending}
             onClick={onLock}
           >
             Lock
@@ -134,6 +165,8 @@ export function UnlockedView({
               setSelectedGroupId(nextGroupId);
               onSnapshot(next);
             }}
+            onDraftChange={setGroupDraft}
+            onBusyChange={setGroupBusy}
           />
         </div>
         <div className="entry-column">
@@ -164,11 +197,13 @@ export function UnlockedView({
             entryId={selectedEntryId}
             groups={snapshot.groups}
             disabled={disabled}
-            onEditingChange={setEditingEntry}
+            onDraftChange={setDetailDraft}
+            onBusyChange={setDetailBusy}
+            clearRevealsVersion={clearRevealsVersion}
             onSnapshot={onSnapshot}
             onDeleted={(next) => {
               setSelectedEntryId(null);
-              setEditingEntry(false);
+              setDetailDraft(false);
               onSnapshot(next);
             }}
             onMoved={(next, destination) => {
@@ -190,6 +225,7 @@ export function UnlockedView({
             setSelectedEntryId(result.createdEntryId);
             onSnapshot(result.snapshot);
           }}
+          onBusyChange={setCreateBusy}
         />
       ) : null}
     </main>

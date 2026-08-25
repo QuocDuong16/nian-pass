@@ -9,6 +9,7 @@ import type {
 } from "../../types/desktop";
 import { EditableMetadataField } from "./EditableMetadataField";
 import { useSecretDraft } from "./useSecretDraft";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 interface EntryEditFormProps {
   api: DesktopApi;
@@ -16,6 +17,7 @@ interface EntryEditFormProps {
   disabled: boolean;
   onApplied: (snapshot: VaultSnapshotDto) => void;
   onCancel: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export function EntryEditForm({
@@ -24,6 +26,7 @@ export function EntryEditForm({
   disabled,
   onApplied,
   onCancel,
+  onBusyChange,
 }: EntryEditFormProps) {
   const title = useSecretDraft();
   const username = useSecretDraft();
@@ -32,6 +35,8 @@ export function EntryEditForm({
   const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [failed, setFailed] = useState(false);
+
+  useSecurityFormTelemetry(true, applying, undefined, onBusyChange);
 
   const clearSecrets = () => {
     setPasswordDraft(null);

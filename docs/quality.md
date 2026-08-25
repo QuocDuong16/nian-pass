@@ -181,6 +181,14 @@ only stable error codes. Runtime validation requires an exact-key snapshot with
 closed. Synthetic Save/reload passwords are tested only as narrow request
 arguments and never appear in the committed response fixture.
 
+M4.5 remains headless-testable. Vitest fake timers and a narrow fake window
+lifecycle drive activity, blur, focus, absolute elapsed-time reconciliation,
+clean and dirty expiry, local drafts, backend `unsaved_changes`, and
+manual-Lock/Save races without real sleeps or a GUI runtime. The production
+focus API remains confined to `src/lib/window-lifecycle.ts`; no capability or
+plugin was added. Browser storage remains forbidden, so the timeout selection
+is intentionally memory-only.
+
 Files under `openwiki/` are generated navigation material, not the source of
 truth for M4.Q policy. Update source code, README, and `docs/`; let the scheduled
 OpenWiki workflow regenerate its pages. Do not hand-edit generated OpenWiki

@@ -7,6 +7,7 @@ import type {
   GroupId,
   VaultSnapshotDto,
 } from "../../types/desktop";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 type Action = "move" | "delete";
 
@@ -17,6 +18,8 @@ interface EntryActionsProps {
   disabled: boolean;
   onMoved: (snapshot: VaultSnapshotDto, destination: GroupId) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
+  onDraftChange?: (active: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export function EntryActions({
@@ -26,11 +29,15 @@ export function EntryActions({
   disabled,
   onMoved,
   onDeleted,
+  onDraftChange,
+  onBusyChange,
 }: EntryActionsProps) {
   const [action, setAction] = useState<Action | null>(null);
   const [destination, setDestination] = useState(groups[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+
+  useSecurityFormTelemetry(action !== null, busy, onDraftChange, onBusyChange);
 
   const apply = async () => {
     if (action === null || busy) return;

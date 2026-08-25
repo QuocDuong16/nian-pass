@@ -1,7 +1,7 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M4.0 through M4.4 provide a Tauri 2 + React desktop shell
+the source of truth. M4.0 through M4.5 provide a Tauri 2 + React desktop shell
 for local open, unlock, browse, detail, explicit reveal/copy, memory-only
 mutation, explicit save/conflict/reload, and lock. M3 provides the unlocked local session and
 verified filesystem persistence beneath it. M3.5 adds provider-independent,
@@ -508,6 +508,61 @@ files. Windows rejects all dirty saves earlier with
 The pinned writer only accepts exact KDBX 4.1. The adapter therefore returns
 `UnsupportedWriteFormat` for KDBX 3.1 and 4.0 and performs no silent format,
 KDF, cipher, or compression migration.
+
+## M4.5 desktop security lifecycle
+
+M4.5 adds no Rust command or persistence path. A dedicated React idle-security
+hook owns one absolute `Date.now()` activity deadline, one timer, and listeners
+for pointer-down, keyboard, touch-start, and wheel activity while a vault is
+unlocked. It does not update React state for mouse movement or render/IPC
+activity. The default is five minutes; the fixed 1, 5, 15, and 30 minute and
+Never choices live only in application memory. Never disables inactivity Lock,
+not manual Lock or the privacy shield.
+
+```text
+genuine user activity
+  -> reset one frontend deadline/timer
+  -> clean + no local draft: ordinary lock_vault
+  -> Rust dirty: security shield -> Save and lock / Discard and lock / Continue
+  -> frontend draft: security shield -> Return / explicit draft discard
+```
+
+Tauri's public `Window.onFocusChanged` API is confined to
+`src/lib/window-lifecycle.ts`; React receives only a boolean focus event. Blur
+immediately replaces the visible vault and dialogs with a neutral screen and
+increments a reveal-cleanup generation. Password and notes reveals clear, while
+mutation drafts remain mounted but hidden. Focus removes the ordinary privacy
+shield only after comparing elapsed wall time with the absolute deadline, so a
+throttled background timer cannot grant a fresh full timeout. Losing focus does
+not count as activity; a non-expired focus return does. Blur never calls a
+clipboard command, preserving Copy -> switch application -> paste.
+
+`VaultSnapshotDto.dirty` and frontend-only draft state are intentionally
+separate. Entry create/edit, custom-field editing, entry/group operations, and
+their confirmation dialogs report draft and pending-operation state upward.
+Timeout cannot call Lock while either state could lose un-applied work. A local
+draft must be returned to or explicitly discarded; it is never auto-applied or
+included in Save. If Rust is dirty after draft resolution, the ordinary M4.4
+decision follows. Backend `unsaved_changes` from a clean-looking frontend is
+also authoritative and enters the dirty security decision without retry or
+discard.
+
+Save-and-lock uses the existing fresh-credential M4.4 flow, then ordinary Lock
+only after Rust returns a validated clean snapshot. Save failure and external
+conflict remain shielded and do not Lock or discard. Explicit discard alone
+uses `discard_changes_and_lock`. Successful explicit Save restarts inactivity;
+pending Save/reload/mutation delays expiry handling until completion. A
+synchronous frontend in-flight guard makes manual Lock and idle expiry issue at
+most one backend Lock request, while the Rust Copy/Lock gate remains the
+authoritative lifecycle boundary.
+
+The privacy shield is visual mitigation, not backend Lock and not universal
+screenshot prevention. During dirty-idle attention the Rust `VaultSession`
+remains unlocked until the user explicitly saves or discards. JavaScript
+strings cannot be deterministically zeroized, WebView timers may still be
+throttled, and endpoint malware can inspect an unlocked process. M4.5 adds no
+native screenshot FFI, plugin, capability, filesystem access, credential cache,
+browser storage, autosave, force-lock, or dirty-discard shortcut.
 
 ## Architecture Invariants
 

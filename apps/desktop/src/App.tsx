@@ -2,23 +2,29 @@ import { useEffect, useRef, useState } from "react";
 
 import { DirtyExitDialog } from "./features/vault/DirtyExitDialog";
 import { LockedView } from "./features/vault/LockedView";
+import {
+  SecurityShield,
+  type SecurityAttention,
+} from "./features/vault/SecurityShield";
 import { SaveDialogs } from "./features/vault/SaveDialogs";
 import { UnlockedView } from "./features/vault/UnlockedView";
-import { type SaveIntent, useSaveFlow } from "./features/vault/useSaveFlow";
 import {
-  DesktopCommandError,
-  desktopApi,
-  type DesktopApi,
-} from "./lib/desktop";
+  DEFAULT_AUTO_LOCK_MS,
+  useIdleSecurity,
+} from "./features/vault/useIdleSecurity";
+import { type SaveIntent, useSaveFlow } from "./features/vault/useSaveFlow";
+import { useCloseRequest } from "./features/vault/useCloseRequest";
+import { useVaultLock } from "./features/vault/useVaultLock";
+import { desktopApi, type DesktopApi } from "./lib/desktop";
 import type { DesktopWindowLifecycle } from "./lib/window-lifecycle";
-import type { LockResultDto, VaultSnapshotDto } from "./types/desktop";
+import type { VaultSnapshotDto } from "./types/desktop";
 
 interface AppProps {
   api?: DesktopApi;
   windowLifecycle?: DesktopWindowLifecycle | null;
 }
 
-type ExitIntent = Exclude<SaveIntent, "save">;
+type ExitIntent = Extract<SaveIntent, "lock" | "close">;
 
 export default function App({
   api = desktopApi,
@@ -26,60 +32,38 @@ export default function App({
 }: AppProps) {
   const [snapshot, setSnapshot] = useState<VaultSnapshotDto | null>(null);
   const [vaultViewVersion, setVaultViewVersion] = useState(0);
-  const [locking, setLocking] = useState(false);
-  const [lockError, setLockError] = useState<string | null>(null);
   const [exitIntent, setExitIntent] = useState<ExitIntent | null>(null);
-  const closeBlocked = useRef(false);
-
-  const finishLocked = (clipboard: string) => {
-    if (clipboard === "clear_failed") {
+  const [attention, setAttention] = useState<SecurityAttention | null>(null);
+  const [autoLockMs, setAutoLockMs] = useState<number | null>(
+    DEFAULT_AUTO_LOCK_MS,
+  );
+  const [hasLocalDraft, setHasLocalDraft] = useState(false);
+  const [mutationPending, setMutationPending] = useState(false);
+  const [revealClearVersion, setRevealClearVersion] = useState(0);
+  const securityActivity = useRef<() => void>(() => undefined);
+  const { locking, lockError, setLockError, performLock } = useVaultLock({
+    api,
+    windowLifecycle,
+    onLocked: (result) => {
       setLockError(
-        "Vault locked, but Nian Pass could not clear the clipboard.",
+        result.clipboard === "clear_failed"
+          ? "Vault locked, but Nian Pass could not clear the clipboard."
+          : null,
       );
-    }
-    setSnapshot(null);
-  };
-
-  const performLock = async (discard: boolean, closing: boolean) => {
-    if (locking) return;
-    closeBlocked.current = true;
-    setLocking(true);
-    setLockError(null);
-    let result: LockResultDto;
-    try {
-      result = discard
-        ? await api.discardChangesAndLock()
-        : await api.lockVault();
-    } catch (error) {
-      if (
-        !discard &&
-        error instanceof DesktopCommandError &&
-        error.code === "unsaved_changes"
-      ) {
-        setExitIntent("lock");
-      } else {
-        setLockError(
-          "Nian Pass could not lock the vault. The unlocked session remains active.",
-        );
-      }
-      setLocking(false);
-      closeBlocked.current = false;
-      return;
-    }
-
-    finishLocked(result.clipboard);
-    setExitIntent(null);
-    if (closing && windowLifecycle !== null) {
-      try {
-        await windowLifecycle.requestClose();
-      } catch {
-        setLockError("Vault locked, but Nian Pass could not close the window.");
-      }
-    }
-    setLocking(false);
-    closeBlocked.current = false;
-  };
-
+      setSnapshot(null);
+      setAttention(null);
+      setExitIntent(null);
+      setHasLocalDraft(false);
+      setMutationPending(false);
+    },
+    onUnsaved: (origin) => {
+      if (origin === "idle") setAttention({ kind: "dirty" });
+      else setExitIntent("lock");
+    },
+    onIdleFailure: () => {
+      setAttention({ kind: "lock_error" });
+    },
+  });
   const save = useSaveFlow({
     api,
     dirty: snapshot?.dirty ?? false,
@@ -89,52 +73,63 @@ export default function App({
       setSnapshot(nextSnapshot);
     },
     onSaveBegin: () => {
-      closeBlocked.current = true;
       setVaultViewVersion((value) => value + 1);
     },
     onSaved: async (intent) => {
-      if (intent !== "save") await performLock(false, intent === "close");
+      if (intent === "save") {
+        setAttention(null);
+        securityActivity.current();
+      } else {
+        await performLock(
+          false,
+          intent === "close",
+          intent === "idle_lock" ? "idle" : "manual",
+        );
+      }
     },
   });
+  const clearSavePassword = save.clearPassword;
+
+  const operationPending = locking || save.busy || mutationPending;
+  const idle = useIdleSecurity({
+    unlocked: snapshot !== null,
+    timeoutMs: autoLockMs,
+    blocked: operationPending,
+    paused: attention !== null,
+    windowLifecycle,
+    onExpired: () => {
+      setRevealClearVersion((value) => value + 1);
+      if (save.flow.kind !== "closed") save.cancel();
+      if (hasLocalDraft) setAttention({ kind: "draft", reason: "idle" });
+      else if (snapshot?.dirty === true) setAttention({ kind: "dirty" });
+      else {
+        setAttention({ kind: "locking" });
+        void performLock(false, false, "idle");
+      }
+    },
+  });
+  useEffect(() => {
+    securityActivity.current = idle.recordActivity;
+  }, [idle.recordActivity]);
 
   useEffect(() => {
-    closeBlocked.current = locking || save.flow.kind !== "closed";
-  }, [locking, save.flow.kind]);
-
-  useEffect(() => {
-    if (windowLifecycle === null) return;
-    let active = true;
-    let unlisten: (() => void) | null = null;
-    void windowLifecycle
-      .onCloseRequested(async (event) => {
-        if (closeBlocked.current) {
-          event.preventDefault();
-          return;
-        }
-        try {
-          const policy = await api.closePolicy();
-          if (policy.policy === "confirm_discard") {
-            event.preventDefault();
-            if (active) setExitIntent("close");
-          }
-        } catch {
-          event.preventDefault();
-          if (active) {
-            setLockError(
-              "Nian Pass could not verify whether it is safe to close.",
-            );
-          }
-        }
-      })
-      .then((stop) => {
-        if (active) unlisten = stop;
-        else stop();
-      });
-    return () => {
-      active = false;
-      unlisten?.();
-    };
-  }, [api, windowLifecycle]);
+    clearSavePassword();
+  }, [clearSavePassword, idle.privacyVersion]);
+  useCloseRequest({
+    api,
+    windowLifecycle,
+    blocked: locking || save.flow.kind !== "closed",
+    hasLocalDraft,
+    onDraft: () => {
+      setAttention({ kind: "draft", reason: "close" });
+    },
+    onDirty: () => {
+      setExitIntent("close");
+    },
+    onError: () => {
+      setLockError("Nian Pass could not verify whether it is safe to close.");
+    },
+  });
 
   if (snapshot === null) {
     return (
@@ -149,52 +144,103 @@ export default function App({
     );
   }
 
-  const startExitSave = () => {
-    if (exitIntent === null) return;
-    const intent = exitIntent;
-    setExitIntent(null);
-    save.start(intent);
+  const continueEditing = () => {
+    setAttention(null);
+    setLockError(null);
+    idle.recordActivity();
   };
+  const discardDraft = () => {
+    if (attention?.kind !== "draft" || operationPending) return;
+    const reason = attention.reason;
+    setVaultViewVersion((value) => value + 1);
+    setHasLocalDraft(false);
+    setAttention(null);
+    if (snapshot.dirty) {
+      if (reason === "idle") setAttention({ kind: "dirty" });
+      else setExitIntent(reason === "close" ? "close" : "lock");
+    } else {
+      void performLock(
+        false,
+        reason === "close",
+        reason === "idle" ? "idle" : "manual",
+      );
+    }
+  };
+  const shielded =
+    idle.backgrounded || attention !== null || idle.expiryPending;
 
   return (
     <>
-      <UnlockedView
-        key={vaultViewVersion}
-        api={api}
-        snapshot={snapshot}
-        disabled={locking || save.busy}
-        saveStatus={save.status}
-        lockError={lockError}
-        onSnapshot={setSnapshot}
-        onSave={() => {
-          save.start("save");
-        }}
-        onLock={() => {
-          if (snapshot.dirty) setExitIntent("lock");
-          else void performLock(false, false);
-        }}
-      />
-      {exitIntent === null ? null : (
+      <div hidden={shielded} aria-hidden={shielded}>
+        <UnlockedView
+          key={vaultViewVersion}
+          api={api}
+          snapshot={snapshot}
+          disabled={locking || save.busy}
+          saveStatus={save.status}
+          lockError={lockError}
+          autoLockMs={autoLockMs}
+          clearRevealsVersion={idle.privacyVersion + revealClearVersion}
+          onAutoLockChange={setAutoLockMs}
+          onDraftStateChange={setHasLocalDraft}
+          onMutationPendingChange={setMutationPending}
+          onSnapshot={setSnapshot}
+          onSave={() => {
+            save.start("save");
+          }}
+          onLock={() => {
+            if (mutationPending) return;
+            if (hasLocalDraft)
+              setAttention({ kind: "draft", reason: "manual" });
+            else if (snapshot.dirty) setExitIntent("lock");
+            else void performLock(false, false, "manual");
+          }}
+        />
+      </div>
+      {shielded ? (
+        <SecurityShield
+          attention={attention}
+          backgrounded={idle.backgrounded}
+          expiryPending={idle.expiryPending}
+          operationPending={operationPending}
+          onContinue={continueEditing}
+          onDiscardDraft={discardDraft}
+          onSaveAndLock={() => {
+            save.start("idle_lock");
+          }}
+          onDiscardAndLock={() => void performLock(true, false, "idle")}
+          onRetryLock={() => void performLock(false, false, "idle")}
+        />
+      ) : null}
+      {exitIntent === null || idle.backgrounded ? null : (
         <DirtyExitDialog
           intent={exitIntent}
           busy={locking}
           onCancel={() => {
             setExitIntent(null);
           }}
-          onSave={startExitSave}
-          onDiscard={() => void performLock(true, exitIntent === "close")}
+          onSave={() => {
+            const intent = exitIntent;
+            setExitIntent(null);
+            save.start(intent);
+          }}
+          onDiscard={() =>
+            void performLock(true, exitIntent === "close", "manual")
+          }
         />
       )}
-      <SaveDialogs
-        flow={save.flow}
-        password={save.password}
-        onPassword={save.setPassword}
-        onCancel={save.cancel}
-        onSave={() => void save.submitSave()}
-        onReloadChoice={save.beginReload}
-        onReloadCancel={save.cancelReload}
-        onReload={() => void save.submitReload()}
-      />
+      {idle.backgrounded ? null : (
+        <SaveDialogs
+          flow={save.flow}
+          password={save.password}
+          onPassword={save.setPassword}
+          onCancel={save.cancel}
+          onSave={() => void save.submitSave()}
+          onReloadChoice={save.beginReload}
+          onReloadCancel={save.cancelReload}
+          onReload={() => void save.submitReload()}
+        />
+      )}
     </>
   );
 }

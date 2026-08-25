@@ -220,6 +220,19 @@ textarea {
   align-items: center;
   gap: 10px;
 }
+.auto-lock-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 6px 0 0;
+  color: #587064;
+  font-size: 12px;
+}
+.auto-lock-control select {
+  width: auto;
+  min-width: 104px;
+  padding: 7px 9px;
+}
 .save-status {
   min-width: 42px;
   color: #426451;
@@ -547,6 +560,29 @@ textarea {
   padding: 24px;
   background: #fff;
   box-shadow: 0 20px 60px rgb(12 27 18 / 24%);
+}
+.security-shield {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: #eef1ee;
+}
+.security-card {
+  width: min(520px, 100%);
+  border: 1px solid #d2dbd4;
+  border-radius: 16px;
+  padding: 34px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgb(24 39 30 / 8%);
+}
+.security-card h1 {
+  margin-bottom: 12px;
+  font-size: 25px;
+}
+.security-card p {
+  color: #5c6c63;
+  line-height: 1.55;
 }
 .destructive-actions {
   flex-wrap: wrap;

@@ -117,6 +117,14 @@ information to an attacker even when their plaintext remains unavailable.
 - A window close silently terminating an active persistence transaction
 - A successful Save failing to update the source fingerprint baseline
 - A force-overwrite path bypassing external-change protection
+- An unlocked vault left visible or accessible after user inactivity
+- Revealed plaintext remaining visible after the window loses foreground focus
+- Background WebView timer throttling extending an unlocked interval
+- Idle handling silently discarding Rust dirty state or frontend-only drafts
+- A visual privacy shield being misrepresented as backend Lock or screenshot prevention
+- Blur clearing the clipboard before the user can paste into another application
+- Manual Lock and idle expiry issuing duplicate backend Lock requests
+- Auto-lock bypassing Save failure or external-conflict UX
 
 ## M4.Q desktop and repository controls
 
@@ -224,6 +232,41 @@ never automatically continues pending Lock or close. Pre-commit failures and
 ordinary external conflicts leave the local session dirty; some post-commit
 uncertainty states may already have a clean Rust session, which the frontend
 reflects only after refreshing the canonical snapshot.
+
+## M4.5 inactivity and privacy controls
+
+The inactivity manager records only genuine pointer, keyboard, touch, wheel,
+and non-expired focus-return activity. It resets one timer/ref rather than
+placing timestamps in React state, and stores the selected fixed timeout only in
+application memory. Clean timeout uses ordinary `lock_vault`, which drops the
+Rust session and reuses conditional clipboard cleanup. Never disables only
+inactivity Lock; privacy-on-blur and manual Lock remain active.
+
+Blur replaces the sensitive UI with a neutral privacy shield and clears
+reveal-only password/notes state. It deliberately does not clear the clipboard,
+because switching to a target application is the expected copy/paste flow.
+Focus restores content only if the absolute elapsed-time check is still below
+the deadline; otherwise clean state locks or dirty/draft state remains
+shielded. This mitigates throttled WebView timers but does not claim exact timer
+wakeups.
+
+Rust dirty state and frontend-only drafts are independent safety signals. A
+dirty timeout never calls `discard_changes_and_lock` automatically. It offers
+Save and lock, explicit Discard changes and lock, or Continue editing. Backend
+`unsaved_changes` overrides a stale clean frontend view and enters the same
+decision without retry. Save failure, `save_uncertain`, and external conflict
+never continue to Lock. An unfinished frontend edit cannot be saved by M4.4;
+the user must return to it or explicitly discard it before security handling
+continues. Pending mutation/Save/reload operations defer the competing Lock
+decision, and successful explicit Save establishes new user activity.
+
+The privacy shield is not called Locked. While dirty-idle attention is active,
+the decrypted Rust `VaultSession` remains unlocked until explicit Save or
+discard. The shield reduces casual window/app-switcher preview exposure but is
+not universal screenshot prevention, secure re-authentication, process-memory
+encryption, or protection against endpoint malware. M4.5 adds no unsafe native
+screenshot hooks, retained credentials, browser persistence, force-lock,
+autosave, or new Tauri permission/plugin.
 
 ## Security assumptions
 

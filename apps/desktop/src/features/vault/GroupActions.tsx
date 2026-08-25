@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { DesktopApi } from "../../lib/desktop";
 import type { GroupDto, GroupId, VaultSnapshotDto } from "../../types/desktop";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 type GroupAction = "create" | "rename" | "move" | "delete";
 
@@ -11,6 +12,8 @@ interface GroupActionsProps {
   snapshot: VaultSnapshotDto;
   disabled: boolean;
   onChanged: (snapshot: VaultSnapshotDto, selectedGroupId: GroupId) => void;
+  onDraftChange?: (active: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export function GroupActions({
@@ -19,6 +22,8 @@ export function GroupActions({
   snapshot,
   disabled,
   onChanged,
+  onDraftChange,
+  onBusyChange,
 }: GroupActionsProps) {
   const [action, setAction] = useState<GroupAction | null>(null);
   const [name, setName] = useState("");
@@ -50,6 +55,8 @@ export function GroupActions({
   const destinations = snapshot.groups.filter(
     (candidate) => !invalidDestinations.has(candidate.id),
   );
+
+  useSecurityFormTelemetry(action !== null, busy, onDraftChange, onBusyChange);
 
   const open = (next: GroupAction) => {
     setFailed(false);

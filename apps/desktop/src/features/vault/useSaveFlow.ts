@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { DesktopCommandError, type DesktopApi } from "../../lib/desktop";
 import type { VaultSnapshotDto } from "../../types/desktop";
 
-export type SaveIntent = "save" | "lock" | "close";
+export type SaveIntent = "save" | "lock" | "close" | "idle_lock";
 
 export type SaveFlowState =
   | { kind: "closed" }
@@ -55,6 +55,10 @@ export function useSaveFlow({
     setFlow({ kind: "closed" });
     setStatus("idle");
   };
+
+  const clearPassword = useCallback(() => {
+    setPassword("");
+  }, []);
 
   const submitSave = async () => {
     if (flow.kind !== "credential" || password === "") return;
@@ -148,6 +152,7 @@ export function useSaveFlow({
     busy: flow.kind === "saving" || flow.kind === "reloading",
     start,
     cancel,
+    clearPassword,
     submitSave,
     beginReload,
     cancelReload,

@@ -11,6 +11,7 @@ import { CustomFieldsEditor } from "./CustomFieldsEditor";
 import { EntryActions } from "./EntryActions";
 import { Summary } from "./summary";
 import { useSecretReveal } from "./useSecretReveal";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 interface EntryReadViewProps {
   api: DesktopApi;
@@ -21,6 +22,9 @@ interface EntryReadViewProps {
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
   onMoved: (snapshot: VaultSnapshotDto, destination: GroupId) => void;
+  onDraftChange?: (active: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
+  clearRevealsVersion?: number;
 }
 
 type CopyTarget = "username" | "password";
@@ -34,9 +38,16 @@ export function EntryReadView({
   onSnapshot,
   onDeleted,
   onMoved,
+  onDraftChange,
+  onBusyChange,
+  clearRevealsVersion = 0,
 }: EntryReadViewProps) {
   const [copying, setCopying] = useState<CopyTarget | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [customFieldDraft, setCustomFieldDraft] = useState(false);
+  const [entryActionDraft, setEntryActionDraft] = useState(false);
+  const [customFieldBusy, setCustomFieldBusy] = useState(false);
+  const [entryActionBusy, setEntryActionBusy] = useState(false);
   const password = useSecretReveal({
     entryId: detail.id,
     disabled,
@@ -47,6 +58,20 @@ export function EntryReadView({
     disabled,
     load: api.revealEntryNotes,
   });
+  const clearPassword = password.clear;
+  const clearNotes = notes.clear;
+
+  useSecurityFormTelemetry(
+    customFieldDraft || entryActionDraft,
+    customFieldBusy || entryActionBusy || copying !== null,
+    onDraftChange,
+    onBusyChange,
+  );
+
+  useEffect(() => {
+    clearPassword();
+    clearNotes();
+  }, [clearNotes, clearPassword, clearRevealsVersion]);
 
   useEffect(() => {
     if (copyStatus === null) return;
@@ -189,6 +214,8 @@ export function EntryReadView({
         fields={detail.customFields}
         disabled={disabled}
         onApplied={onSnapshot}
+        onDraftChange={setCustomFieldDraft}
+        onBusyChange={setCustomFieldBusy}
       />
       <EntryActions
         api={api}
@@ -197,6 +224,8 @@ export function EntryReadView({
         disabled={disabled}
         onDeleted={onDeleted}
         onMoved={onMoved}
+        onDraftChange={setEntryActionDraft}
+        onBusyChange={setEntryActionBusy}
       />
       <p className="copy-status" aria-live="polite">
         {copyStatus ?? ""}

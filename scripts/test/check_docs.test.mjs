@@ -18,10 +18,11 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M4.4 — Desktop Save / External Modification / Conflict UX\nExplicit Save. " +
+    "M4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
-      "The active clipboard clears only if it still contains the value written by Nian Pass.\n",
+      "The active clipboard clears only if it still contains the value written by Nian Pass. " +
+      "The timeout is application-memory only. The privacy shield is not universal screenshot prevention.\n",
   );
   write(
     root,
@@ -31,7 +32,8 @@ function fixture(t) {
   write(
     root,
     "docs/threat-model.md",
-    "Compromised supply-chain dependencies. OS clipboard history may retain data.\n",
+    "Compromised supply-chain dependencies. OS clipboard history may retain data. " +
+      "A dirty timeout never performs discard without explicit user intent.\n",
   );
   write(root, "docs/write-safety.md", "Windows persistence is unsupported and fails closed.\n");
   write(

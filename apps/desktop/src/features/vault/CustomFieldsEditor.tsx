@@ -6,7 +6,13 @@ import type {
   EntryId,
   VaultSnapshotDto,
 } from "../../types/desktop";
+import {
+  fieldActionLabel,
+  fieldLabel,
+  requireLoaded,
+} from "./custom-field-labels";
 import { useSecretDraft } from "./useSecretDraft";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 type FieldAction =
   | { kind: "add" }
@@ -19,18 +25,8 @@ interface CustomFieldsEditorProps {
   fields: CustomFieldSummaryDto[];
   disabled: boolean;
   onApplied: (snapshot: VaultSnapshotDto) => void;
-}
-
-function fieldLabel(name: string): string {
-  return name.trim() === "" ? "Unnamed custom field" : name;
-}
-function fieldActionLabel(action: "Edit" | "Delete", name: string): string {
-  return `${action} ${name.trim() === "" ? "unnamed custom field" : name}`;
-}
-
-function requireLoaded(value: string | null): string {
-  if (value === null) throw new Error("Custom field value was not loaded");
-  return value;
+  onDraftChange?: (active: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export function CustomFieldsEditor({
@@ -39,6 +35,8 @@ export function CustomFieldsEditor({
   fields,
   disabled,
   onApplied,
+  onDraftChange,
+  onBusyChange,
 }: CustomFieldsEditorProps) {
   const [action, setAction] = useState<FieldAction | null>(null);
   const [name, setName] = useState("");
@@ -49,6 +47,8 @@ export function CustomFieldsEditor({
   const [failed, setFailed] = useState(false);
   const value = useSecretDraft();
   const loadValue = value.load;
+
+  useSecurityFormTelemetry(action !== null, busy, onDraftChange, onBusyChange);
 
   const loadExistingValue = useCallback(
     (field: CustomFieldSummaryDto) =>

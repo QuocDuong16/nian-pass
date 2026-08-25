@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 
 import type { DesktopApi } from "../../lib/desktop";
 import type { CreatedEntryDto, GroupId } from "../../types/desktop";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 interface EntryCreateDialogProps {
   api: DesktopApi;
   groupId: GroupId;
   onCreated: (result: CreatedEntryDto) => void;
   onCancel: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export function EntryCreateDialog({
@@ -15,6 +17,7 @@ export function EntryCreateDialog({
   groupId,
   onCreated,
   onCancel,
+  onBusyChange,
 }: EntryCreateDialogProps) {
   const [title, setTitle] = useState("");
   const [username, setUsername] = useState("");
@@ -30,6 +33,8 @@ export function EntryCreateDialog({
   };
 
   useEffect(() => clearSecrets, []);
+
+  useSecurityFormTelemetry(true, busy, undefined, onBusyChange);
 
   const cancel = () => {
     clearSecrets();

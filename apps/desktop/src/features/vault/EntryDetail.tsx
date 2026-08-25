@@ -10,6 +10,7 @@ import type {
 } from "../../types/desktop";
 import { EntryEditForm } from "./EntryEditForm";
 import { EntryReadView } from "./EntryReadView";
+import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 interface EntryDetailProps {
   api: DesktopApi;
@@ -20,6 +21,9 @@ interface EntryDetailProps {
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
   onMoved: (snapshot: VaultSnapshotDto, destination: GroupId) => void;
+  onDraftChange?: (active: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
+  clearRevealsVersion?: number;
 }
 
 export function EntryDetail(props: EntryDetailProps) {
@@ -40,11 +44,24 @@ function EntryDetailContent({
   onSnapshot,
   onDeleted,
   onMoved,
+  onDraftChange,
+  onBusyChange,
+  clearRevealsVersion = 0,
 }: EntryDetailProps) {
   const [detail, setDetail] = useState<EntryDetailDto | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [readDraft, setReadDraft] = useState(false);
+  const [readBusy, setReadBusy] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+
+  useSecurityFormTelemetry(
+    editing || readDraft,
+    editBusy || readBusy,
+    onDraftChange,
+    onBusyChange,
+  );
 
   useEffect(
     () => () => {
@@ -106,6 +123,7 @@ function EntryDetailContent({
             setEditing(false);
             onEditingChange?.(false);
           }}
+          onBusyChange={setEditBusy}
         />
       ) : (
         <EntryReadView
@@ -125,6 +143,9 @@ function EntryDetailContent({
             setDetailFailed(false);
             setRefresh((value) => value + 1);
           }}
+          onDraftChange={setReadDraft}
+          onBusyChange={setReadBusy}
+          clearRevealsVersion={clearRevealsVersion}
         />
       )}
     </aside>

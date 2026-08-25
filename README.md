@@ -19,23 +19,25 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M4.4 — Desktop Save / External Modification / Conflict UX
+M4.5 — Desktop Security UX
 
-M4.4 connects the desktop's explicit Save action to the existing M3
-`VaultSession::save` transaction. A dirty vault requests the master password
-for that attempt, detects a changed or missing pre-commit source through the M3
-encrypted fingerprint baseline, refuses overwrite, and retains the dirty
-in-memory session. Post-commit final-state uncertainty refreshes the canonical
-Rust snapshot without continuing a pending Lock or close. Explicit destructive
-reload opens and projects a candidate session
-before replacing the local session, so a wrong password or corrupt external
-file cannot destroy local edits. M4.Q remains complete: the root
+M4.5 makes the experimental Desktop MVP feature-complete by composing explicit
+auto-lock, a background privacy shield, dirty-idle decisions, local-draft
+safety, and the existing M4.4 Save/conflict flow without silent data loss. The
+default inactivity timeout is five minutes; 1, 5, 15, and 30 minutes plus
+Never are available. This preference is application-memory only and returns to
+the default on restart. Clean idle sessions use ordinary Rust Lock. Dirty idle
+sessions stay visually shielded until the user explicitly chooses Save and
+lock, Discard changes and lock, or Continue editing. Frontend-only edits must be
+returned to or explicitly discarded before any Lock continues. M4.Q remains
+complete: the root
 `Makefile` is still the single developer/CI interface for formatting, typed
 linting, tests, coverage and changed-line coverage, dependency policy, dead code,
 architecture/security invariants, contract drift, builds, and docs.
 
-M4.0 through M4.4 are the current desktop functionality: Shell, Unlock/Browse,
-explicit read/copy, in-memory mutation, and explicit conflict-protected Save.
+M4.0 through M4.5 are the current desktop functionality: Shell, Unlock/Browse,
+explicit read/copy, in-memory mutation, conflict-protected Save, manual Lock,
+and inactivity/background security UX.
 
 `apps/desktop` is the first visible Nian Pass application: a Tauri 2 shell with
 React, strict TypeScript, Vite, and pnpm. It selects a local `.kdbx` through a
@@ -62,10 +64,10 @@ and clear remains a narrow residual race. Clipboard history, cloud clipboard
 sync, and third-party clipboard managers may retain copies outside the process's
 control.
 
-M4.4 deliberately has no Save As, autosave, force overwrite, automatic
+M4.5 deliberately has no Save As, autosave, force overwrite, automatic
 local/external merge, recycle-bin workflow, password generator, TOTP/passkey
-editing, attachments, URL opening, search, cloud transport, auto-lock,
-biometrics, or updater. Applying a form still mutates only the unlocked
+editing, attachments, URL opening, search, cloud transport, biometrics, OS
+keychain unlock, screenshot-blocking native code, or updater. Applying a form still mutates only the unlocked
 in-memory document; only explicit Save writes. Dirty Lock and close prompts
 offer Save, discard, or Cancel, and neither Lock nor close continues after a
 failed or conflicted Save. The main-window close request is prevented while a
@@ -77,6 +79,14 @@ normal new-field form rejects blank names. Failed Notes loads remain omitted
 from entry updates. Creation receipts are accepted only when their IDs belong
 to the returned canonical snapshot.
 Nian Pass remains experimental and is not a user-ready product.
+
+The privacy shield replaces visible vault content when the window loses focus
+and clears reveal-only password/notes state, but it is visual mitigation—not a
+universal screenshot-prevention control. It does not clear the clipboard on
+blur, so Copy then switch-and-paste remains usable. If a dirty vault times out,
+the Rust `VaultSession` remains unlocked behind the shield until an explicit
+Save/discard decision. Never disables only inactivity Lock; the privacy shield
+and manual Lock remain active. Endpoint malware remains out of scope.
 
 M3.5 remains complete as the underlying conflict-safe sync engine.
 
