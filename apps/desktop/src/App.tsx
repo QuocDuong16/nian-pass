@@ -99,6 +99,7 @@ export default function App({
         error.code === "unsaved_changes"
       ) {
         setDiscardIntent("lock");
+        setLocking(false);
         return;
       }
       setLockError(

@@ -174,6 +174,41 @@ test("post-discard close failure reports the already-locked state accurately", a
 });
 
 test("backend unsaved protection opens discard UI even from a stale clean snapshot", async () => {
+  const discardChangesAndLock = vi
+    .fn()
+    .mockResolvedValue({ clipboard: "not_owned" });
+  const api = mutationApi({
+    unlockVault: vi
+      .fn()
+      .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
+    lockVault: vi
+      .fn()
+      .mockRejectedValue(new DesktopCommandError("unsaved_changes")),
+    discardChangesAndLock,
+  });
+  render(<App api={api} />);
+  await unlock();
+  fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+  expect(await screen.findByRole("dialog")).toHaveTextContent(
+    "M4.3 cannot save changes yet",
+  );
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  const discard = screen.getByRole("button", {
+    name: "Discard changes and lock",
+  });
+  expect(discard).toBeEnabled();
+  expect(api.lockVault).toHaveBeenCalledOnce();
+
+  fireEvent.click(discard);
+  await waitFor(() => {
+    expect(discardChangesAndLock).toHaveBeenCalledOnce();
+  });
+  expect(
+    await screen.findByRole("button", { name: "Choose KDBX file" }),
+  ).toBeVisible();
+});
+
+test("backend unsaved discard Cancel restores a usable stale-clean unlocked UI", async () => {
   const api = mutationApi({
     unlockVault: vi
       .fn()
@@ -185,9 +220,15 @@ test("backend unsaved protection opens discard UI even from a stale clean snapsh
   render(<App api={api} />);
   await unlock();
   fireEvent.click(screen.getByRole("button", { name: "Lock" }));
-  expect(await screen.findByRole("dialog")).toHaveTextContent(
-    "M4.3 cannot save changes yet",
-  );
+  await screen.findByRole("dialog");
+
+  const cancel = screen.getByRole("button", { name: "Cancel" });
+  expect(cancel).toBeEnabled();
+  fireEvent.click(cancel);
+
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Lock" })).toBeEnabled();
+  expect(api.discardChangesAndLock).not.toHaveBeenCalled();
 });
 
 test("close-policy failure prevents close and delayed registration is unlistened", async () => {
