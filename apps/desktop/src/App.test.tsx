@@ -69,6 +69,8 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
     selectVault: vi.fn().mockResolvedValue({ fileName: "test-vault.kdbx" }),
     unlockVault: vi.fn().mockResolvedValue(snapshot),
     getVaultSnapshot: vi.fn().mockResolvedValue(snapshot),
+    saveVault: vi.fn().mockResolvedValue(snapshot),
+    reloadVault: vi.fn().mockResolvedValue(snapshot),
     getEntryDetail: vi.fn().mockImplementation((entryId: string) =>
       Promise.resolve({
         ...detail,

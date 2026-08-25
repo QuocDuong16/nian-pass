@@ -28,6 +28,11 @@ function unlockMessage(code: DesktopErrorCode): string {
     case "reserved_field":
     case "secret_unavailable":
     case "unsaved_changes":
+    case "save_failed":
+    case "save_authentication_failed":
+    case "save_uncertain":
+    case "external_change":
+    case "reload_failed":
     case "clipboard_failed":
     case "locked":
     case "no_vault_selected":

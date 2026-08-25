@@ -200,16 +200,30 @@ power loss is uncertain; the session is clean because disk currently matches
 memory. A final-generation conflict or verification failure is also explicitly
 post-commit: no baseline is accepted and the session remains dirty/unreconciled.
 
-## Concurrency and lifecycle limitations
+## Desktop mapping and lifecycle limitations
 
-M4.3 desktop mutations are deliberately volatile. They change only the
-Rust-owned unlocked `KdbxDocument`, advance its logical revision, and surface
-`VaultSession::is_dirty` through a fresh snapshot. No M4.3 desktop command calls
-`save`, `save_to_writer`, atomic replacement, or backup code, and there is no
-autosave or save-before-lock/close behavior. Tests mutate and explicitly
-discard a session while proving the checked-in source fixture bytes remain
-identical. M4.4 will connect a reviewed desktop Save UX to the existing M3
-transaction and external-change handling.
+M4.3 mutation commands still change only the Rust-owned unlocked
+`KdbxDocument`; they never write disk. M4.4 adds one explicit `save_vault`
+boundary whose complete path is React credential dialog -> semantic IPC ->
+immediate `SecretString` -> `DesktopVaultService::save` ->
+`VaultSession::save` -> this existing M3 transaction. The Tauri crate contains
+no `fs::write`, rename, backup, temp serialization, or fingerprint
+implementation. There is no autosave, Save As, or force overwrite.
+
+The desktop service mutex serializes Save with in-memory mutations and Lock.
+Save does not acquire the separate Copy/Lock lifecycle gate, avoiding inverse
+lock order. The frontend disables mutation and Lock while Save is pending and
+prevents a native close request. Save-and-Lock and Save-and-Close call ordinary
+clean Lock only after Rust returns an exact validated clean snapshot. Any
+pre-commit failure or external conflict leaves the dirty session unlocked and
+does not close the application.
+
+When the source baseline differs, ordinary Save returns `external_change` and
+never offers an overwrite bypass. Explicit **Discard local changes and reload**
+opens and projects a candidate session before swapping it into the service;
+reload failure therefore preserves local in-memory edits. A successful reload
+is clean and establishes the candidate's current encrypted baseline. External
+divergence is detected but not automatically merged in M4.4.
 
 Fingerprint validation is optimistic external-modification detection. KeePassXC,
 OneDrive, Google Drive, Dropbox, and other writers do not honor a Nian-specific

@@ -18,7 +18,8 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M4.3 — Desktop Mutation UX\nUnsaved changes\nM4.3 is in-memory only with no filesystem Save.\n" +
+    "M4.4 — Desktop Save / External Modification / Conflict UX\nExplicit Save. " +
+      "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
       "The active clipboard clears only if it still contains the value written by Nian Pass.\n",
   );

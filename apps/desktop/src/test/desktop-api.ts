@@ -51,6 +51,10 @@ export function mutationApi(overrides: Partial<DesktopApi> = {}): DesktopApi {
       .fn()
       .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
     getVaultSnapshot: vi.fn().mockResolvedValue(mutationSnapshot),
+    saveVault: vi.fn().mockResolvedValue({ ...mutationSnapshot, dirty: false }),
+    reloadVault: vi
+      .fn()
+      .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
     getEntryDetail: vi.fn().mockResolvedValue(mutationDetail),
     revealEntryPassword: vi.fn().mockResolvedValue("old-password"),
     revealEntryNotes: vi.fn().mockResolvedValue("secret notes"),

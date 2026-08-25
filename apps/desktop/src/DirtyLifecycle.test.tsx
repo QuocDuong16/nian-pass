@@ -37,9 +37,7 @@ test("Rust dirty snapshot drives indicator and explicit discard-lock confirmatio
   expect(screen.getByText("Unsaved changes")).toBeVisible();
 
   fireEvent.click(screen.getByRole("button", { name: "Lock" }));
-  expect(screen.getByRole("dialog")).toHaveTextContent(
-    "M4.3 cannot save changes yet",
-  );
+  expect(screen.getByRole("dialog")).toHaveTextContent("Save changes");
   expect(api.lockVault).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.getByText("Unsaved changes")).toBeVisible();
@@ -121,9 +119,9 @@ test("dirty window close is prevented until explicit discard then requested agai
     await closeHandler({ preventDefault });
   });
   expect(preventDefault).toHaveBeenCalledOnce();
-  expect(screen.getByRole("dialog")).toHaveTextContent("close Nian Pass");
+  expect(screen.getByRole("dialog")).toHaveTextContent("closing Nian Pass");
   fireEvent.click(
-    screen.getByRole("button", { name: "Discard changes and lock" }),
+    screen.getByRole("button", { name: "Discard changes and close" }),
   );
   await waitFor(() => {
     expect(requestClose).toHaveBeenCalledOnce();
@@ -158,7 +156,7 @@ test("post-discard close failure reports the already-locked state accurately", a
     await closeHandler({ preventDefault: vi.fn() });
   });
   fireEvent.click(
-    screen.getByRole("button", { name: "Discard changes and lock" }),
+    screen.getByRole("button", { name: "Discard changes and close" }),
   );
   expect(
     await screen.findByText(
@@ -189,9 +187,7 @@ test("backend unsaved protection opens discard UI even from a stale clean snapsh
   render(<App api={api} />);
   await unlock();
   fireEvent.click(screen.getByRole("button", { name: "Lock" }));
-  expect(await screen.findByRole("dialog")).toHaveTextContent(
-    "M4.3 cannot save changes yet",
-  );
+  expect(await screen.findByRole("dialog")).toHaveTextContent("Save changes");
   expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
   const discard = screen.getByRole("button", {
     name: "Discard changes and lock",

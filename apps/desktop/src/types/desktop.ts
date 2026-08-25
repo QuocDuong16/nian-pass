@@ -111,5 +111,10 @@ export type DesktopErrorCode =
   | "reserved_field"
   | "secret_unavailable"
   | "unsaved_changes"
+  | "save_failed"
+  | "save_authentication_failed"
+  | "save_uncertain"
+  | "external_change"
+  | "reload_failed"
   | "clipboard_failed"
   | "internal";

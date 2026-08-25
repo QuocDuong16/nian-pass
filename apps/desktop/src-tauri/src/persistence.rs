@@ -1,0 +1,41 @@
+use tauri::State;
+use vault_core::SecretString;
+
+use crate::{
+    dto::VaultSnapshotDto,
+    errors::DesktopErrorDto,
+    state::{AppState, DesktopError},
+};
+
+pub async fn save(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    persist_with_credential(password, state, crate::state::DesktopVaultService::save).await
+}
+
+pub async fn reload(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    persist_with_credential(password, state, crate::state::DesktopVaultService::reload).await
+}
+
+async fn persist_with_credential(
+    password: String,
+    state: State<'_, AppState>,
+    operation: fn(
+        &mut crate::state::DesktopVaultService,
+        SecretString,
+    ) -> Result<VaultSnapshotDto, DesktopError>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let credential = SecretString::new(password);
+        let mut service = service.lock().map_err(|_| DesktopError::Internal)?;
+        operation(&mut service, credential)
+    })
+    .await
+    .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?
+    .map_err(Into::into)
+}

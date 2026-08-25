@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 
-use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use vault_core::SecretString;
@@ -11,59 +10,13 @@ use crate::{
         ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, EntryDetailDto,
         LockResultDto, SelectedVaultDto, VaultSnapshotDto,
     },
+    errors::DesktopErrorDto,
     mutations::{
         CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
         RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
     },
     state::{AppState, DesktopError},
 };
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum DesktopErrorCode {
-    AlreadyUnlocked,
-    Locked,
-    NoVaultSelected,
-    UnlockFailed,
-    UnsupportedVault,
-    EntryNotFound,
-    GroupNotFound,
-    InvalidRequest,
-    InvalidMove,
-    ReservedField,
-    SecretUnavailable,
-    UnsavedChanges,
-    ClipboardFailed,
-    Internal,
-}
-
-/// Stable IPC error payload without dependency or path details.
-#[derive(Serialize)]
-pub struct DesktopErrorDto {
-    code: DesktopErrorCode,
-}
-
-impl From<DesktopError> for DesktopErrorDto {
-    fn from(value: DesktopError) -> Self {
-        let code = match value {
-            DesktopError::AlreadyUnlocked => DesktopErrorCode::AlreadyUnlocked,
-            DesktopError::Locked => DesktopErrorCode::Locked,
-            DesktopError::NoVaultSelected => DesktopErrorCode::NoVaultSelected,
-            DesktopError::UnlockFailed => DesktopErrorCode::UnlockFailed,
-            DesktopError::UnsupportedVault => DesktopErrorCode::UnsupportedVault,
-            DesktopError::EntryNotFound => DesktopErrorCode::EntryNotFound,
-            DesktopError::GroupNotFound => DesktopErrorCode::GroupNotFound,
-            DesktopError::InvalidRequest => DesktopErrorCode::InvalidRequest,
-            DesktopError::InvalidMove => DesktopErrorCode::InvalidMove,
-            DesktopError::ReservedField => DesktopErrorCode::ReservedField,
-            DesktopError::SecretUnavailable => DesktopErrorCode::SecretUnavailable,
-            DesktopError::UnsavedChanges => DesktopErrorCode::UnsavedChanges,
-            DesktopError::ClipboardFailed => DesktopErrorCode::ClipboardFailed,
-            DesktopError::Internal => DesktopErrorCode::Internal,
-        };
-        Self { code }
-    }
-}
 
 #[tauri::command]
 pub async fn select_vault(
@@ -116,6 +69,22 @@ pub fn vault_snapshot(state: State<'_, AppState>) -> Result<VaultSnapshotDto, De
         .lock()
         .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
     service.snapshot().map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn save_vault(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    crate::persistence::save(password, state).await
+}
+
+#[tauri::command]
+pub async fn reload_vault(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    crate::persistence::reload(password, state).await
 }
 
 #[tauri::command]
@@ -387,31 +356,66 @@ pub async fn discard_changes_and_lock(
 #[cfg(test)]
 mod tests {
     use std::{
-        path::Path,
-        sync::{Arc, Mutex},
+        fs, io,
+        path::{Path, PathBuf},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicU64, Ordering},
+        },
     };
 
     use serde::de::DeserializeOwned;
     use serde_json::{Value, from_str, from_value, json, to_value};
     use tauri::{Manager, test::mock_app};
-    use vault_core::SecretString;
+    use vault_core::{EntryId, SecretString};
+    use vault_session::VaultSession;
 
     use super::{
-        DesktopErrorDto, close_policy, copy_entry_password, copy_entry_username, create_entry,
-        create_group, delete_entry, delete_entry_custom_field, delete_group,
-        discard_changes_and_lock, entry_detail, lock_vault, move_entry, move_group, rename_group,
+        close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
+        delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock,
+        entry_detail, lock_vault, move_entry, move_group, reload_vault, rename_group,
         reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
-        reveal_entry_url, reveal_entry_username, set_entry_custom_field, update_entry,
+        reveal_entry_url, reveal_entry_username, save_vault, set_entry_custom_field, update_entry,
     };
     use crate::{
         clipboard::ClipboardPort,
         dto::ClosePolicyDto,
+        errors::DesktopErrorDto,
         mutations::{
             CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
             RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
         },
         state::{AppState, DesktopError},
     };
+
+    static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn create() -> Self {
+            let parent = std::env::temp_dir();
+            for _ in 0..128 {
+                let sequence = TEST_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+                let path = parent.join(format!(
+                    "nian-pass-desktop-command-test-{}-{sequence}",
+                    std::process::id()
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("could not create command test directory: {error}"),
+                }
+            }
+            panic!("could not allocate command test directory");
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     struct FakeClipboard(Mutex<Option<String>>);
 
@@ -449,8 +453,109 @@ mod tests {
         app
     }
 
+    fn writable_app() -> (TestDir, PathBuf, tauri::App<tauri::test::MockRuntime>) {
+        let directory = TestDir::create();
+        let path = directory.0.join("vault.kdbx");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx"),
+            &path,
+        )
+        .expect("fixture copy should succeed");
+        let app = mock_app();
+        let state = AppState::new(Arc::new(FakeClipboard(Mutex::new(None))));
+        {
+            let mut service = state.service.lock().expect("desktop service lock");
+            service
+                .select_path(path.clone())
+                .expect("temporary fixture should be selectable");
+            service
+                .unlock(SecretString::new("demopass".to_owned()))
+                .expect("temporary fixture should unlock");
+        }
+        app.manage(state);
+        (directory, path, app)
+    }
+
     fn request<T: DeserializeOwned>(value: Value) -> T {
         from_value(value).expect("synthetic command request should deserialize")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn m44_commands_move_credentials_and_return_only_canonical_snapshots() {
+        let (_directory, path, app) = writable_app();
+        let state = app.state::<AppState>();
+        let entry_id = {
+            let mut service = state.service.lock().expect("desktop service lock");
+            let entry_id = service
+                .snapshot()
+                .expect("snapshot should exist")
+                .entries
+                .first()
+                .expect("fixture entry")
+                .id
+                .clone();
+            service
+                .session_mut()
+                .expect("session should exist")
+                .document_mut()
+                .set_entry_title(&EntryId::new(entry_id.clone()), "command local B")
+                .expect("local mutation should succeed");
+            entry_id
+        };
+        let before = fs::read(&path).expect("source should be readable");
+        let synthetic = "M4.4-SAVE-PASSWORD";
+        let Err(wrong) =
+            tauri::async_runtime::block_on(save_vault(synthetic.to_owned(), state.clone()))
+        else {
+            panic!("wrong credential should fail");
+        };
+        let serialized = to_value(wrong).expect("stable error should serialize");
+        assert!(!serialized.to_string().contains(synthetic));
+        assert_eq!(fs::read(&path).expect("source should remain"), before);
+        assert!(
+            state
+                .service
+                .lock()
+                .expect("desktop service lock")
+                .snapshot()
+                .expect("dirty snapshot")
+                .dirty
+        );
+
+        let Ok(saved) =
+            tauri::async_runtime::block_on(save_vault("demopass".to_owned(), state.clone()))
+        else {
+            panic!("save command should succeed");
+        };
+        assert!(!saved.dirty);
+
+        {
+            let mut service = state.service.lock().expect("desktop service lock");
+            service
+                .session_mut()
+                .expect("session should exist")
+                .document_mut()
+                .set_entry_title(&EntryId::new(entry_id.clone()), "local dirty D")
+                .expect("second local mutation should succeed");
+        }
+        let mut external = VaultSession::open(&path, &SecretString::new("demopass".to_owned()))
+            .expect("external session should open");
+        external
+            .document_mut()
+            .set_entry_title(&EntryId::new(entry_id), "external C")
+            .expect("external mutation should succeed");
+        external
+            .save(&SecretString::new("demopass".to_owned()))
+            .expect("external save should succeed");
+
+        let Ok(reloaded) =
+            tauri::async_runtime::block_on(reload_vault("demopass".to_owned(), state))
+        else {
+            panic!("reload command should succeed");
+        };
+        assert!(!reloaded.dirty);
     }
 
     #[test]
@@ -470,6 +575,11 @@ mod tests {
             DesktopError::ReservedField,
             DesktopError::SecretUnavailable,
             DesktopError::UnsavedChanges,
+            DesktopError::SaveFailed,
+            DesktopError::SaveAuthenticationFailed,
+            DesktopError::SaveUncertain,
+            DesktopError::ExternalChange,
+            DesktopError::ReloadFailed,
             DesktopError::ClipboardFailed,
             DesktopError::Internal,
         ];

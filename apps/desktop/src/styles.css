@@ -215,6 +215,16 @@ textarea {
 .lock-button {
   min-width: 84px;
 }
+.top-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.save-status {
+  min-width: 42px;
+  color: #426451;
+  font-size: 13px;
+}
 .shell-error {
   min-height: 0;
   margin: 0;
@@ -511,6 +521,9 @@ textarea {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 18px;
+}
+.stacked-actions {
+  flex-wrap: wrap;
 }
 .danger-button {
   border-color: #a13636;

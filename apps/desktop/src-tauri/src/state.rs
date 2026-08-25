@@ -27,6 +27,11 @@ pub enum DesktopError {
     ReservedField,
     SecretUnavailable,
     UnsavedChanges,
+    SaveFailed,
+    SaveAuthenticationFailed,
+    SaveUncertain,
+    ExternalChange,
+    ReloadFailed,
     ClipboardFailed,
     Internal,
 }
@@ -80,6 +85,29 @@ impl DesktopVaultService {
             .projection()
             .map(|vault| VaultSnapshotDto::from_vault(&vault, session.is_dirty()))
             .map_err(|_| DesktopError::Internal)
+    }
+
+    pub fn save(&mut self, credential: SecretString) -> Result<VaultSnapshotDto, DesktopError> {
+        let session = self.session.as_mut().ok_or(DesktopError::Locked)?;
+        session.save(&credential).map_err(map_save_error)?;
+        self.snapshot()
+    }
+
+    pub fn reload(&mut self, credential: SecretString) -> Result<VaultSnapshotDto, DesktopError> {
+        let path = self
+            .session
+            .as_ref()
+            .ok_or(DesktopError::Locked)?
+            .path()
+            .to_owned();
+        let candidate =
+            VaultSession::open(path, &credential).map_err(|_| DesktopError::ReloadFailed)?;
+        let snapshot = candidate
+            .projection()
+            .map(|vault| VaultSnapshotDto::from_vault(&vault, candidate.is_dirty()))
+            .map_err(|_| DesktopError::ReloadFailed)?;
+        self.session = Some(candidate);
+        Ok(snapshot)
     }
 
     pub(crate) fn session_mut(&mut self) -> Result<&mut VaultSession, DesktopError> {
@@ -282,6 +310,19 @@ pub(crate) fn map_mutation_error(error: SessionError) -> DesktopError {
     }
 }
 
+fn map_save_error(error: SessionError) -> DesktopError {
+    match error {
+        SessionError::ExternalModificationDetected
+        | SessionError::UnsupportedPath
+        | SessionError::ReadSource(_) => DesktopError::ExternalChange,
+        SessionError::CredentialMismatch => DesktopError::SaveAuthenticationFailed,
+        SessionError::SavedButBackupUpdateFailed(_)
+        | SessionError::SavedButBackupDurabilityUncertain(_)
+        | SessionError::DurabilityUncertain(_) => DesktopError::SaveUncertain,
+        _ => DesktopError::SaveFailed,
+    }
+}
+
 fn display_file_name(path: &Path) -> Option<String> {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -306,10 +347,11 @@ fn map_clipboard_error(_error: ClipboardFailure) -> DesktopError {
 #[cfg(test)]
 mod tests {
     use std::{
+        fs, io,
         path::{Path, PathBuf},
         sync::{
             Arc, Mutex, TryLockError,
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
             mpsc::{Receiver, SyncSender, TryRecvError, sync_channel},
         },
         thread,
@@ -317,14 +359,49 @@ mod tests {
     };
 
     use serde_json::{Map, Value, to_value};
-    use vault_core::{NewEntry, SecretString};
+    use vault_core::{EntryId, NewEntry, SecretString};
+    use vault_session::VaultSession;
 
-    use super::{AppState, DesktopError, DesktopVaultService};
+    use super::{AppState, DesktopError, DesktopVaultService, SessionError, map_save_error};
     use crate::clipboard::{ClipboardClearStatus, ClipboardPort};
 
     const FIXTURE_PASSWORD: &str = "demopass";
     const FIXTURE: &str = "keepassxc-2.7.12-kdbx41.kdbx";
     const TEST_COORDINATION_TIMEOUT: Duration = Duration::from_secs(3);
+    static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn create() -> Self {
+            let parent = std::env::temp_dir();
+            for _ in 0..128 {
+                let sequence = TEST_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+                let path = parent.join(format!(
+                    "nian-pass-desktop-save-test-{}-{sequence}",
+                    std::process::id()
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("could not create desktop test directory: {error}"),
+                }
+            }
+            panic!("could not allocate desktop test directory");
+        }
+
+        fn fixture_copy(&self) -> PathBuf {
+            let path = self.0.join("vault.kdbx");
+            fs::copy(fixture_path(), &path).expect("fixture copy should succeed");
+            path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn fixture_path() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -344,6 +421,59 @@ mod tests {
         service
             .unlock(SecretString::new(FIXTURE_PASSWORD.to_owned()))
             .expect("trusted fixture should unlock");
+    }
+
+    fn isolated_service() -> (TestDir, PathBuf, DesktopVaultService) {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy();
+        let mut service = DesktopVaultService::new();
+        service
+            .select_path(path.clone())
+            .expect("temporary fixture should be selectable");
+        unlock(&mut service);
+        (directory, path, service)
+    }
+
+    fn credential() -> SecretString {
+        SecretString::new(FIXTURE_PASSWORD.to_owned())
+    }
+
+    fn mutate_first_title(service: &mut DesktopVaultService, title: &str) -> String {
+        let entry_id = service
+            .snapshot()
+            .expect("snapshot should exist")
+            .entries
+            .first()
+            .expect("fixture should contain an entry")
+            .id
+            .clone();
+        service
+            .session_mut()
+            .expect("session should be unlocked")
+            .document_mut()
+            .set_entry_title(&EntryId::new(entry_id.clone()), title)
+            .expect("title mutation should succeed");
+        entry_id
+    }
+
+    fn write_external_version(path: &Path, title: &str) {
+        let mut external = VaultSession::open(path, &credential()).expect("external source open");
+        let entry = external
+            .projection()
+            .expect("external source projection")
+            .root()
+            .entries()
+            .first()
+            .expect("external source entry")
+            .id()
+            .clone();
+        external
+            .document_mut()
+            .set_entry_title(&entry, title)
+            .expect("external mutation should succeed");
+        external
+            .save(&credential())
+            .expect("external save should succeed");
     }
 
     #[derive(Default)]
@@ -479,6 +609,28 @@ mod tests {
     }
 
     #[test]
+    fn save_errors_map_to_minimal_stable_desktop_categories() {
+        assert_eq!(
+            map_save_error(SessionError::ExternalModificationDetected),
+            DesktopError::ExternalChange
+        );
+        assert_eq!(
+            map_save_error(SessionError::CredentialMismatch),
+            DesktopError::SaveAuthenticationFailed
+        );
+        assert_eq!(
+            map_save_error(SessionError::UnsupportedPersistencePlatform),
+            DesktopError::SaveFailed
+        );
+        assert_eq!(
+            map_save_error(SessionError::DurabilityUncertain(io::Error::other(
+                "synthetic post-commit uncertainty"
+            ))),
+            DesktopError::SaveUncertain
+        );
+    }
+
+    #[test]
     fn wrong_password_leaves_service_locked_and_allows_retry() {
         let mut service = selected_service();
         let result = service.unlock(SecretString::new("wrong-password".to_owned()));
@@ -522,6 +674,207 @@ mod tests {
         let after = to_value(service.snapshot().expect("original session should remain"))
             .expect("snapshot should serialize");
         assert_eq!(before, after);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_uses_session_transaction_clears_dirty_and_updates_baseline() {
+        let (_directory, path, mut service) = isolated_service();
+        let initial = fs::read(&path).expect("initial source should be readable");
+        let entry_id = mutate_first_title(&mut service, "desktop saved B");
+        assert!(service.snapshot().expect("dirty snapshot").dirty);
+
+        let saved = service
+            .save(credential())
+            .expect("desktop save should succeed");
+        assert!(!saved.dirty);
+        assert!(fs::read(&path).expect("saved source should be readable") != initial);
+        let reopened =
+            VaultSession::open(&path, &credential()).expect("saved source should reopen");
+        assert_eq!(
+            reopened
+                .document()
+                .entry_title(&EntryId::new(entry_id.clone()))
+                .expect("saved title read")
+                .expect("saved title present")
+                .expose_secret(),
+            "desktop saved B"
+        );
+
+        mutate_first_title(&mut service, "desktop saved C");
+        assert!(
+            !service
+                .save(credential())
+                .expect("second save should succeed")
+                .dirty
+        );
+        let reopened = VaultSession::open(&path, &credential()).expect("second save should reopen");
+        assert_eq!(
+            reopened
+                .document()
+                .entry_title(&EntryId::new(entry_id))
+                .expect("second saved title read")
+                .expect("second saved title present")
+                .expose_secret(),
+            "desktop saved C"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_save_keeps_source_and_dirty_session_available_for_retry() {
+        let (_directory, path, mut service) = isolated_service();
+        let before = fs::read(&path).expect("source should be readable");
+        let entry_id = mutate_first_title(&mut service, "local retry edit");
+
+        assert!(matches!(
+            service.save(SecretString::new("wrong-password".to_owned())),
+            Err(DesktopError::SaveAuthenticationFailed)
+        ));
+        assert_eq!(fs::read(&path).expect("source should remain"), before);
+        assert!(service.snapshot().expect("session should remain").dirty);
+        assert_eq!(
+            service
+                .entry_title(&entry_id)
+                .expect("local mutation should remain")
+                .expose_secret(),
+            "local retry edit"
+        );
+        assert!(
+            !service
+                .save(credential())
+                .expect("valid retry should succeed")
+                .dirty
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_change_and_deletion_are_fail_closed_without_losing_local_edits() {
+        let (_directory, path, mut service) = isolated_service();
+        let entry_id = mutate_first_title(&mut service, "local B");
+        write_external_version(&path, "external C");
+        let external = fs::read(&path).expect("external source should be readable");
+
+        assert!(matches!(
+            service.save(credential()),
+            Err(DesktopError::ExternalChange)
+        ));
+        assert_eq!(
+            fs::read(&path).expect("external source should remain"),
+            external
+        );
+        assert!(
+            service
+                .snapshot()
+                .expect("local session should remain")
+                .dirty
+        );
+        assert_eq!(
+            service
+                .entry_title(&entry_id)
+                .expect("local title should remain")
+                .expose_secret(),
+            "local B"
+        );
+
+        fs::remove_file(&path).expect("external deletion should succeed");
+        assert!(matches!(
+            service.save(credential()),
+            Err(DesktopError::ExternalChange)
+        ));
+        assert!(!path.exists());
+        assert!(
+            service
+                .snapshot()
+                .expect("deleted-source session should remain")
+                .dirty
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_change_after_a_successful_save_uses_the_fresh_baseline() {
+        let (_directory, path, mut service) = isolated_service();
+        mutate_first_title(&mut service, "saved S1");
+        service
+            .save(credential())
+            .expect("first save should succeed");
+        write_external_version(&path, "external after S1");
+        let external = fs::read(&path).expect("external generation should be readable");
+        mutate_first_title(&mut service, "local after S1");
+
+        assert!(matches!(
+            service.save(credential()),
+            Err(DesktopError::ExternalChange)
+        ));
+        assert_eq!(
+            fs::read(&path).expect("external generation should remain"),
+            external
+        );
+        assert!(service.snapshot().expect("local state should remain").dirty);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reload_swaps_only_after_a_candidate_opens_and_projects() {
+        let (_directory, path, mut service) = isolated_service();
+        let entry_id = mutate_first_title(&mut service, "local B");
+        write_external_version(&path, "external C");
+
+        assert!(matches!(
+            service.reload(SecretString::new("wrong-password".to_owned())),
+            Err(DesktopError::ReloadFailed)
+        ));
+        assert!(
+            service
+                .snapshot()
+                .expect("wrong-password local state")
+                .dirty
+        );
+        assert_eq!(
+            service
+                .entry_title(&entry_id)
+                .expect("wrong-password local title")
+                .expose_secret(),
+            "local B"
+        );
+
+        let reloaded = service.reload(credential()).expect("reload should succeed");
+        assert!(!reloaded.dirty);
+        assert_eq!(
+            service
+                .entry_title(&entry_id)
+                .expect("external title should load")
+                .expose_secret(),
+            "external C"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn corrupt_reload_preserves_dirty_local_session_and_external_bytes() {
+        let (_directory, path, mut service) = isolated_service();
+        let entry_id = mutate_first_title(&mut service, "local survives corruption");
+        let corrupt = b"not a KDBX file";
+        fs::write(&path, corrupt).expect("external corruption should be written");
+
+        assert!(matches!(
+            service.reload(credential()),
+            Err(DesktopError::ReloadFailed)
+        ));
+        assert_eq!(
+            fs::read(&path).expect("corrupt source should remain"),
+            corrupt
+        );
+        assert!(service.snapshot().expect("local state should remain").dirty);
+        assert_eq!(
+            service
+                .entry_title(&entry_id)
+                .expect("local title should remain")
+                .expose_secret(),
+            "local survives corruption"
+        );
     }
 
     #[test]

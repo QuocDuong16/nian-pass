@@ -10,6 +10,7 @@ import {
 } from "./entry-validation";
 import {
   parseClosePolicy,
+  parseCleanVaultSnapshot,
   parseCreatedEntry,
   parseCreatedGroup,
   parseDesktopErrorCode,
@@ -278,6 +279,37 @@ test("M4.3 response validators reject expansion and malformed dirty state", () =
   expect(() => parseClosePolicy({ policy: "save_then_close" })).toThrow(
     /invalid desktop contract/,
   );
+});
+
+test("M4.4 save and reload use narrow credentials and require clean exact snapshots", async () => {
+  invoke
+    .mockResolvedValueOnce(contract.snapshot)
+    .mockResolvedValueOnce(contract.snapshot);
+  await expect(desktopApi.saveVault("M4.4-SAVE-PASSWORD")).resolves.toEqual(
+    contract.snapshot,
+  );
+  await expect(desktopApi.reloadVault("M4.4-RELOAD-PASSWORD")).resolves.toEqual(
+    contract.snapshot,
+  );
+  expect(invoke).toHaveBeenNthCalledWith(1, "save_vault", {
+    password: "M4.4-SAVE-PASSWORD",
+  });
+  expect(invoke).toHaveBeenNthCalledWith(2, "reload_vault", {
+    password: "M4.4-RELOAD-PASSWORD",
+  });
+
+  expect(() =>
+    parseCleanVaultSnapshot({ ...contract.snapshot, dirty: true }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseCleanVaultSnapshot({
+      ...contract.snapshot,
+      masterPassword: "must-not-cross",
+    }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseCleanVaultSnapshot({ ...contract.snapshot, dirty: "false" }),
+  ).toThrow(/invalid desktop contract/);
 });
 
 test("created entry receipt accepts only an ID contained in its snapshot", () => {

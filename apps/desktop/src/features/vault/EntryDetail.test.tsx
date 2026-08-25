@@ -37,6 +37,8 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
     selectVault: vi.fn().mockResolvedValue(null),
     unlockVault: vi.fn().mockRejectedValue(new Error("unused")),
     getVaultSnapshot: vi.fn().mockRejectedValue(new Error("unused")),
+    saveVault: vi.fn().mockRejectedValue(new Error("unused")),
+    reloadVault: vi.fn().mockRejectedValue(new Error("unused")),
     getEntryDetail: vi.fn().mockImplementation((entryId: string) =>
       Promise.resolve({
         ...detail,

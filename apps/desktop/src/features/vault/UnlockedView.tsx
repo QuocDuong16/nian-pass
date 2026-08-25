@@ -11,23 +11,28 @@ import { GroupTree } from "./GroupTree";
 interface UnlockedViewProps {
   api: DesktopApi;
   snapshot: VaultSnapshotDto;
-  locking: boolean;
+  disabled: boolean;
+  saveStatus: "idle" | "saving" | "saved";
   lockError: string | null;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
+  onSave: () => void;
   onLock: () => void;
 }
 
 export function UnlockedView({
   api,
   snapshot,
-  locking,
+  disabled,
+  saveStatus,
   lockError,
   onSnapshot,
+  onSave,
   onLock,
 }: UnlockedViewProps) {
   const [selectedGroupId, setSelectedGroupId] = useState(snapshot.rootGroupId);
   const [selectedEntryId, setSelectedEntryId] = useState<EntryId | null>(null);
   const [creatingEntry, setCreatingEntry] = useState(false);
+  const [editingEntry, setEditingEntry] = useState(false);
   const groupsById = useMemo(
     () => new Map(snapshot.groups.map((group) => [group.id, group])),
     [snapshot.groups],
@@ -54,7 +59,11 @@ export function UnlockedView({
     }
     setSelectedGroupId(groupId);
     setSelectedEntryId(null);
+    setEditingEntry(false);
   };
+
+  const saveUnavailable =
+    disabled || !snapshot.dirty || creatingEntry || editingEntry;
 
   return (
     <main className="vault-shell">
@@ -73,14 +82,36 @@ export function UnlockedView({
             ) : null}
           </div>
         </div>
-        <button
-          className="secondary-button lock-button"
-          type="button"
-          disabled={locking}
-          onClick={onLock}
-        >
-          {locking ? "Locking…" : "Lock"}
-        </button>
+        <div className="top-bar-actions">
+          <span className="save-status" aria-live="polite">
+            {saveStatus === "saved" ? "Saved" : ""}
+          </span>
+          <button
+            type="button"
+            aria-label="Save vault"
+            disabled={saveUnavailable}
+            title={
+              creatingEntry || editingEntry
+                ? "Apply or cancel the current draft before saving"
+                : undefined
+            }
+            onClick={onSave}
+          >
+            {saveStatus === "saving"
+              ? "Saving…"
+              : saveStatus === "saved" && !snapshot.dirty
+                ? "Saved"
+                : "Save"}
+          </button>
+          <button
+            className="secondary-button lock-button"
+            type="button"
+            disabled={disabled}
+            onClick={onLock}
+          >
+            Lock
+          </button>
+        </div>
       </header>
       <p className="shell-error" role="alert" aria-live="assertive">
         {lockError ?? ""}
@@ -97,7 +128,7 @@ export function UnlockedView({
             api={api}
             group={selectedGroup}
             snapshot={snapshot}
-            disabled={locking}
+            disabled={disabled}
             onChanged={(next, nextGroupId) => {
               setSelectedEntryId(null);
               setSelectedGroupId(nextGroupId);
@@ -108,7 +139,7 @@ export function UnlockedView({
         <div className="entry-column">
           <button
             type="button"
-            disabled={locking}
+            disabled={disabled}
             onClick={() => {
               setCreatingEntry(true);
             }}
@@ -132,10 +163,12 @@ export function UnlockedView({
             api={api}
             entryId={selectedEntryId}
             groups={snapshot.groups}
-            disabled={locking}
+            disabled={disabled}
+            onEditingChange={setEditingEntry}
             onSnapshot={onSnapshot}
             onDeleted={(next) => {
               setSelectedEntryId(null);
+              setEditingEntry(false);
               onSnapshot(next);
             }}
             onMoved={(next, destination) => {
@@ -145,7 +178,7 @@ export function UnlockedView({
           />
         )}
       </div>
-      {creatingEntry && !locking ? (
+      {creatingEntry && !disabled ? (
         <EntryCreateDialog
           api={api}
           groupId={selectedGroup.id}

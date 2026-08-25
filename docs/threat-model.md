@@ -1,8 +1,9 @@
 # Threat Model
 
 This is the threat model for the M3 local vault session/filesystem foundation,
-the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, and the
-M4.Q quality/security gates. It records boundaries and assumptions; it is not a
+the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
+M4.3 mutation UI, the M4.4 save/conflict flow, and the M4.Q quality/security
+gates. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
@@ -106,6 +107,16 @@ information to an attacker even when their plaintext remains unavailable.
 - Mutation-versus-Lock races and stale selected IDs after structural changes
 - Protected custom fields accidentally downgraded during value updates
 - Mutation responses returning passwords, notes, or custom-field values
+- A stale external KDBX generation overwritten by desktop Save
+- A master password retained to make repeated Save convenient
+- Wrong Save credentials modifying or re-keying the source
+- Frontend optimism clearing dirty state before persistence commits
+- Save responses exposing credentials, paths, backup names, or fingerprints
+- Reload failure destroying the dirty local in-memory session
+- Save-and-Lock locking, or Save-and-Close closing, after Save failure
+- A window close silently terminating an active persistence transaction
+- A successful Save failing to update the source fingerprint baseline
+- A force-overwrite path bypassing external-change protection
 
 ## M4.Q desktop and repository controls
 
@@ -166,6 +177,43 @@ close calls a testable Rust policy and is prevented for dirty sessions until
 explicit discard. Permanent entry and recursive group deletion use explicit
 warnings and remain tombstone-based, not recycle-bin operations. Service tests
 verify mutation/discard leaves the immutable source fixture byte-identical.
+
+## M4.4 save and reload controls
+
+Desktop Save is explicit and is the only desktop disk-write command. The
+WebView supplies one component-local password string, the command immediately
+moves it into `SecretString`, and the service calls `VaultSession::save`; no
+layer retains the password for another operation. React clears its password
+state before awaiting Save/reload and again on Cancel or transition. JavaScript
+strings still cannot be deterministically zeroized.
+
+M3 revalidates the encrypted fingerprint at actual Save execution, including
+when an external editor changes the file after the credential dialog opened.
+Fingerprint mismatch, source deletion, or unsupported path maps to the stable
+`external_change` code without paths or digest data. There is no force-save,
+ignore-fingerprint, overwrite-anyway, autosave, or automatic M3.5 merge command.
+The external bytes and local dirty session are both retained.
+
+Successful Save returns a newly projected Rust snapshot and the frontend
+accepts it only when exact-key runtime validation proves `dirty=false`. Ordinary
+pre-commit Save failure leaves the session dirty and never shows Saved. M3's
+explicit post-commit durability/backup uncertainty remains distinct:
+`save_uncertain` causes a fresh snapshot request and never continues a pending
+Lock or close intent.
+
+Destructive reload opens and projects the current canonical file into a
+candidate session before swapping it into service state. Wrong credentials,
+invalid KDBX bytes, or a missing source cannot drop the existing dirty session.
+Successful reload remounts the presentation so stale selections, reveals, and
+drafts do not survive the external generation change.
+
+Save holds only the desktop service mutex during M3 persistence. Mutations and
+Lock cannot interleave; Save never acquires the Copy/Lock lifecycle gate, so it
+cannot introduce the inverse `service -> secret-operation gate` order. While
+Save is pending, React disables mutation and Lock actions and synchronously
+prevents close requests. Dirty Lock/close offers Save, explicit discard, or
+Cancel. Ordinary Lock and native close execute only after Save returns a clean
+snapshot; any Save error or external conflict leaves the vault open and dirty.
 
 ## Security assumptions
 
@@ -436,8 +484,9 @@ process-local mutex. Clearing the active clipboard also cannot remove copies hel
 by OS clipboard history, desktop clipboard managers, cloud clipboard sync, or
 third-party utilities. Auto-clear is best-effort at the OS boundary, not secure
 erasure. Privacy-sensitive metadata remains visible while unlocked, and native
-runtime smoke testing still needs a graphical host. M4.2 has no editing, save,
-sync transport, autosave, auto-lock, biometrics, or screenshot protection.
+runtime smoke testing still needs a graphical host. M4.4 has no Save As,
+force overwrite, automatic conflict merge, sync transport, autosave, auto-lock,
+biometrics, or screenshot protection.
 
 ## M3 residual risks
 

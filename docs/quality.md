@@ -175,6 +175,12 @@ to be a member of the returned snapshot. Frontend regression tests distinguish
 failed, empty, and non-empty custom-field loads and prove failed loads cannot
 issue a mutation.
 
+M4.4 reuses the exact snapshot fixture for Save and reload responses and adds
+only stable error codes. Runtime validation requires an exact-key snapshot with
+`dirty=false`; unknown keys, a wrong dirty type, or an added secret field fail
+closed. Synthetic Save/reload passwords are tested only as narrow request
+arguments and never appear in the committed response fixture.
+
 Files under `openwiki/` are generated navigation material, not the source of
 truth for M4.Q policy. Update source code, README, and `docs/`; let the scheduled
 OpenWiki workflow regenerate its pages. Do not hand-edit generated OpenWiki

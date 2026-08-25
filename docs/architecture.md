@@ -1,12 +1,12 @@
 # Architecture
 
 Nian Pass is a KDBX-native, offline-first password manager. The `.kdbx` file is
-the source of truth. M4.0 through M4.3 provide a Tauri 2 + React desktop shell
+the source of truth. M4.0 through M4.4 provide a Tauri 2 + React desktop shell
 for local open, unlock, browse, detail, explicit reveal/copy, memory-only
-mutation, and lock. M3 provides the unlocked local session and
+mutation, explicit save/conflict/reload, and lock. M3 provides the unlocked local session and
 verified filesystem persistence beneath it. M3.5 adds provider-independent,
-synchronous three-way semantic merge; the current desktop does not call sync or
-expose filesystem save behavior.
+synchronous three-way semantic merge; M4.4 does not automatically call it when
+an external source conflict is detected.
 
 M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
@@ -222,10 +222,54 @@ If the explicit discard succeeds but the follow-up native close request fails,
 the locked screen remains authoritative and reports that only window closing
 failed; it never claims that the destroyed session is still active.
 
-M4.3 never calls `VaultSession::save`, `save_to_writer`, atomic replacement, or
-backup code. Mutation responses are fresh projections only. The encrypted KDBX
-file and its fingerprint baseline remain unchanged; M4.4 owns future Save and
-external-change/conflict UX.
+M4.3 mutation commands never call `VaultSession::save`, `save_to_writer`, atomic
+replacement, or backup code. Mutation responses are fresh projections only;
+M4.4 adds a separate explicit write boundary.
+
+## M4.4 desktop persistence boundary
+
+React remains presentation-only and never reconstructs persistence state:
+
+```text
+React dirty snapshot
+  -> Save credential dialog
+  -> save_vault(password) semantic IPC
+  -> immediate SecretString conversion
+  -> DesktopVaultService mutex
+  -> VaultSession::save
+  -> existing M3 fingerprint/verified replacement transaction
+  -> fresh Rust-authoritative clean VaultSnapshotDto
+```
+
+`save_vault` is the only desktop command that writes the KDBX source. It does
+not acquire the Copy/Lock `secret_operation_gate`, so no code holds the service
+mutex and then waits for that gate. The service mutex serializes Save with every
+mutation and Lock; the password is dropped with the blocking request and is not
+retained by `AppState`, `DesktopVaultService`, `VaultSession`, or React after the
+request completes. Save and reload responses use the existing exact-key,
+secret-free snapshot validator and additionally require `dirty=false`.
+
+At actual Save execution, M3 compares the complete encrypted source fingerprint
+to the session baseline. A mismatch, missing target, or path substitution maps
+to `external_change`; no temp is installed, no force command exists, the
+external source remains untouched, and the local dirty session remains active.
+M4.4 does not invoke M3.5 automatically. The user may keep working or explicitly
+choose **Discard local changes and reload**.
+
+Reload obtains the canonical path from the active Rust session, opens and
+projects a candidate `VaultSession`, and swaps it into the service only after
+both operations succeed. Wrong credentials, a corrupt source, or a missing file
+therefore return `reload_failed` without dropping the local dirty document.
+Successful reload returns a clean snapshot and remounts the vault presentation,
+clearing stale entry/group selection, reveal state, and drafts.
+
+Dirty Lock and close share one frontend Save flow. Save must return a canonical
+clean snapshot before ordinary `lock_vault` runs; close then requests the native
+window close only after Lock succeeds. Save failure or external conflict never
+calls Lock, discard, or close. Explicit discard remains separate and never
+saves. While Save is pending, mutation controls and Lock are disabled and a
+window close request is prevented. There is no autosave, Save As, force
+overwrite, or automatic merge path.
 
 `vault-core` owns KDBX-independent domain types. `crates/kdbx` is the adapter
 that contains all `keepass-rs` types and converts them to the domain model. The

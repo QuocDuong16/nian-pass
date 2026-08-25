@@ -15,18 +15,38 @@ afterEach(cleanup);
 function renderView() {
   const api = mutationApi();
   const onSnapshot = vi.fn();
+  const onSave = vi.fn();
   render(
     <UnlockedView
       api={api}
       snapshot={mutationSnapshot}
-      locking={false}
+      disabled={false}
+      saveStatus="idle"
       lockError={null}
       onSnapshot={onSnapshot}
+      onSave={onSave}
       onLock={vi.fn()}
     />,
   );
-  return { api, onSnapshot };
+  return { api, onSnapshot, onSave };
 }
+
+test("Save is unavailable while an entry or creation draft is open", async () => {
+  renderView();
+  const save = screen.getByRole("button", { name: "Save vault" });
+  expect(save).toBeEnabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "New entry" }));
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(save).toBeEnabled();
+
+  fireEvent.click(screen.getByRole("button", { name: /Account A/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit entry" }));
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(save).toBeEnabled();
+});
 
 test("create dialog clears local drafts on Cancel and selects a successful creation", async () => {
   const { api, onSnapshot } = renderView();
@@ -53,7 +73,9 @@ test("create dialog clears local drafts on Cancel and selects a successful creat
   await waitFor(() => {
     expect(onSnapshot).toHaveBeenCalledWith(mutationSnapshot);
   });
-  expect(api.getEntryDetail).toHaveBeenCalledWith("entry-created");
+  await waitFor(() => {
+    expect(api.getEntryDetail).toHaveBeenCalledWith("entry-created");
+  });
 });
 
 test("parent selection callbacks follow canonical group, move, and delete results", async () => {

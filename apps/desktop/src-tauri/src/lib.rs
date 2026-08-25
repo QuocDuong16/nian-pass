@@ -1,7 +1,9 @@
 mod clipboard;
 mod commands;
 mod dto;
+mod errors;
 mod mutations;
+mod persistence;
 mod state;
 
 use std::sync::Arc;
@@ -10,10 +12,10 @@ use clipboard::TauriClipboard;
 use commands::{
     close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
     delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock, entry_detail,
-    lock_vault, move_entry, move_group, rename_group, reveal_entry_custom_field,
+    lock_vault, move_entry, move_group, reload_vault, rename_group, reveal_entry_custom_field,
     reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
-    reveal_entry_username, select_vault, set_entry_custom_field, unlock_vault, update_entry,
-    vault_snapshot,
+    reveal_entry_username, save_vault, select_vault, set_entry_custom_field, unlock_vault,
+    update_entry, vault_snapshot,
 };
 use state::AppState;
 use tauri::{Manager, Runtime};
@@ -43,6 +45,8 @@ pub fn run() {
             select_vault,
             unlock_vault,
             vault_snapshot,
+            save_vault,
+            reload_vault,
             entry_detail,
             reveal_entry_password,
             reveal_entry_notes,
@@ -81,5 +85,18 @@ mod tests {
         let _builder = with_desktop_plugins(mock_builder());
         let mut app = mock_app();
         assert!(setup_app(&mut app).is_ok());
+    }
+
+    #[test]
+    fn m44_command_surface_has_no_stale_source_bypass() {
+        let command_source = concat!(include_str!("commands.rs"), include_str!("persistence.rs"));
+        let forbidden = [
+            ["save_", "force"].concat(),
+            ["ignore_", "fingerprint"].concat(),
+            ["overwrite_", "anyway"].concat(),
+        ];
+        for name in forbidden {
+            assert!(!command_source.contains(&name));
+        }
     }
 }

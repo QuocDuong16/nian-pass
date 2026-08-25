@@ -16,6 +16,7 @@ interface EntryDetailProps {
   entryId: EntryId;
   groups: GroupDto[];
   disabled: boolean;
+  onEditingChange?: (editing: boolean) => void;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
   onMoved: (snapshot: VaultSnapshotDto, destination: GroupId) => void;
@@ -35,6 +36,7 @@ function EntryDetailContent({
   entryId,
   groups,
   disabled,
+  onEditingChange,
   onSnapshot,
   onDeleted,
   onMoved,
@@ -43,6 +45,13 @@ function EntryDetailContent({
   const [detailFailed, setDetailFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [refresh, setRefresh] = useState(0);
+
+  useEffect(
+    () => () => {
+      onEditingChange?.(false);
+    },
+    [onEditingChange],
+  );
 
   useEffect(() => {
     let active = true;
@@ -62,6 +71,7 @@ function EntryDetailContent({
   const changed = (snapshot: VaultSnapshotDto) => {
     onSnapshot(snapshot);
     setEditing(false);
+    onEditingChange?.(false);
     setDetail(null);
     setDetailFailed(false);
     setRefresh((value) => value + 1);
@@ -94,6 +104,7 @@ function EntryDetailContent({
           onApplied={changed}
           onCancel={() => {
             setEditing(false);
+            onEditingChange?.(false);
           }}
         />
       ) : (
@@ -104,6 +115,7 @@ function EntryDetailContent({
           disabled={disabled}
           onEdit={() => {
             setEditing(true);
+            onEditingChange?.(true);
           }}
           onSnapshot={changed}
           onDeleted={onDeleted}

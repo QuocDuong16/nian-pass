@@ -19,19 +19,21 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M4.3 — Desktop Mutation UX
+M4.4 — Desktop Save / External Modification / Conflict UX
 
-M4.3 exposes memory-only entry, group, and custom-field mutations through the
-desktop while the Rust-owned `VaultSession` remains the sole mutable vault
-owner. It adds entry edit/create/permanent-delete/move, group
-create/rename/move/recursive-permanent-delete, custom-field add/edit/delete,
-and an explicit `Unsaved changes` state. M4.Q remains complete: the root
+M4.4 connects the desktop's explicit Save action to the existing M3
+`VaultSession::save` transaction. A dirty vault requests the master password
+for that attempt, detects a changed or missing source through the M3 encrypted
+fingerprint baseline, refuses overwrite, and retains the dirty in-memory
+session. Explicit destructive reload opens and projects a candidate session
+before replacing the local session, so a wrong password or corrupt external
+file cannot destroy local edits. M4.Q remains complete: the root
 `Makefile` is still the single developer/CI interface for formatting, typed
 linting, tests, coverage and changed-line coverage, dependency policy, dead code,
 architecture/security invariants, contract drift, builds, and docs.
 
-M4.0 through M4.3 are the current desktop functionality: Shell, Unlock/Browse,
-explicit read/copy, and in-memory mutation.
+M4.0 through M4.4 are the current desktop functionality: Shell, Unlock/Browse,
+explicit read/copy, in-memory mutation, and explicit conflict-protected Save.
 
 `apps/desktop` is the first visible Nian Pass application: a Tauri 2 shell with
 React, strict TypeScript, Vite, and pnpm. It selects a local `.kdbx` through a
@@ -58,12 +60,14 @@ and clear remains a narrow residual race. Clipboard history, cloud clipboard
 sync, and third-party clipboard managers may retain copies outside the process's
 control.
 
-M4.3 deliberately has no filesystem Save, Save As, autosave, external-change or
-conflict UI, recycle-bin workflow, password generator, TOTP/passkey editing,
-attachments, URL opening, search, cloud transport, auto-lock, biometrics, or
-updater. Applying a form mutates only the unlocked in-memory document. Plain
-Lock refuses a dirty session; only an explicit discard confirmation may drop
-it. The main-window close request uses the same Rust-authoritative dirty policy.
+M4.4 deliberately has no Save As, autosave, force overwrite, automatic
+local/external merge, recycle-bin workflow, password generator, TOTP/passkey
+editing, attachments, URL opening, search, cloud transport, auto-lock,
+biometrics, or updater. Applying a form still mutates only the unlocked
+in-memory document; only explicit Save writes. Dirty Lock and close prompts
+offer Save, discard, or Cancel, and neither Lock nor close continues after a
+failed or conflicted Save. The main-window close request is prevented while a
+Save transaction is active.
 Existing custom-field values must load successfully before editing; load
 failure is retryable and cannot be converted into an empty overwrite. Existing
 empty-name KDBX fields remain editable/deletable by exact identity, although the
@@ -229,12 +233,12 @@ See [the architecture](docs/architecture.md) and
 See [quality policy](docs/quality.md) for pinned tools, coverage ratchets,
 dependency/advisory handling, and the reviewed exception process.
 
-Nian Pass remains experimental and is not production-ready. Desktop edits exist
-only in unlocked memory and cannot yet be saved through the UI; closing or
-explicitly discarding loses those edits. Filesystem Save arrives in M4.4. There
-is no cloud transport/provider integration, manual
-conflict-resolution UI, file watcher, autosave timer, keyfile support, master-
-password rotation, biometric unlock, or guaranteed zeroization of decrypted
+Nian Pass remains experimental and is not production-ready. Desktop edits can
+be saved explicitly through M3 safe persistence, but external divergence is
+only detected and refused; it is not automatically merged. There is no Save As,
+force overwrite, cloud transport/provider integration, file watcher, autosave
+timer, keyfile support, master-password rotation, biometric unlock, or
+guaranteed zeroization of decrypted
 allocations owned by `keepass-rs` or JavaScript/WebView strings. The CLI remains read-only. Local persistence
 uses optimistic conflict detection rather than cooperative or distributed
 locking. Windows open/read sessions are supported, but dirty save currently

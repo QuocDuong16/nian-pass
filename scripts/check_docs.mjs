@@ -29,9 +29,10 @@ export function runChecks(root) {
   const packageSource = readRequired(root, "package.json", violations);
   const nodeVersion = readRequired(root, ".node-version", violations).trim();
 
-  requirePattern(violations, "README.md", readme, /M4\.3\s*[—-]\s*Desktop Mutation UX/, "current milestone must be M4.3");
-  requirePattern(violations, "README.md", readme, /Unsaved changes/i, "M4.3 dirty-state UX is missing");
-  requirePattern(violations, "README.md", readme, /M4\.3[\s\S]{0,600}(?:no filesystem Save|in-memory only)/i, "M4.3 persistence boundary is missing");
+  requirePattern(violations, "README.md", readme, /M4\.4\s*[—-]\s*Desktop Save \/ External Modification \/ Conflict UX/, "current milestone must be M4.4");
+  requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
+  requirePattern(violations, "README.md", readme, /external[\s\S]{0,180}(?:refus|not automatically merged)/i, "M4.4 external-conflict boundary is missing");
+  requirePattern(violations, "README.md", readme, /no Save As[\s\S]{0,100}(?:force overwrite|autosave)/i, "M4.4 persistence non-goals are missing");
   requirePattern(violations, "docs/architecture.md", architecture, /M4\.Q/, "architecture must describe M4.Q");
   requirePattern(violations, "README.md", readme, /make quality-check/, "canonical quality command is missing");
   requirePattern(violations, "README.md", readme, /Headless Linux/i, "headless desktop development guidance is missing");

@@ -24,6 +24,7 @@ import {
 } from "./entry-validation";
 import {
   parseClosePolicy,
+  parseCleanVaultSnapshot,
   parseCreatedEntry,
   parseCreatedGroup,
   parseDesktopErrorCode,
@@ -35,6 +36,8 @@ export interface DesktopApi {
   selectVault: () => Promise<SelectedVaultDto | null>;
   unlockVault: (password: string) => Promise<VaultSnapshotDto>;
   getVaultSnapshot: () => Promise<VaultSnapshotDto>;
+  saveVault: (password: string) => Promise<VaultSnapshotDto>;
+  reloadVault: (password: string) => Promise<VaultSnapshotDto>;
   getEntryDetail: (entryId: EntryId) => Promise<EntryDetailDto>;
   revealEntryPassword: (entryId: EntryId) => Promise<string>;
   revealEntryNotes: (entryId: EntryId) => Promise<string>;
@@ -123,6 +126,10 @@ export const desktopApi: DesktopApi = {
   unlockVault: (password) =>
     call("unlock_vault", parseVaultSnapshot, { password }),
   getVaultSnapshot: () => call("vault_snapshot", parseVaultSnapshot),
+  saveVault: (password) =>
+    call("save_vault", parseCleanVaultSnapshot, { password }),
+  reloadVault: (password) =>
+    call("reload_vault", parseCleanVaultSnapshot, { password }),
   getEntryDetail: (entryId) =>
     call("entry_detail", parseEntryDetail, { entryId }),
   revealEntryPassword: (entryId) =>
