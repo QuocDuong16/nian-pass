@@ -229,6 +229,8 @@ set (`aarch64`, `armv7`, `i686`, and `x86_64`); the foundation build gate
 prioritizes `aarch64` and `x86_64` for a modern physical device and emulator.
 Future AutofillService work requires Android 8.0, so M5.0 deliberately sets
 `minSdk = 26` without claiming Autofill is implemented.
+M5.0 Android production builds do not request network permission. Development
+builds use debug-only `INTERNET` access for the Tauri/Vite development host.
 
 Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to a CLI SDK containing Android SDK 36,
 Build Tools 36.0.0, and an NDK. Then install the two required Rust targets and

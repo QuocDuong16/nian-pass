@@ -48,8 +48,9 @@ binary fails. Cargo always uses `--locked`; pnpm install always uses
 `mobile-source-check` is environment-independent and participates in the normal
 policy, quick, and quality gates. It verifies the committed Tauri-generated
 Android project, API 26 minimum, normal generated ABI set, machine-local ignore
-rules, and the narrow `TAURI_DEV_HOST` Vite boundary. It does not claim an
-Android binary was built.
+rules, the narrow `TAURI_DEV_HOST` Vite boundary, a network-free main manifest,
+and debug-only ownership of the development `INTERNET` permission. It does not
+claim an Android binary was built.
 
 `mobile-tools-check` validates Java, SDK 36, Build Tools 36.0.0, NDK, the two
 priority Rust targets, and the repository-pinned Tauri CLI without installing

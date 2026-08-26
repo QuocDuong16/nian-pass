@@ -3,6 +3,22 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+const internetPermission = "android.permission.INTERNET";
+const dangerousDebugPermissions = [
+  "READ_EXTERNAL_STORAGE",
+  "WRITE_EXTERNAL_STORAGE",
+  "MANAGE_EXTERNAL_STORAGE",
+  "QUERY_ALL_PACKAGES",
+  "REQUEST_INSTALL_PACKAGES",
+  "SYSTEM_ALERT_WINDOW",
+  "READ_CONTACTS",
+  "WRITE_CONTACTS",
+  "CAMERA",
+  "RECORD_AUDIO",
+  "ACCESS_FINE_LOCATION",
+  "ACCESS_COARSE_LOCATION",
+  "BLUETOOTH_CONNECT",
+];
 
 function requireFile(root, path, violations) {
   const absolute = resolve(root, path);
@@ -29,6 +45,11 @@ export function runChecks(root) {
   const manifest = requireFile(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml",
+    violations,
+  );
+  const debugManifest = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/debug/AndroidManifest.xml",
     violations,
   );
   const cargoManifest = requireFile(
@@ -79,10 +100,47 @@ export function runChecks(root) {
       "Tauri Rust library must emit staticlib, cdylib, and rlib artifacts",
     );
   }
-  if (/FileProvider|FILE_PROVIDER_PATHS|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE/.test(manifest)) {
+  if (
+    /FileProvider|FILE_PROVIDER_PATHS|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE/.test(
+      manifest,
+    )
+  ) {
     violations.push(
       "M5.0 Android manifest must not expose a filesystem provider or storage permission",
     );
+  }
+  if (manifest.includes(internetPermission)) {
+    violations.push(
+      "M5.0 release/main Android manifest must not request INTERNET",
+    );
+  }
+  const debugPermissions = [
+    ...debugManifest.matchAll(
+      /<uses-permission\b[^>]*\bandroid:name\s*=\s*["']([^"']+)["'][^>]*>/g,
+    ),
+  ].map((match) => match[1]);
+  const debugInternetCount = debugPermissions.filter(
+    (permission) => permission === internetPermission,
+  ).length;
+  if (debugInternetCount !== 1) {
+    violations.push(
+      "M5.0 debug Android manifest must request INTERNET exactly once",
+    );
+  }
+  const unrelatedDebugPermissions = debugPermissions.filter(
+    (permission) => permission !== internetPermission,
+  );
+  if (unrelatedDebugPermissions.length > 0) {
+    violations.push(
+      `M5.0 debug Android manifest may request only INTERNET; found ${unrelatedDebugPermissions.join(", ")}`,
+    );
+  }
+  for (const permission of dangerousDebugPermissions) {
+    if (debugManifest.includes(`android.permission.${permission}`)) {
+      violations.push(
+        `M5.0 debug Android manifest must not request ${permission}`,
+      );
+    }
   }
   for (const ignored of [
     "local.properties",

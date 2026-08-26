@@ -33,6 +33,11 @@ function fixture(t) {
   );
   write(
     root,
+    "apps/desktop/src-tauri/gen/android/app/src/debug/AndroidManifest.xml",
+    '<manifest><uses-permission android:name="android.permission.INTERNET" /></manifest>\n',
+  );
+  write(
+    root,
     "apps/desktop/src-tauri/Cargo.toml",
     '[lib]\ncrate-type = ["staticlib", "cdylib", "rlib"]\n',
   );
@@ -98,4 +103,34 @@ test("broad generated Android filesystem providers are rejected", (t) => {
     '<manifest><application><provider android:name="androidx.core.content.FileProvider" /></application></manifest>\n',
   );
   assert.match(runChecks(root).join("\n"), /filesystem provider/);
+});
+
+test("main manifest INTERNET permission is rejected", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml",
+    '<manifest><uses-permission android:name="android.permission.INTERNET" /><application /></manifest>\n',
+  );
+  assert.match(runChecks(root).join("\n"), /release\/main.*INTERNET/);
+});
+
+test("debug manifest must contain INTERNET permission", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/debug/AndroidManifest.xml",
+    "<manifest />\n",
+  );
+  assert.match(runChecks(root).join("\n"), /debug.*INTERNET exactly once/);
+});
+
+test("dangerous debug permissions are rejected", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/debug/AndroidManifest.xml",
+    '<manifest><uses-permission android:name="android.permission.INTERNET" /><uses-permission android:name="android.permission.CAMERA" /></manifest>\n',
+  );
+  assert.match(runChecks(root).join("\n"), /must not request CAMERA/);
 });

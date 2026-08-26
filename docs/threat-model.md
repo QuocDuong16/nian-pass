@@ -127,6 +127,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Auto-lock bypassing Save failure or external-conflict UX
 - Native Kotlin/Swift code duplicating cryptographic, KDBX, or persistence logic
 - Broad mobile Tauri capabilities exposing filesystem, shell, process, or network access
+- Generated mobile defaults granting production network authority before Nian Pass has a production network feature
 - Android content URIs being treated as ordinary canonical filesystem paths
 - Platform bootstrap leaking device or environment identifiers
 - Mobile signing keys or signing passwords entering version control
@@ -183,6 +184,8 @@ when Tauri mobile development explicitly supplies that host, with a scoped HMR
 configuration. This network-accessible development server is development-only;
 production uses bundled assets and the production CSP is unchanged. M5.0's
 mobile view contains no vault data or credential and exposes no debug endpoint.
+M5.0 production Android builds do not request `INTERNET`; that permission exists
+only in the debug manifest for Tauri mobile development and is source-ratcheted.
 
 Android Storage Access Framework and document-provider URIs remain unimplemented.
 They must not be converted into strings and passed to `VaultSession` as if they
