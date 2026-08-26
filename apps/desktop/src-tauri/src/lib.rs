@@ -1,15 +1,28 @@
+#[cfg(any(desktop, test))]
 mod clipboard;
+#[cfg(any(desktop, test))]
+mod command_support;
+#[cfg(any(desktop, test))]
 mod commands;
 mod dto;
+#[cfg(any(desktop, test))]
 mod errors;
+#[cfg(any(target_os = "android", target_os = "ios", test))]
+mod mobile;
+#[cfg(any(desktop, test))]
 mod mutations;
+#[cfg(any(desktop, test))]
 mod persistence;
 mod platform;
+#[cfg(any(desktop, test))]
 mod state;
 
+#[cfg(desktop)]
 use std::sync::Arc;
 
+#[cfg(desktop)]
 use clipboard::TauriClipboard;
+#[cfg(desktop)]
 use commands::{
     close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
     delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock, entry_detail,
@@ -18,9 +31,12 @@ use commands::{
     reveal_entry_username, runtime_info, save_vault, select_vault, set_entry_custom_field,
     unlock_vault, update_entry, vault_snapshot,
 };
+#[cfg(desktop)]
 use state::AppState;
+#[cfg(desktop)]
 use tauri::{Manager, Runtime};
 
+#[cfg(desktop)]
 fn with_desktop_plugins<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -28,11 +44,13 @@ fn with_desktop_plugins<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
         .setup(setup_app)
 }
 
+#[cfg(desktop)]
 fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
     install_app_state(app);
     Ok(())
 }
 
+#[cfg(desktop)]
 fn install_app_state<R: Runtime>(app: &mut tauri::App<R>) {
     app.manage(AppState::new(Arc::new(TauriClipboard::new(
         app.handle().clone(),
@@ -79,10 +97,42 @@ pub fn run() {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::mobile_entry_point]
 pub fn run() {
+    run_mobile();
+}
+
+#[cfg(target_os = "android")]
+fn run_mobile() {
+    use mobile::commands::{
+        mobile_entry_detail, mobile_lock_vault, mobile_select_vault, mobile_unlock_vault,
+        mobile_vault_snapshot, runtime_info,
+    };
+
+    tauri::Builder::default()
+        .plugin(mobile::source::init())
+        .setup(|app| {
+            mobile::install_state(app);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            runtime_info,
+            mobile_select_vault,
+            mobile_unlock_vault,
+            mobile_vault_snapshot,
+            mobile_entry_detail,
+            mobile_lock_vault
+        ])
+        .run(tauri::generate_context!())
+        .expect("Nian Pass Android runtime failed");
+}
+
+#[cfg(target_os = "ios")]
+fn run_mobile() {
+    use mobile::commands::runtime_info;
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![runtime_info])
         .run(tauri::generate_context!())
-        .expect("Nian Pass mobile runtime failed");
+        .expect("Nian Pass iOS runtime failed");
 }
 
 #[cfg(test)]

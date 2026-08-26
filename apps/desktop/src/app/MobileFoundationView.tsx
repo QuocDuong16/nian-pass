@@ -1,10 +1,4 @@
-import type { RuntimePlatform } from "../types/runtime";
-
-interface MobileFoundationViewProps {
-  platform: Exclude<RuntimePlatform, "desktop">;
-}
-
-export function MobileFoundationView({ platform }: MobileFoundationViewProps) {
+export function MobileFoundationView() {
   return (
     <main className="mobile-foundation-view">
       <section
@@ -16,10 +10,7 @@ export function MobileFoundationView({ platform }: MobileFoundationViewProps) {
         </div>
         <p className="eyebrow">Mobile foundation</p>
         <h1 id="mobile-title">Nian Pass</h1>
-        <p>
-          {platform === "android" ? "Android" : "iOS"} runtime ready. Vault
-          access arrives in M5.1.
-        </p>
+        <p>iOS vault access is not implemented in this build.</p>
       </section>
     </main>
   );

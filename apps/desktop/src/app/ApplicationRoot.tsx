@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import App from "../App";
+import { MobileVaultApp } from "../features/mobile/MobileVaultApp";
 import {
   desktopApi,
   runtimeApi,
@@ -12,18 +13,22 @@ import {
   type DesktopWindowLifecycle,
 } from "../lib/window-lifecycle";
 import type { RuntimeInfoDto } from "../types/runtime";
+import type { MobileApi } from "../types/mobile";
+import { mobileApi } from "../lib/mobile";
 import { MobileFoundationView } from "./MobileFoundationView";
 
 interface ApplicationRootProps {
   api?: DesktopApi;
   runtime?: RuntimeApi;
   windowLifecycle?: DesktopWindowLifecycle | null;
+  mobile?: MobileApi;
 }
 
 export function ApplicationRoot({
   api = desktopApi,
   runtime = runtimeApi,
   windowLifecycle = desktopWindowLifecycle,
+  mobile = mobileApi,
 }: ApplicationRootProps) {
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfoDto | null>(null);
   const [failed, setFailed] = useState(false);
@@ -58,5 +63,8 @@ export function ApplicationRoot({
   if (runtimeInfo.platform === "desktop") {
     return <App api={api} windowLifecycle={windowLifecycle} />;
   }
-  return <MobileFoundationView platform={runtimeInfo.platform} />;
+  if (runtimeInfo.platform === "android") {
+    return <MobileVaultApp api={mobile} />;
+  }
+  return <MobileFoundationView />;
 }

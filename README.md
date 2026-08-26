@@ -19,21 +19,26 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M5.0 — Mobile Foundation
+M5.1 — Mobile Unlock + Browse
 
-The Desktop MVP remains complete through M4.5. M5.0 mobile-enables the existing
-Tauri application host for an Android-first, iOS-ready foundation. It adds a
-real generated Android project, Android 8.0 / API 26 minimum support, a passive
-mobile runtime screen, explicit desktop/mobile bootstrap boundaries, and a
-dedicated CLI-only Android APK build gate. It does not add mobile vault open,
-unlock, browse, save, native document selection, Autofill, Keystore, biometrics,
-sync, or other M5.1+ functionality.
+The Desktop MVP remains complete through M4.5. Android now provides real,
+read-only vault access: system document selection, password unlock through the
+existing Rust KDBX implementation, group/entry browse, secret-free entry detail,
+and immediate Lock. Android 8.0 / API 26 remains the minimum. The selected
+document is streamed through `ContentResolver` into private no-backup encrypted
+staging; a path-free, Save-free Rust `MobileReadSession` owns the decrypted
+document after successful unlock. The original provider document is untouched.
+
+Android does not support Save, edit, create/delete/move, password or notes
+reveal, clipboard secret copy, Autofill, Keystore, biometrics, or sync. iOS
+document access remains unimplemented and is not claimed as tested from Linux.
 
 `apps/desktop` remains the historical path for the shared Tauri application
 host. Renaming it is deferred to a dedicated mechanical refactor. Desktop and
-Android both compile the same Rust application package and shared `vault-core`,
-`kdbx`, and `vault-session` dependency graph; there is no Kotlin KDBX parser,
-second persistence algorithm, or separate mobile Rust backend.
+Android compile the same Rust application package and share `vault-core` and the
+authoritative `kdbx` adapter. Desktop alone uses `VaultSession` persistence.
+Android staging never enters `VaultSession`; there is no Kotlin KDBX parser,
+second persistence algorithm, or mobile Save path.
 
 The current Linux environment can build Android through command-line tooling
 without Android Studio, an emulator, or a connected device. iOS initialization
@@ -221,15 +226,15 @@ make docs-check
 make mobile-source-check
 ```
 
-### Android mobile foundation
+### Android mobile unlock and browse
 
 The committed Tauri-generated project is at
 `apps/desktop/src-tauri/gen/android`. It targets the normal Rust Android ABI
-set (`aarch64`, `armv7`, `i686`, and `x86_64`); the foundation build gate
+set (`aarch64`, `armv7`, `i686`, and `x86_64`); the Android build gate
 prioritizes `aarch64` and `x86_64` for a modern physical device and emulator.
-Future AutofillService work requires Android 8.0, so M5.0 deliberately sets
+Future AutofillService work requires Android 8.0, so M5.1 retains
 `minSdk = 26` without claiming Autofill is implemented.
-M5.0 Android production builds do not request network permission. Development
+M5.1 Android production builds do not request network permission. Development
 builds use debug-only `INTERNET` access for the Tauri/Vite development host.
 
 Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to a CLI SDK containing Android SDK 36,
@@ -244,17 +249,31 @@ make mobile-android-check
 
 The tool check never downloads components, changes shell profiles, accepts
 licenses, or starts a device. `mobile-android-check` invokes the repository-pinned
-Tauri CLI and validates an APK under
+Tauri CLI, runs focused Kotlin source-policy tests, and validates an APK under
 `apps/desktop/src-tauri/gen/android/app/build/outputs/apk/`; Gradle and Rust
 build outputs remain ignored. Optional device development can use
 `pnpm --filter @nian-pass/desktop tauri android dev` after the separate device
 or emulator setup.
 
-Android document selection and Storage Access Framework integration are not yet
-implemented. A content URI must not be passed to the M3 canonical regular-file
-path contract. M5.1/M5.2 must design URI ownership and a deliberate persistence
-adapter without weakening fingerprints, safe replacement, backups, or external
-modification detection.
+Android selection uses `ACTION_OPEN_DOCUMENT` and a temporary provider grant.
+The URI never crosses into React and is never converted into a filesystem path.
+Native Kotlin streams encrypted bytes to an opaque file under
+`noBackupFilesDir/nian-pass-imports`; Rust opens it with `KdbxDocument`, deletes
+staging after successful candidate projection, and owns a read-only session.
+Wrong passwords retain staging for retry. Picker cancellation preserves the
+current pending selection. Startup/drop cleanup is best-effort and scoped to
+the dedicated directory; ordinary deletion is not claimed as physical secure
+erasure.
+
+Optional device/emulator smoke procedure: launch, Open KDBX, select a committed
+synthetic fixture, try a wrong password, retry with `demopass`, browse groups
+and entries, inspect secret-free detail, then Lock. This does not replace the
+automated Rust, Vitest, Kotlin, source-policy, and APK checks.
+
+M5.2 must separately design safe writes to a document-provider source,
+including source identity, encrypted-generation baselines, conflict detection,
+provider replacement/failure, external modification, and transactional
+guarantees. M5.1 does not copy modified staging bytes back to the URI.
 
 A future `make mobile-ios-check` will be a macOS-only gate after the official
 Tauri iOS project is generated with Xcode available. It must fail clearly on an

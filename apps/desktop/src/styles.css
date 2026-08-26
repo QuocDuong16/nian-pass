@@ -81,6 +81,76 @@ textarea:focus-visible {
   line-height: 1.55;
 }
 
+.mobile-locked-view .unlock-card {
+  padding: 32px;
+}
+.choose-another {
+  margin-top: 12px;
+}
+.mobile-vault-shell {
+  min-height: 100vh;
+  background: #f7f8f6;
+}
+.mobile-top-bar {
+  height: auto;
+  min-height: 76px;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.mobile-file-name {
+  max-width: 55vw;
+  margin: 2px 0 0;
+  color: #637169;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile-vault-layout {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.65fr) minmax(220px, 1fr) minmax(
+      240px,
+      1fr
+    );
+  min-height: calc(100vh - 76px);
+}
+.mobile-detail {
+  min-width: 0;
+  padding: 26px 22px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.mobile-detail h2 {
+  margin-bottom: 20px;
+}
+.mobile-detail h3 {
+  margin: 0 0 8px;
+  color: #5b6b62;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.mobile-detail .detail-field p {
+  margin-bottom: 6px;
+  color: #637169;
+}
+
+@media (max-width: 760px) {
+  .mobile-vault-layout {
+    display: block;
+  }
+  .mobile-vault-layout .group-sidebar,
+  .mobile-vault-layout .entry-pane,
+  .mobile-detail {
+    border-right: 0;
+    border-bottom: 1px solid #dce2dd;
+  }
+  .mobile-vault-layout .group-tree {
+    max-height: 28vh;
+    overflow: auto;
+  }
+}
+
 .unlock-card,
 .fatal-card {
   width: min(440px, 100%);

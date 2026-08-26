@@ -1,21 +1,19 @@
-use std::{sync::Arc, time::Duration};
-
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
+use tauri::State;
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use vault_core::SecretString;
 
+use crate::dto::{EntryDetailDto, SelectedVaultDto, VaultSnapshotDto};
+use crate::platform::RuntimeInfoDto;
+
 use crate::{
-    clipboard::{CLIPBOARD_CLEAR_MS, DesktopClipboardService},
-    dto::{
-        ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, EntryDetailDto,
-        LockResultDto, SelectedVaultDto, VaultSnapshotDto,
-    },
+    command_support::{copy_entry, reveal_entry_value, with_service},
+    dto::{ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, LockResultDto},
     errors::DesktopErrorDto,
     mutations::{
         CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
         RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
     },
-    platform::RuntimeInfoDto,
     state::{AppState, DesktopError},
 };
 
@@ -181,19 +179,6 @@ pub fn reveal_entry_custom_field(
     Ok(secret.expose_secret().to_owned())
 }
 
-fn reveal_entry_value(
-    entry_id: String,
-    state: State<'_, AppState>,
-    read: fn(&crate::state::DesktopVaultService, &str) -> Result<SecretString, DesktopError>,
-) -> Result<String, DesktopErrorDto> {
-    let service = state
-        .service
-        .lock()
-        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
-    let secret = read(&service, &entry_id)?;
-    Ok(secret.expose_secret().to_owned())
-}
-
 #[tauri::command]
 pub fn update_entry(
     request: UpdateEntryRequestDto,
@@ -275,17 +260,6 @@ pub fn delete_entry_custom_field(
     with_service(state, |service| service.delete_custom_field(entry_id, name))
 }
 
-fn with_service<T>(
-    state: State<'_, AppState>,
-    operation: impl FnOnce(&mut crate::state::DesktopVaultService) -> Result<T, DesktopError>,
-) -> Result<T, DesktopErrorDto> {
-    let mut service = state
-        .service
-        .lock()
-        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
-    operation(&mut service).map_err(Into::into)
-}
-
 #[tauri::command]
 pub fn close_policy(state: State<'_, AppState>) -> Result<ClosePolicyDto, DesktopErrorDto> {
     let service = state
@@ -311,34 +285,6 @@ pub async fn copy_entry_password(
     copy_entry(entry_id, state.inner().clone(), true).await
 }
 
-async fn copy_entry(
-    entry_id: String,
-    state: AppState,
-    password: bool,
-) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
-    let clipboard = state.clipboard.clone();
-    let copy = tauri::async_runtime::spawn_blocking(move || {
-        if password {
-            state.copy_entry_password(&entry_id)
-        } else {
-            state.copy_entry_username(&entry_id)
-        }
-    })
-    .await
-    .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))??;
-    schedule_expiration(clipboard, copy.generation);
-    Ok(copy.into())
-}
-
-fn schedule_expiration(clipboard: Arc<DesktopClipboardService>, generation: u64) {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(CLIPBOARD_CLEAR_MS)).await;
-        let _ =
-            tauri::async_runtime::spawn_blocking(move || clipboard.expire_generation(generation))
-                .await;
-    });
-}
-
 #[tauri::command]
 pub async fn lock_vault(state: State<'_, AppState>) -> Result<LockResultDto, DesktopErrorDto> {
     let state = state.inner().clone();
@@ -358,7 +304,6 @@ pub async fn discard_changes_and_lock(
         .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?
         .map_err(Into::into)
 }
-
 #[cfg(test)]
 mod tests {
     use std::{

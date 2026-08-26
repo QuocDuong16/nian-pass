@@ -73,7 +73,10 @@ export function runChecks(root, budget) {
     const source = readFileSync(path, "utf8");
     const name = projectPath(root, path);
     const ipcPattern = /(?:from\s+["']@tauri-apps\/api\/core["']|\binvoke\s*\()/g;
-    if (name !== "apps/desktop/src/lib/desktop.ts") {
+    if (
+      name !== "apps/desktop/src/lib/desktop.ts" &&
+      name !== "apps/desktop/src/lib/mobile.ts"
+    ) {
       checkPattern(
         violations,
         root,
@@ -96,14 +99,17 @@ export function runChecks(root, budget) {
   for (const path of rustFiles) {
     const source = readRustProduction(path);
     const name = projectPath(root, path);
-    if (name !== "apps/desktop/src-tauri/src/commands.rs") {
+    if (
+      name !== "apps/desktop/src-tauri/src/commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/mobile/commands.rs"
+    ) {
       checkPattern(
         violations,
         root,
         path,
         source,
         /#\s*\[\s*tauri::command\s*\]/g,
-        "#[tauri::command] is confined to src-tauri/src/commands.rs",
+        "#[tauri::command] is confined to reviewed command modules",
       );
     }
     if (!name.startsWith("crates/kdbx/")) {
@@ -120,7 +126,10 @@ export function runChecks(root, budget) {
 
   const manifests = [
     ["apps/cli/Cargo.toml", new Set(["kdbx", "vault-core"])],
-    ["apps/desktop/src-tauri/Cargo.toml", new Set(["vault-core", "vault-session"])],
+    [
+      "apps/desktop/src-tauri/Cargo.toml",
+      new Set(["kdbx", "vault-core", "vault-session"]),
+    ],
     ["crates/kdbx/Cargo.toml", new Set(["vault-core"])],
     ["crates/vault-core/Cargo.toml", new Set()],
     ["crates/vault-session/Cargo.toml", new Set(["kdbx", "vault-core"])],

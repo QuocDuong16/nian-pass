@@ -3,7 +3,7 @@
 This is the threat model for the M3 local vault session/filesystem foundation,
 the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
 M4.3 mutation UI, the M4.4 save/conflict flow, the M4.Q quality/security gates,
-and the M5.0 mobile foundation. It records boundaries and assumptions; it is not a
+and the M5.1 Android read-only mobile flow. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
@@ -129,6 +129,11 @@ information to an attacker even when their plaintext remains unavailable.
 - Broad mobile Tauri capabilities exposing filesystem, shell, process, or network access
 - Generated mobile defaults granting production network authority before Nian Pass has a production network feature
 - Android content URIs being treated as ordinary canonical filesystem paths
+- URI/provider/document identifiers leaking to the WebView, logs, or errors
+- Partial or stale encrypted import files remaining in private staging
+- An Android staging copy being treated as a canonical Save target
+- Mobile Save, mutation, or secret reveal being exposed before source semantics exist
+- URI grants being retained beyond the immediate staging copy
 - Platform bootstrap leaking device or environment identifiers
 - Mobile signing keys or signing passwords entering version control
 - A mobile development server being exposed outside its required development boundary
@@ -138,8 +143,9 @@ information to an attacker even when their plaintext remains unavailable.
 
 Production frontend code cannot use browser storage/cookies/cache APIs,
 `eval`, `Function`, `document.write`, `dangerouslySetInnerHTML`, console output,
-or runtime HTTP(S) assets. Only `src/lib/desktop.ts` may import Tauri core or
-invoke commands. Runtime IPC data is reconstructed through exact-key validators
+or runtime HTTP(S) assets. Only the reviewed platform adapters
+`src/lib/desktop.ts` and `src/lib/mobile.ts` may import Tauri core or invoke
+commands. Runtime IPC data is reconstructed through exact-key validators
 before use; malformed snapshots and unknown enum values fail closed as a
 generic internal error. The application-level ErrorBoundary renders fixed
 recovery guidance without the exception message, stack, props, state, or
@@ -160,13 +166,14 @@ is machine checked. npm production dependencies are audited separately from
 dev-only tooling. Coverage is a regression guard, not proof of security; exact
 DTO whitelist and state-transition assertions remain required.
 
-## M5.0 mobile foundation controls
+## M5.1 Android read-only mobile controls
 
-M5.0 adds no mobile vault workflow and no native business logic. Android uses
-the existing Tauri Rust package and shared vault crates; generated Kotlin is
-runtime glue only. Android and future iOS builds register only the secret-free
-`runtime_info` command, while desktop-only dialog, clipboard, close/focus
-lifecycle, and vault commands remain on the desktop bootstrap path.
+Android registers only the six reviewed semantic commands: `runtime_info`,
+`mobile_select_vault`, `mobile_unlock_vault`, `mobile_vault_snapshot`,
+`mobile_entry_detail`, and `mobile_lock_vault`. React never invokes the native
+plugin namespace. Desktop dialog, clipboard, reveal, mutation, Save,
+close/focus, and dirty-session commands remain on the desktop bootstrap path.
+iOS still registers only `runtime_info` and makes no vault-access claim.
 
 The runtime DTO contains exactly one coarse enum (`desktop`, `android`, or
 `ios`). Exact frontend validation rejects missing keys, extra keys, unknown
@@ -182,15 +189,51 @@ state/build outputs, signing property files, and native build products.
 Vite binds to loopback in ordinary development. It uses `TAURI_DEV_HOST` only
 when Tauri mobile development explicitly supplies that host, with a scoped HMR
 configuration. This network-accessible development server is development-only;
-production uses bundled assets and the production CSP is unchanged. M5.0's
-mobile view contains no vault data or credential and exposes no debug endpoint.
-M5.0 production Android builds do not request `INTERNET`; that permission exists
+production uses bundled assets and the production CSP is unchanged. M5.1
+production Android builds do not request `INTERNET`; that permission exists
 only in the debug manifest for Tauri mobile development and is source-ratcheted.
 
-Android Storage Access Framework and document-provider URIs remain unimplemented.
-They must not be converted into strings and passed to `VaultSession` as if they
-were canonical regular files. Later picker/persistence design must preserve the
-M3 fingerprint, safe replacement, backup, and external-change invariants.
+The native bridge uses `ACTION_OPEN_DOCUMENT`, `CATEGORY_OPENABLE`, provider
+display-name metadata, and `ContentResolver.openInputStream`. It requests no
+storage/media permission, does not use `FileProvider`, `_data`, `Uri.getPath`,
+or persistable URI grants, and never returns the URI to Rust or React. It streams
+with a bounded buffer into an opaque random filename under the app-private
+no-backup import directory. A failed copy deletes its partial file before
+returning generic `picker_failed`; provider exceptions and identifiers are not
+forwarded.
+
+Rust owns one optional pending encrypted selection and one optional decrypted
+`MobileReadSession`, with locked and unlocked states kept disjoint. Pending-file
+RAII cleans replacement, drop, and successful unlock. Plugin startup cleanup
+inspects only Nian Pass's dedicated directory, skips symlinks, and removes only
+recognized opaque import names. These controls reduce retention but do not
+claim physical secure erasure of filesystem blocks.
+
+The password exists in React only for the current attempt, is cleared before
+awaiting Rust, becomes `SecretString` on a blocking worker, and is never stored.
+Wrong credentials map only to `unlock_failed` and retain staging for retry.
+Malformed or unsupported input exposes no parser/header/KDF detail. Candidate
+open and secret-free projection complete before staging cleanup and state swap;
+failure leaves the locked pending state intact. Successful unlock deletes
+staging, installs a path-free read session, and returns only exact validated
+DTOs. Lock drops that session immediately without a credential or dirty prompt.
+
+`MobileReadSession` directly uses the existing `KdbxDocument`; Kotlin contains
+no parser or cryptography. It has no Save, reload, source fingerprint, mutation,
+or mutable-document API. Browse/detail can expose protected markers, visible
+reviewed metadata, field presence, and custom-field name/protection only—never
+password, notes plaintext, custom values, TOTP/passkey material, or attachments.
+The original provider document is untouched. M5.2 must design writes and
+conflict/source identity separately rather than copying modified staging bytes
+back to a URI.
+
+The mobile view clears detail and hides browse presentation when the WebView
+reports hidden. This is visual mitigation, not cryptographic Lock or native
+background enforcement. The Rust read session can remain decrypted while the
+app is backgrounded until explicit Lock; authoritative native lifecycle lock,
+app-switcher/screenshot hardening, configurable auto-lock, biometrics, and
+Keystore integration remain M5.5 work. M5.1 is not production-ready mobile
+security.
 
 Android signing relies only on standard local/debug tooling; no keystore or
 password belongs in the repository. iOS is not initialized or built on Linux.

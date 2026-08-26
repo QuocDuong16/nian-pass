@@ -49,13 +49,17 @@ binary fails. Cargo always uses `--locked`; pnpm install always uses
 policy, quick, and quality gates. It verifies the committed Tauri-generated
 Android project, API 26 minimum, normal generated ABI set, machine-local ignore
 rules, the narrow `TAURI_DEV_HOST` Vite boundary, a network-free main manifest,
-and debug-only ownership of the development `INTERNET` permission. It does not
-claim an Android binary was built.
+and debug-only ownership of the development `INTERNET` permission. For M5.1 it
+also ratchets SAF/`ContentResolver`, no-backup streaming staging, opaque names,
+the read-only semantic command whitelist, absence of URI/path DTOs, absence of
+`VaultSession` from mobile staging, and absence of Kotlin KDBX logic. It does
+not claim an Android binary was built.
 
 `mobile-tools-check` validates Java, SDK 36, Build Tools 36.0.0, NDK, the two
 priority Rust targets, and the repository-pinned Tauri CLI without installing
-anything. `mobile-android-check` then invokes `tauri android build --apk` for
-aarch64 and x86_64 and requires a real APK artifact. It needs neither an
+anything. `mobile-android-check` invokes `tauri android build --apk` for
+aarch64 and x86_64, runs the focused Kotlin unit tests, and requires a real APK
+artifact containing the native source bridge. It needs neither an
 emulator nor a device and remains separate from `quality-check`, so ordinary
 Linux/desktop CI never silently skips or unexpectedly requires an Android SDK.
 
@@ -181,11 +185,11 @@ plugin behind Nian Pass semantic commands. CSP tokens are unchanged. A future
 milestone may intentionally update this policy only with threat-model,
 capability, CSP, and regression-test review.
 
-M5.0 does not expand that capability or dependency allowlist. Mobile bootstrap
-uses compile-time Rust target information instead of `plugin-os`; Android and
-future iOS register only the exact runtime-info command until later milestones
-provide reviewed native storage and lifecycle integrations. Production CSP
-tokens remain unchanged.
+M5.1 does not expand the WebView capability or external plugin dependency
+allowlist. Mobile bootstrap uses compile-time Rust target information instead
+of `plugin-os`; the first-party Android source plugin is called only from Rust
+behind the exact semantic mobile command surface. iOS remains passive.
+Production CSP tokens remain unchanged.
 
 ## IPC and OpenWiki
 
@@ -195,6 +199,15 @@ tests feed it through runtime validators. Exact-key validation rejects unknown
 fields so future DTO drift cannot silently expose a secret-bearing addition.
 Full type generation is deferred until a maintained generator reduces risk
 without placing export derives on core secret-bearing types.
+
+`apps/desktop/contracts/mobile-contract.json` reuses the same exact selected,
+snapshot, summary, and entry-detail semantics and adds only stable mobile error
+codes. Rust Serde and TypeScript runtime tests consume that fixture. Focused
+service tests use only committed synthetic KDBX data and prove replacement and
+cancel ownership, wrong-password retry, successful staging cleanup, malformed
+candidate atomicity, generic detail errors, and drop-only Lock. Vitest proves
+Android/iOS routing, filename-only selection, pre-await password clearing,
+retry, secret-free browse/detail, absence of mutation UI, and Lock cleanup.
 
 M4.3 extends that fixture only with secret-free `dirty`, creation receipts, and
 close-policy samples. Password, notes, and custom-field request plaintext is

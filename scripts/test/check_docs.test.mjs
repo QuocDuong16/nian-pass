@@ -18,7 +18,7 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M5.0 — Mobile Foundation\nM4.5 — Desktop Security UX\nExplicit Save. " +
+    "M5.1 — Mobile Unlock + Browse\nM5.1 Android is read-only.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
       "The active clipboard clears only if it still contains the value written by Nian Pass. " +
@@ -29,7 +29,8 @@ function fixture(t) {
     root,
     "docs/architecture.md",
     "M4.Q quality architecture. Clipboard salt then SHA-256 fingerprint then generation. " +
-      "apps/desktop remains the historical shared host. Android content URI is not a canonical path.\n",
+      "apps/desktop remains the historical shared host. Android content URI is not a canonical path. " +
+      "VaultSession is NOT used for Android staging.\n",
   );
   write(
     root,

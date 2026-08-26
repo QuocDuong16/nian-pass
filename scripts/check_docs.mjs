@@ -29,7 +29,8 @@ export function runChecks(root) {
   const packageSource = readRequired(root, "package.json", violations);
   const nodeVersion = readRequired(root, ".node-version", violations).trim();
 
-  requirePattern(violations, "README.md", readme, /M5\.0\s*[—-]\s*Mobile Foundation/, "current milestone must be M5.0");
+  requirePattern(violations, "README.md", readme, /M5\.1\s*[—-]\s*Mobile Unlock \+ Browse/, "current milestone must be M5.1");
+  requirePattern(violations, "README.md", readme, /M5\.1[\s\S]{0,500}read-only/i, "M5.1 Android read-only boundary is missing");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
   requirePattern(violations, "README.md", readme, /external[\s\S]{0,180}(?:refus|not automatically merged)/i, "M4.4 external-conflict boundary is missing");
   requirePattern(violations, "README.md", readme, /no Save As[\s\S]{0,100}(?:force overwrite|autosave)/i, "M4.4 persistence non-goals are missing");
@@ -50,6 +51,7 @@ export function runChecks(root) {
   requirePattern(violations, "README.md", readme, /make mobile-android-check/, "real Android build gate is missing");
   requirePattern(violations, "docs/architecture.md", architecture, /apps\/desktop[\s\S]{0,180}historical/i, "shared Tauri host naming debt is missing");
   requirePattern(violations, "docs/architecture.md", architecture, /content[ -]URI[\s\S]{0,300}(?:not|isn't)[\s\S]{0,80}canonical/i, "Android URI persistence boundary is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /VaultSession[\s\S]{0,80}(?:NOT|not)[\s\S]{0,80}Android staging/i, "Android staging must exclude VaultSession");
   requirePattern(violations, "docs/threat-model.md", threatModel, /macOS with Xcode[\s\S]{0,180}(?:NOT RUN|not initialized|not.*built)/i, "honest iOS validation boundary is missing");
   requirePattern(violations, "docs/quality.md", quality, /mobile-tools-check[\s\S]{0,300}mobile-android-check/i, "mobile gate policy is missing");
 

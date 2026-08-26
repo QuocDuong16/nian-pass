@@ -1,6 +1,7 @@
 use serde::Serialize;
 use vault_core::{CustomFieldSummary, EntrySummary, FieldProtection, Group, SummaryText, Vault};
 
+#[cfg(desktop)]
 use crate::clipboard::{ClipboardClearStatus, ClipboardCopy};
 
 /// Filename metadata returned after a native file selection.
@@ -21,6 +22,7 @@ pub struct VaultSnapshotDto {
 }
 
 /// Secret-free result of entry creation.
+#[cfg(desktop)]
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedEntryDto {
@@ -29,6 +31,7 @@ pub struct CreatedEntryDto {
 }
 
 /// Secret-free result of group creation.
+#[cfg(desktop)]
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedGroupDto {
@@ -37,6 +40,7 @@ pub struct CreatedGroupDto {
 }
 
 /// Rust-authoritative decision for a main-window close request.
+#[cfg(desktop)]
 #[derive(Clone, Copy, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "policy")]
 pub enum ClosePolicyDto {
@@ -97,6 +101,7 @@ pub enum FieldProtectionDto {
 }
 
 /// Safe confirmation that clipboard I/O succeeded.
+#[cfg(desktop)]
 #[derive(Clone, Copy, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipboardReceiptDto {
@@ -105,6 +110,7 @@ pub struct ClipboardReceiptDto {
 }
 
 /// Lock always drops the session; this reports best-effort clipboard cleanup.
+#[cfg(desktop)]
 #[derive(Clone, Copy, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "clipboard")]
 pub enum LockResultDto {
@@ -177,6 +183,7 @@ impl From<&CustomFieldSummary> for CustomFieldSummaryDto {
     }
 }
 
+#[cfg(desktop)]
 impl From<ClipboardCopy> for ClipboardReceiptDto {
     fn from(value: ClipboardCopy) -> Self {
         Self {
@@ -186,6 +193,7 @@ impl From<ClipboardCopy> for ClipboardReceiptDto {
     }
 }
 
+#[cfg(desktop)]
 impl From<ClipboardClearStatus> for LockResultDto {
     fn from(value: ClipboardClearStatus) -> Self {
         match value {

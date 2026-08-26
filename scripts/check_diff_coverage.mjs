@@ -154,9 +154,22 @@ function evaluateChangedLines(changed, coverage) {
   };
 }
 
-function rustProductionLines(file, changed, cwd = process.cwd()) {
+function rustTargetOs(platform = process.platform) {
+  if (platform === "darwin") return "macos";
+  if (platform === "win32") return "windows";
+  return platform;
+}
+
+function rustProductionLines(file, changed, cwd = process.cwd(), targetOs = rustTargetOs()) {
   if (!file.endsWith(".rs")) return changed;
   const source = withoutRustTestItems(readFileSync(resolve(cwd, file), "utf8"), true);
+  const fileTarget = source.match(
+    /^\s*#!\[cfg\(target_os\s*=\s*"([^"]+)"\)\]/,
+  )?.[1];
+  if (fileTarget !== undefined && fileTarget !== targetOs) return new Set();
+  if (!/\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*(?:<[^>{}]*>)?\s*\(/.test(source)) {
+    return new Set();
+  }
   const lines = source.split(/\r?\n/);
   return new Set([...changed].filter((line) => lines[line - 1]?.trim() !== ""));
 }
@@ -181,12 +194,16 @@ function main() {
 
   const failures = [];
   for (const file of files) {
+    const changed = rustProductionLines(file, changedLineNumbers(base, file));
+    if (changed.size === 0) {
+      console.log(`${file}: no executable production lines changed`);
+      continue;
+    }
     const fileCoverage = coverage.get(file);
     if (fileCoverage === undefined) {
       failures.push(`${file}: absent from coverage report`);
       continue;
     }
-    const changed = rustProductionLines(file, changedLineNumbers(base, file));
     const result = evaluateChangedLines(changed, fileCoverage);
     if (result.percent === null) {
       console.log(`${file}: no executable production lines changed`);
@@ -226,4 +243,5 @@ export {
   parseLcov,
   resolveBase,
   rustProductionLines,
+  rustTargetOs,
 };

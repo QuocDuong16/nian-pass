@@ -5,6 +5,7 @@ import { desktopApi, type RuntimeApi } from "../lib/desktop";
 import type { DesktopWindowLifecycle } from "../lib/window-lifecycle";
 import type { RuntimePlatform } from "../types/runtime";
 import { ApplicationRoot } from "./ApplicationRoot";
+import { createMobileApi } from "../test/mobile-api";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -40,35 +41,47 @@ test("desktop runtime mounts the existing desktop application", async () => {
   });
 });
 
-test.each(["android", "ios"] as const)(
-  "%s foundation is passive and does not mount desktop vault lifecycle",
-  async (platform) => {
-    const windowLifecycle = lifecycle();
-    const selectVault = vi.spyOn(desktopApi, "selectVault");
-    const unlockVault = vi.spyOn(desktopApi, "unlockVault");
-    const closePolicy = vi.spyOn(desktopApi, "closePolicy");
-    const lockVault = vi.spyOn(desktopApi, "lockVault");
+test("Android mounts the mobile vault app without desktop lifecycle", async () => {
+  const windowLifecycle = lifecycle();
+  const mobile = createMobileApi();
+  const closePolicy = vi.spyOn(desktopApi, "closePolicy");
 
-    render(
-      <ApplicationRoot
-        runtime={runtime(platform)}
-        windowLifecycle={windowLifecycle}
-      />,
-    );
+  render(
+    <ApplicationRoot
+      runtime={runtime("android")}
+      windowLifecycle={windowLifecycle}
+      mobile={mobile}
+    />,
+  );
 
-    expect(
-      await screen.findByText(
-        `${platform === "android" ? "Android" : "iOS"} runtime ready. Vault access arrives in M5.1.`,
-      ),
-    ).toBeVisible();
-    expect(windowLifecycle.onCloseRequested).not.toHaveBeenCalled();
-    expect(windowLifecycle.onFocusChanged).not.toHaveBeenCalled();
-    expect(selectVault).not.toHaveBeenCalled();
-    expect(unlockVault).not.toHaveBeenCalled();
-    expect(closePolicy).not.toHaveBeenCalled();
-    expect(lockVault).not.toHaveBeenCalled();
-  },
-);
+  expect(
+    await screen.findByRole("button", { name: "Open KDBX" }),
+  ).toBeVisible();
+  expect(windowLifecycle.onCloseRequested).not.toHaveBeenCalled();
+  expect(windowLifecycle.onFocusChanged).not.toHaveBeenCalled();
+  expect(closePolicy).not.toHaveBeenCalled();
+});
+
+test("iOS remains passive and mounts neither Android picker nor desktop lifecycle", async () => {
+  const windowLifecycle = lifecycle();
+  const mobile = createMobileApi();
+  render(
+    <ApplicationRoot
+      runtime={runtime("ios")}
+      windowLifecycle={windowLifecycle}
+      mobile={mobile}
+    />,
+  );
+
+  expect(
+    await screen.findByText(
+      "iOS vault access is not implemented in this build.",
+    ),
+  ).toBeVisible();
+  expect(windowLifecycle.onCloseRequested).not.toHaveBeenCalled();
+  expect(mobile.selectVault).not.toHaveBeenCalled();
+  expect(mobile.unlockVault).not.toHaveBeenCalled();
+});
 
 test("invalid runtime bootstrap fails closed without mounting desktop", async () => {
   const windowLifecycle = lifecycle();

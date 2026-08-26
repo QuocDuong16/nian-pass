@@ -63,6 +63,41 @@ export function runChecks(root) {
     violations,
   );
   const vite = requireFile(root, "apps/desktop/vite.config.ts", violations);
+  const nativeBridge = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+    violations,
+  );
+  const nativePolicy = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePolicy.kt",
+    violations,
+  );
+  const nativePolicyTest = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/VaultSourcePolicyTest.kt",
+    violations,
+  );
+  const mobileRust = [
+    "apps/desktop/src-tauri/src/mobile/session.rs",
+    "apps/desktop/src-tauri/src/mobile/state.rs",
+    "apps/desktop/src-tauri/src/mobile/source.rs",
+  ]
+    .map((path) => requireFile(root, path, violations))
+    .join("\n");
+  const rustHost = requireFile(
+    root,
+    "apps/desktop/src-tauri/src/lib.rs",
+    violations,
+  );
+  const mobileFrontend = [
+    "apps/desktop/src/lib/mobile.ts",
+    "apps/desktop/src/types/mobile.ts",
+    "apps/desktop/src/features/mobile/MobileVaultApp.tsx",
+    "apps/desktop/src/features/mobile/MobileLockedView.tsx",
+  ]
+    .map((path) => requireFile(root, path, violations))
+    .join("\n");
 
   for (const path of [
     "apps/desktop/src-tauri/gen/android/gradlew",
@@ -101,17 +136,17 @@ export function runChecks(root) {
     );
   }
   if (
-    /FileProvider|FILE_PROVIDER_PATHS|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE/.test(
+    /FileProvider|FILE_PROVIDER_PATHS|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|READ_MEDIA_/.test(
       manifest,
     )
   ) {
     violations.push(
-      "M5.0 Android manifest must not expose a filesystem provider or storage permission",
+      "M5.1 Android manifest must not expose a filesystem provider or storage permission",
     );
   }
   if (manifest.includes(internetPermission)) {
     violations.push(
-      "M5.0 release/main Android manifest must not request INTERNET",
+      "M5.1 release/main Android manifest must not request INTERNET",
     );
   }
   const debugPermissions = [
@@ -124,7 +159,7 @@ export function runChecks(root) {
   ).length;
   if (debugInternetCount !== 1) {
     violations.push(
-      "M5.0 debug Android manifest must request INTERNET exactly once",
+      "M5.1 debug Android manifest must request INTERNET exactly once",
     );
   }
   const unrelatedDebugPermissions = debugPermissions.filter(
@@ -132,13 +167,13 @@ export function runChecks(root) {
   );
   if (unrelatedDebugPermissions.length > 0) {
     violations.push(
-      `M5.0 debug Android manifest may request only INTERNET; found ${unrelatedDebugPermissions.join(", ")}`,
+      `M5.1 debug Android manifest may request only INTERNET; found ${unrelatedDebugPermissions.join(", ")}`,
     );
   }
   for (const permission of dangerousDebugPermissions) {
     if (debugManifest.includes(`android.permission.${permission}`)) {
       violations.push(
-        `M5.0 debug Android manifest must not request ${permission}`,
+        `M5.1 debug Android manifest must not request ${permission}`,
       );
     }
   }
@@ -168,6 +203,80 @@ export function runChecks(root) {
     violations.push(
       "Vite must retain loopback-only hosting outside Tauri mobile development",
     );
+  }
+
+  for (const required of [
+    "Intent.ACTION_OPEN_DOCUMENT",
+    "Intent.CATEGORY_OPENABLE",
+    "contentResolver.openInputStream",
+    "OpenableColumns.DISPLAY_NAME",
+    "noBackupFilesDir",
+    "nian-pass-imports",
+    "FileOutputStream",
+  ]) {
+    if (!nativeBridge.includes(required)) {
+      violations.push(`M5.1 Android source bridge must use ${required}`);
+    }
+  }
+  for (const [label, pattern] of [
+    ["Uri.getPath", /\.getPath\s*\(/],
+    ["historical _data column", /["']_data["']/],
+    ["persistable URI grants", /takePersistableUriPermission/],
+    ["whole-document byte loading", /readBytes\s*\(|readAllBytes\s*\(|Base64/],
+    ["external staging", /externalFilesDir|getExternal|Environment\.DIRECTORY_/],
+  ]) {
+    if (pattern.test(nativeBridge)) {
+      violations.push(`M5.1 native bridge must not use ${label}`);
+    }
+  }
+  if (!/ByteArray\(DEFAULT_BUFFER_SIZE\)/.test(nativeBridge)) {
+    violations.push("M5.1 native bridge must retain a bounded streaming buffer");
+  }
+  if (!/UUID\.randomUUID\(\)/.test(nativePolicy)) {
+    violations.push("M5.1 staging filenames must remain opaque and random");
+  }
+  if (!nativePolicyTest.includes("isManagedStagingName")) {
+    violations.push("M5.1 native staging policy must retain focused unit tests");
+  }
+  if (/VaultSession::(?:open|save)|\.save\s*\(/.test(mobileRust)) {
+    violations.push("M5.1 mobile Rust must not use VaultSession open/save semantics");
+  }
+  if (!mobileRust.includes("KdbxDocument::open")) {
+    violations.push("M5.1 mobile Rust must reuse the authoritative KdbxDocument parser");
+  }
+  if (/\b(?:AES|Argon2|ChaCha|KeyDerivation|Database\.open)\b/i.test(nativeBridge)) {
+    violations.push("M5.1 native Kotlin must not implement KDBX or cryptography");
+  }
+  const androidHandler = rustHost.match(
+    /fn run_mobile\(\)[\s\S]*?generate_handler!\[([\s\S]*?)\][\s\S]*?Android runtime failed/,
+  )?.[1];
+  const allowedCommands = new Set([
+    "runtime_info",
+    "mobile_select_vault",
+    "mobile_unlock_vault",
+    "mobile_vault_snapshot",
+    "mobile_entry_detail",
+    "mobile_lock_vault",
+  ]);
+  if (androidHandler === undefined) {
+    violations.push("M5.1 Android semantic command handler is missing");
+  } else {
+    const commands = androidHandler.match(/[a-z][a-z0-9_]*/g) ?? [];
+    const unexpected = commands.filter((command) => !allowedCommands.has(command));
+    const missing = [...allowedCommands].filter((command) => !commands.includes(command));
+    if (unexpected.length > 0 || missing.length > 0) {
+      violations.push("M5.1 Android command surface must match the read-only whitelist");
+    }
+  }
+  if (/plugin:vault-source|content:\/\//.test(mobileFrontend)) {
+    violations.push("M5.1 frontend must not receive or invoke native document transport");
+  }
+  if (
+    /\b(?:contentUri|stagedPath|absolutePath|provider|documentId|uri|path)\s*[?:]/i.test(
+      mobileFrontend,
+    )
+  ) {
+    violations.push("M5.1 mobile TypeScript DTOs must not expose URI or path properties");
   }
 
   return violations;

@@ -1,0 +1,47 @@
+{
+  "selectedVault": {
+    "fileName": "example.kdbx"
+  },
+  "snapshot": {
+    "dirty": false,
+    "rootGroupId": "group-root",
+    "groups": [
+      {
+        "id": "group-root",
+        "name": "Root",
+        "childGroupIds": [],
+        "entryIds": ["entry-example"]
+      }
+    ],
+    "entries": [
+      {
+        "id": "entry-example",
+        "groupId": "group-root",
+        "title": { "kind": "visible", "value": "Example" },
+        "username": { "kind": "missing" },
+        "url": { "kind": "protected" },
+        "passwordPresent": true,
+        "notesPresent": true,
+        "tags": ["synthetic"]
+      }
+    ]
+  },
+  "entryDetail": {
+    "id": "entry-example",
+    "title": { "kind": "visible", "value": "Example" },
+    "username": { "kind": "missing" },
+    "url": { "kind": "protected" },
+    "passwordPresent": true,
+    "notesPresent": true,
+    "customFields": [{ "name": "Account type", "protection": "unprotected" }]
+  },
+  "errors": [
+    "picker_failed",
+    "no_vault_selected",
+    "unlock_failed",
+    "unsupported_vault",
+    "entry_not_found",
+    "locked",
+    "internal"
+  ]
+}

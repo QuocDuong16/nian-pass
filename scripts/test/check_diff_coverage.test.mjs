@@ -14,6 +14,7 @@ import {
   parseLcov,
   resolveBase,
   rustProductionLines,
+  rustTargetOs,
 } from "../check_diff_coverage.mjs";
 
 function temporary(t, files = {}) {
@@ -98,4 +99,26 @@ test("Rust cfg(test) lines are removed from changed production lines", (t) => {
     root,
   );
   assert.deepEqual([...filtered], [1]);
+});
+
+test("Rust host coverage excludes whole target-only files and declaration modules", (t) => {
+  const root = temporary(t, {
+    "crates/core/src/android.rs":
+      "#![cfg(target_os = \"android\")]\npub fn native_only() {}\n",
+    "crates/core/src/mobile.rs": "mod android;\npub use android::Bridge;\n",
+  });
+  assert.deepEqual(
+    [...rustProductionLines("crates/core/src/android.rs", new Set([1, 2]), root, "linux")],
+    [],
+  );
+  assert.deepEqual(
+    [...rustProductionLines("crates/core/src/android.rs", new Set([1, 2]), root, "android")],
+    [1, 2],
+  );
+  assert.deepEqual(
+    [...rustProductionLines("crates/core/src/mobile.rs", new Set([1, 2]), root, "linux")],
+    [],
+  );
+  assert.equal(rustTargetOs("darwin"), "macos");
+  assert.equal(rustTargetOs("win32"), "windows");
 });

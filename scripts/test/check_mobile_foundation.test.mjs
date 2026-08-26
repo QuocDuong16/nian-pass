@@ -51,6 +51,60 @@ function fixture(t) {
     "apps/desktop/vite.config.ts",
     'const mobileDevHost = loadEnv(mode, ".", "")["TAURI_DEV_HOST"];\nconst host = mobileDevHost ?? "127.0.0.1";\n',
   );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+    `Intent.ACTION_OPEN_DOCUMENT
+Intent.CATEGORY_OPENABLE
+contentResolver.openInputStream
+OpenableColumns.DISPLAY_NAME
+noBackupFilesDir
+nian-pass-imports
+FileOutputStream
+ByteArray(DEFAULT_BUFFER_SIZE)
+`,
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePolicy.kt",
+    "UUID.randomUUID()\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/VaultSourcePolicyTest.kt",
+    "isManagedStagingName\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/session.rs",
+    "KdbxDocument::open(staged_path, password)\n",
+  );
+  write(root, "apps/desktop/src-tauri/src/mobile/state.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/source.rs");
+  write(
+    root,
+    "apps/desktop/src-tauri/src/lib.rs",
+    `fn run_mobile() {
+generate_handler![
+runtime_info,
+mobile_select_vault,
+mobile_unlock_vault,
+mobile_vault_snapshot,
+mobile_entry_detail,
+mobile_lock_vault
+]
+expect("Nian Pass Android runtime failed");
+}
+`,
+  );
+  for (const path of [
+    "apps/desktop/src/lib/mobile.ts",
+    "apps/desktop/src/types/mobile.ts",
+    "apps/desktop/src/features/mobile/MobileVaultApp.tsx",
+    "apps/desktop/src/features/mobile/MobileLockedView.tsx",
+  ]) {
+    write(root, path);
+  }
   for (const path of [
     "apps/desktop/src-tauri/gen/android/gradlew",
     "apps/desktop/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar",
@@ -133,4 +187,59 @@ test("dangerous debug permissions are rejected", (t) => {
     '<manifest><uses-permission android:name="android.permission.INTERNET" /><uses-permission android:name="android.permission.CAMERA" /></manifest>\n',
   );
   assert.match(runChecks(root).join("\n"), /must not request CAMERA/);
+});
+
+test("native bridge source-path and whole-buffer shortcuts are rejected", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+    `Intent.ACTION_OPEN_DOCUMENT
+Intent.CATEGORY_OPENABLE
+contentResolver.openInputStream
+OpenableColumns.DISPLAY_NAME
+noBackupFilesDir
+nian-pass-imports
+FileOutputStream
+ByteArray(DEFAULT_BUFFER_SIZE)
+uri.getPath()
+readBytes()
+takePersistableUriPermission()
+`,
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /Uri.getPath/);
+  assert.match(violations, /whole-document byte loading/);
+  assert.match(violations, /persistable URI grants/);
+});
+
+test("mobile VaultSession and mutation commands are rejected", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/state.rs",
+    "VaultSession::open(staged_path, password)\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/src/lib.rs",
+    `fn run_mobile() {
+generate_handler![runtime_info, mobile_select_vault, mobile_unlock_vault, mobile_vault_snapshot, mobile_entry_detail, mobile_lock_vault, save_vault]
+expect("Nian Pass Android runtime failed");
+}
+`,
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /must not use VaultSession/);
+  assert.match(violations, /read-only whitelist/);
+});
+
+test("mobile TypeScript transport identifiers are rejected", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src/types/mobile.ts",
+    "interface Selection { contentUri: string; stagedPath?: string }\n",
+  );
+  assert.match(runChecks(root).join("\n"), /must not expose URI or path/);
 });
