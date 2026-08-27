@@ -19,6 +19,7 @@ export function MobileUnlockedView(props: Props) {
   const [snapshot, setSnapshot] = useState(props.initialSnapshot);
   const [hasDraft, setHasDraft] = useState(false);
   const [mutationPending, setMutationPending] = useState(false);
+  const [lockPending, setLockPending] = useState(false);
   const [dirtyExit, setDirtyExit] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
   const flow = useMobileSaveFlow({
@@ -26,6 +27,7 @@ export function MobileUnlockedView(props: Props) {
     dirty: snapshot.dirty,
     onSnapshot: setSnapshot,
     onLocked: props.onLocked,
+    onLockPendingChange: setLockPending,
     onLockFailure: () => {
       setLockError(
         "The vault is saved, but Nian Pass could not safely release the active Android source.",
@@ -44,7 +46,7 @@ export function MobileUnlockedView(props: Props) {
     );
   }
 
-  const busy = flow.busy || mutationPending;
+  const busy = flow.busy || mutationPending || lockPending;
   const editsDisabled = busy || !props.selected.writable || flow.blocked;
   const saveDisabled =
     busy ||
@@ -61,6 +63,7 @@ export function MobileUnlockedView(props: Props) {
       setDirtyExit(true);
       return;
     }
+    setLockPending(true);
     try {
       await props.api.lockVault();
       props.onLocked();
@@ -68,12 +71,14 @@ export function MobileUnlockedView(props: Props) {
       setLockError(
         "Nian Pass could not safely release the active Android source.",
       );
+    } finally {
+      setLockPending(false);
     }
   };
 
   const discard = async () => {
     if (busy) return;
-    setMutationPending(true);
+    setLockPending(true);
     try {
       await props.api.discardChangesAndLock();
       props.onLocked();
@@ -83,7 +88,7 @@ export function MobileUnlockedView(props: Props) {
         "The dirty session remains open because discard-and-lock did not complete.",
       );
     } finally {
-      setMutationPending(false);
+      setLockPending(false);
     }
   };
 

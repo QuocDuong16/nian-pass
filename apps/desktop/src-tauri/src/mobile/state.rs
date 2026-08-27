@@ -301,33 +301,47 @@ impl MobileVaultService {
     }
 
     pub(crate) fn finish_operation(&mut self, operation: u64) {
+        self.cancel_operation(operation);
+    }
+
+    pub(crate) fn cancel_operation(&mut self, operation: u64) {
         if self.active_operation == Some(operation) {
             self.active_operation = None;
         }
     }
 
-    pub(crate) fn lock(&mut self) -> Result<String, MobileError> {
+    pub(crate) fn begin_lock(&mut self) -> Result<MobileOperation, MobileError> {
         if self.active_operation.is_some() {
             return Err(MobileError::Busy);
         }
         if self.session.as_ref().ok_or(MobileError::Locked)?.is_dirty() {
             return Err(MobileError::UnsavedChanges);
         }
-        self.drop_session()
+        self.begin_operation()
     }
 
-    pub(crate) fn discard_and_lock(&mut self) -> Result<String, MobileError> {
+    pub(crate) fn begin_discard_and_lock(&mut self) -> Result<MobileOperation, MobileError> {
         if self.active_operation.is_some() {
             return Err(MobileError::Busy);
         }
-        self.drop_session()
+        self.begin_operation()
     }
 
-    fn drop_session(&mut self) -> Result<String, MobileError> {
-        let session = self.session.take().ok_or(MobileError::Locked)?;
-        let handle = session.source_handle().as_str().to_owned();
-        drop(session);
-        Ok(handle)
+    pub(crate) fn complete_lock(&mut self, operation: u64) -> Result<(), MobileError> {
+        self.complete_lock_operation(operation)
+    }
+
+    pub(crate) fn complete_discard_and_lock(&mut self, operation: u64) -> Result<(), MobileError> {
+        self.complete_lock_operation(operation)
+    }
+
+    fn complete_lock_operation(&mut self, operation: u64) -> Result<(), MobileError> {
+        if self.active_operation != Some(operation) || self.session.is_none() {
+            return Err(MobileError::Internal);
+        }
+        self.session.take();
+        self.active_operation = None;
+        Ok(())
     }
 }
 
@@ -409,7 +423,46 @@ mod tests {
     }
 
     #[test]
-    fn dirty_lock_refuses_and_explicit_discard_drops_session() {
+    fn clean_lock_release_failure_cancellation_preserves_the_exact_session() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        selected(&mut service, path, true);
+        let before = service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock");
+        let before = serde_json::to_value(before).expect("serialize snapshot");
+
+        let operation = service.begin_lock().expect("begin clean lock");
+        assert!(!service.snapshot().expect("retained while pending").dirty);
+        service.cancel_operation(operation.id);
+
+        let after = service.snapshot().expect("retained after release failure");
+        assert!(!after.dirty);
+        assert_eq!(
+            serde_json::to_value(after).expect("serialize snapshot"),
+            before
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clean_lock_release_success_drops_session_only_on_completion() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        selected(&mut service, path, true);
+        service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock");
+
+        let operation = service.begin_lock().expect("begin clean lock");
+        assert!(service.snapshot().is_ok());
+        service.complete_lock(operation.id).expect("complete lock");
+        assert!(matches!(service.snapshot(), Err(MobileError::Locked)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dirty_ordinary_lock_refuses_without_reserving_an_operation() {
         let (root, path) = fixture();
         let mut service = MobileVaultService::new();
         selected(&mut service, path, true);
@@ -427,15 +480,21 @@ mod tests {
                 notes: None,
             })
             .expect("mutate");
-        assert!(matches!(service.lock(), Err(MobileError::UnsavedChanges)));
+        assert!(matches!(
+            service.begin_lock(),
+            Err(MobileError::UnsavedChanges)
+        ));
         assert!(service.snapshot().expect("retained").dirty);
-        assert!(service.discard_and_lock().is_ok());
-        assert!(matches!(service.snapshot(), Err(MobileError::Locked)));
+        let discard = service
+            .begin_discard_and_lock()
+            .expect("no lock reservation was left behind");
+        service.cancel_operation(discard.id);
+        assert!(service.snapshot().expect("still dirty").dirty);
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn active_save_serializes_mutation_reload_and_lock_without_sleeps() {
+    fn discard_lock_release_failure_preserves_the_exact_dirty_session() {
         let (root, path) = fixture();
         let mut service = MobileVaultService::new();
         selected(&mut service, path, true);
@@ -445,15 +504,81 @@ mod tests {
         let entry = snapshot.entries.first().expect("entry").id.clone();
         service
             .update_entry(crate::mobile::mutations::MobileUpdateEntryRequest {
-                entry_id: entry.clone(),
-                title: Some("dirty".to_owned()),
+                entry_id: entry,
+                title: Some("retained dirty mutation".to_owned()),
                 username: None,
                 url: None,
                 password: None,
                 notes: None,
             })
             .expect("mutate");
-        let operation = service.begin_save().expect("begin");
+        let before = serde_json::to_value(service.snapshot().expect("dirty snapshot"))
+            .expect("serialize snapshot");
+
+        let operation = service
+            .begin_discard_and_lock()
+            .expect("begin discard lock");
+        assert!(service.snapshot().expect("retained while pending").dirty);
+        service.cancel_operation(operation.id);
+
+        let after = service.snapshot().expect("retained after release failure");
+        assert!(after.dirty);
+        assert_eq!(
+            serde_json::to_value(after).expect("serialize snapshot"),
+            before
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn discard_lock_release_success_drops_dirty_session_without_saving() {
+        let (root, path) = fixture();
+        let provider = root.join("provider.kdbx");
+        fs::copy(&path, &provider).expect("provider copy");
+        let provider_before = fs::read(&provider).expect("provider bytes");
+        let mut service = MobileVaultService::new();
+        selected(&mut service, path, true);
+        let snapshot = service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock");
+        let entry = snapshot.entries.first().expect("entry").id.clone();
+        service
+            .update_entry(crate::mobile::mutations::MobileUpdateEntryRequest {
+                entry_id: entry,
+                title: Some("discarded dirty mutation".to_owned()),
+                username: None,
+                url: None,
+                password: None,
+                notes: None,
+            })
+            .expect("mutate");
+
+        let operation = service
+            .begin_discard_and_lock()
+            .expect("begin discard lock");
+        assert!(service.snapshot().expect("retained while pending").dirty);
+        service
+            .complete_discard_and_lock(operation.id)
+            .expect("complete discard lock");
+
+        assert!(matches!(service.snapshot(), Err(MobileError::Locked)));
+        assert_eq!(
+            fs::read(&provider).expect("provider bytes"),
+            provider_before
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pending_lock_serializes_all_mobile_operations_without_sleeps() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        selected(&mut service, path, true);
+        let snapshot = service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock");
+        let entry = snapshot.entries.first().expect("entry").id.clone();
+        let operation = service.begin_lock().expect("begin lock");
         assert!(matches!(
             service.update_entry(crate::mobile::mutations::MobileUpdateEntryRequest {
                 entry_id: entry,
@@ -465,10 +590,42 @@ mod tests {
             }),
             Err(MobileError::Busy)
         ));
+        assert!(matches!(service.begin_save(), Err(MobileError::Busy)));
         assert!(matches!(service.begin_reload(), Err(MobileError::Busy)));
-        assert!(matches!(service.lock(), Err(MobileError::Busy)));
-        service.finish_operation(operation.id);
-        assert!(matches!(service.lock(), Err(MobileError::UnsavedChanges)));
+        assert!(matches!(service.begin_selection(), Err(MobileError::Busy)));
+        assert!(matches!(service.begin_lock(), Err(MobileError::Busy)));
+        assert!(matches!(
+            service.begin_discard_and_lock(),
+            Err(MobileError::Busy)
+        ));
+        service.cancel_operation(operation.id);
+        assert!(!service.snapshot().expect("clean session retained").dirty);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_lock_completion_and_cancellation_cannot_drop_or_unreserve_newer_session() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        selected(&mut service, path, true);
+        service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock");
+
+        let stale = service.begin_lock().expect("begin stale operation");
+        service.cancel_operation(stale.id);
+        let current = service.begin_lock().expect("begin current operation");
+        service.cancel_operation(stale.id);
+        assert!(matches!(
+            service.complete_lock(stale.id),
+            Err(MobileError::Internal)
+        ));
+        assert!(service.snapshot().is_ok());
+        assert!(matches!(service.begin_reload(), Err(MobileError::Busy)));
+        service
+            .complete_lock(current.id)
+            .expect("current completion");
+        assert!(matches!(service.snapshot(), Err(MobileError::Locked)));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -646,8 +803,9 @@ mod tests {
             Err(MobileError::PersistenceUnsupported)
         ));
         assert!(matches!(service.can_select(), Err(MobileError::Conflict)));
-        assert!(service.lock().is_ok());
-        assert!(matches!(service.lock(), Err(MobileError::Locked)));
+        let lock = service.begin_lock().expect("begin clean lock");
+        service.complete_lock(lock.id).expect("complete clean lock");
+        assert!(matches!(service.begin_lock(), Err(MobileError::Locked)));
 
         let (recovery_root, recovery_path) = fixture();
         let mut recovery = MobileVaultService::new();

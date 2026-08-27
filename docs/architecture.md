@@ -65,6 +65,14 @@ reload, selection, Lock, and mutation across native awaits; completion checks
 the prepared document revision before marking clean. No synchronous mutex guard
 is held across a native await.
 
+Mobile Lock and discard-and-lock use two-phase source release. The begin phase
+reserves the shared operation token but retains the decrypted
+`MobileVaultSession`; only a successful Android source release permits the
+matching completion to drop it. A release failure cancels only that reservation,
+leaving a clean Lock session clean and unlocked, or a discard-and-lock session
+dirty and unlocked. If Save-and-Lock has already saved successfully, a later
+release failure leaves that committed Save intact and the clean session unlocked.
+
 ```text
 Rust application semantics
         ^

@@ -1,5 +1,10 @@
 use crate::platform::RuntimeInfoDto;
 
+#[cfg(any(target_os = "android", test))]
+use std::{
+    future::Future,
+    sync::{Arc, Mutex},
+};
 #[cfg(target_os = "android")]
 use tauri::State;
 #[cfg(target_os = "android")]
@@ -22,9 +27,53 @@ use crate::mobile::{
     source::AndroidVaultSource,
     state::{MobileSecretKind, MobileVaultService},
 };
+#[cfg(all(test, not(target_os = "android")))]
+use crate::mobile::{MobileError, state::MobileVaultService};
 
 fn compiled_runtime_info() -> RuntimeInfoDto {
     RuntimeInfoDto::current()
+}
+
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Copy)]
+enum MobileLockKind {
+    Clean,
+    Discard,
+}
+
+#[cfg(any(target_os = "android", test))]
+async fn run_mobile_lock_transaction<Release, ReleaseFuture>(
+    service: Arc<Mutex<MobileVaultService>>,
+    kind: MobileLockKind,
+    release: Release,
+) -> Result<(), MobileError>
+where
+    Release: FnOnce(String) -> ReleaseFuture,
+    ReleaseFuture: Future<Output = Result<(), MobileError>>,
+{
+    let operation = {
+        let mut service = service.lock().map_err(|_| MobileError::Internal)?;
+        match kind {
+            MobileLockKind::Clean => service.begin_lock()?,
+            MobileLockKind::Discard => service.begin_discard_and_lock()?,
+        }
+    };
+
+    match release(operation.source_token).await {
+        Ok(()) => {
+            let mut service = service.lock().map_err(|_| MobileError::Internal)?;
+            match kind {
+                MobileLockKind::Clean => service.complete_lock(operation.id),
+                MobileLockKind::Discard => service.complete_discard_and_lock(operation.id),
+            }
+        }
+        Err(error) => {
+            if let Ok(mut service) = service.lock() {
+                service.cancel_operation(operation.id);
+            }
+            Err(error)
+        }
+    }
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -313,11 +362,14 @@ pub(crate) async fn mobile_lock_vault(
     source: State<'_, AndroidVaultSource>,
     state: State<'_, MobileAppState>,
 ) -> Result<(), MobileErrorDto> {
-    let token = lock_service(&state)?.lock().map_err(MobileErrorDto::from)?;
-    source
-        .release(&token, false)
-        .await
-        .map_err(MobileErrorDto::from)
+    let source = source.inner().clone();
+    run_mobile_lock_transaction(
+        state.service.clone(),
+        MobileLockKind::Clean,
+        move |token| async move { source.release(&token, false).await },
+    )
+    .await
+    .map_err(MobileErrorDto::from)
 }
 
 #[cfg(target_os = "android")]
@@ -326,24 +378,155 @@ pub(crate) async fn mobile_discard_changes_and_lock(
     source: State<'_, AndroidVaultSource>,
     state: State<'_, MobileAppState>,
 ) -> Result<(), MobileErrorDto> {
-    let token = lock_service(&state)?
-        .discard_and_lock()
-        .map_err(MobileErrorDto::from)?;
-    source
-        .release(&token, false)
-        .await
-        .map_err(MobileErrorDto::from)
+    let source = source.inner().clone();
+    run_mobile_lock_transaction(
+        state.service.clone(),
+        MobileLockKind::Discard,
+        move |token| async move { source.release(&token, false).await },
+    )
+    .await
+    .map_err(MobileErrorDto::from)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::compiled_runtime_info;
+    use super::{MobileLockKind, compiled_runtime_info, run_mobile_lock_transaction};
+    use crate::mobile::{MobileError, state::MobileVaultService};
     use crate::platform::RuntimePlatform;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicU64, Ordering},
+        },
+    };
+    use vault_core::SecretString;
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    fn unlocked_service() -> (PathBuf, Arc<Mutex<MobileVaultService>>) {
+        let root = std::env::temp_dir().join(format!(
+            "nian-pass-mobile-lock-command-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test dir");
+        let staged = root.join("staged.kdbx");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx"),
+            &staged,
+        )
+        .expect("stage");
+        let mut service = MobileVaultService::new();
+        let selection = service.begin_selection().expect("begin selection");
+        service
+            .complete_selection(
+                selection.id,
+                staged,
+                "vault.kdbx".to_owned(),
+                "0123456789abcdef0123456789abcdef".to_owned(),
+                true,
+                false,
+            )
+            .expect("select");
+        service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock");
+        (root, Arc::new(Mutex::new(service)))
+    }
+
     #[test]
     fn runtime_command_reports_the_compiled_platform() {
         assert!(matches!(
             compiled_runtime_info().platform,
             RuntimePlatform::Desktop
         ));
+    }
+
+    #[test]
+    fn command_release_failure_returns_error_and_keeps_service_unlocked() {
+        let (root, service) = unlocked_service();
+        let result = tauri::async_runtime::block_on(run_mobile_lock_transaction(
+            service.clone(),
+            MobileLockKind::Clean,
+            |_| async { Err(MobileError::Internal) },
+        ));
+
+        assert!(matches!(result, Err(MobileError::Internal)));
+        assert!(
+            !service
+                .lock()
+                .expect("service")
+                .snapshot()
+                .expect("snapshot")
+                .dirty
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn command_release_success_returns_success_and_locks_service() {
+        let (root, service) = unlocked_service();
+        let result = tauri::async_runtime::block_on(run_mobile_lock_transaction(
+            service.clone(),
+            MobileLockKind::Clean,
+            |token| async move {
+                assert_eq!(token, "0123456789abcdef0123456789abcdef");
+                Ok(())
+            },
+        ));
+
+        assert!(result.is_ok());
+        assert!(matches!(
+            service.lock().expect("service").snapshot(),
+            Err(MobileError::Locked)
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn command_discard_release_failure_keeps_dirty_service_unlocked() {
+        let (root, service) = unlocked_service();
+        let entry_id = service
+            .lock()
+            .expect("service")
+            .snapshot()
+            .expect("snapshot")
+            .entries
+            .first()
+            .expect("entry")
+            .id
+            .clone();
+        service
+            .lock()
+            .expect("service")
+            .update_entry(crate::mobile::mutations::MobileUpdateEntryRequest {
+                entry_id,
+                title: Some("dirty command mutation".to_owned()),
+                username: None,
+                url: None,
+                password: None,
+                notes: None,
+            })
+            .expect("mutate");
+
+        let result = tauri::async_runtime::block_on(run_mobile_lock_transaction(
+            service.clone(),
+            MobileLockKind::Discard,
+            |_| async { Err(MobileError::Internal) },
+        ));
+
+        assert!(matches!(result, Err(MobileError::Internal)));
+        assert!(
+            service
+                .lock()
+                .expect("service")
+                .snapshot()
+                .expect("snapshot")
+                .dirty
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

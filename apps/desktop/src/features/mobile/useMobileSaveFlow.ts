@@ -19,6 +19,7 @@ interface Options {
   dirty: boolean;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onLocked: () => void;
+  onLockPendingChange: (pending: boolean) => void;
   onLockFailure: () => void;
 }
 
@@ -71,11 +72,14 @@ export function useMobileSaveFlow(options: Options) {
       setSaved(true);
       setFlow({ kind: "closed" });
       if (intent === "lock") {
+        options.onLockPendingChange(true);
         try {
           await options.api.lockVault();
           options.onLocked();
         } catch {
           options.onLockFailure();
+        } finally {
+          options.onLockPendingChange(false);
         }
       }
     } catch (error) {

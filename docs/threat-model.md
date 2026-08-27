@@ -226,6 +226,15 @@ Reveal/Copy, Autofill, Keystore, biometrics, sync, iOS persistence, and producti
 mobile hardening remain outside M5.2. iOS is NOT RUN on Linux; initialization,
 build, and validation require macOS with Xcode.
 
+Mobile Lock is a two-phase transaction: Rust reserves the shared operation and
+retains the decrypted session while native code releases the Android source;
+only completion of that exact operation may then drop the session. Failed clean
+Lock release leaves the session clean and unlocked. Failed dirty discard release
+leaves the original dirty session unlocked. If Save succeeded before a
+Save-and-Lock release failure, the Save is not rolled back and the session stays
+clean and unlocked. These failure states intentionally keep backend and frontend
+truthful without reacquiring or reconstructing the source document.
+
 ## M4.3 mutation controls
 
 Desktop mutation commands accept stable IDs and semantic request types only.

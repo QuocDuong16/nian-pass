@@ -36,6 +36,45 @@ async function unlockDirty(overrides = {}) {
   return api;
 }
 
+async function unlockClean(overrides = {}) {
+  const api = createMobileApi(overrides);
+  render(<MobileVaultApp api={api} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
+  await screen.findByText("fixture.kdbx");
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  await screen.findByText("Synthetic account");
+  return api;
+}
+
+test("clean Lock stays unlocked and disables actions until release failure settles", async () => {
+  let rejectLock: ((reason?: unknown) => void) | undefined;
+  const lockVault = vi.fn().mockImplementation(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectLock = reject;
+      }),
+  );
+  await unlockClean({ lockVault });
+
+  fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+  expect(screen.getByText("fixture.kdbx")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Lock" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "New entry" })).toBeDisabled();
+
+  await act(() => {
+    rejectLock?.(new Error("private native release detail"));
+    return Promise.resolve();
+  });
+  expect(await screen.findByText(/could not safely release/i)).toBeVisible();
+  expect(screen.getByText("fixture.kdbx")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Lock" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "New entry" })).toBeEnabled();
+});
+
 test("Save password clears before deferred provider transaction resolves", async () => {
   let resolveSave: ((snapshot: VaultSnapshotDto) => void) | undefined;
   const saveVault = vi.fn().mockImplementation(
@@ -117,6 +156,30 @@ test("dirty Lock exposes Cancel and explicit discard without Save", async () => 
   expect(api.saveVault).not.toHaveBeenCalled();
 });
 
+test("discard-and-lock release failure keeps the dirty vault open and usable", async () => {
+  const api = await unlockDirty({
+    discardChangesAndLock: vi
+      .fn()
+      .mockRejectedValue(new Error("private native release detail")),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Discard changes and lock" }),
+  );
+
+  expect(
+    await screen.findByText(
+      "The dirty session remains open because discard-and-lock did not complete.",
+    ),
+  ).toBeVisible();
+  expect(screen.getByText("Unsaved changes")).toBeVisible();
+  expect(screen.getByText("fixture.kdbx")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Lock" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "New entry" })).toBeEnabled();
+  expect(api.discardChangesAndLock).toHaveBeenCalledOnce();
+  expect(api.saveVault).not.toHaveBeenCalled();
+});
+
 test("recovery_required is fixed, generic, and blocks automatic action", async () => {
   const api = await unlockDirty({
     saveVault: vi
@@ -177,7 +240,7 @@ test("verified Save-and-Lock continues only after a canonical clean snapshot", a
 });
 
 test("a clean Save with source-release failure stays clean and unlocked", async () => {
-  await unlockDirty({
+  const api = await unlockDirty({
     lockVault: vi.fn().mockRejectedValue(new Error("native release failed")),
   });
   fireEvent.click(screen.getByRole("button", { name: "Lock" }));
@@ -191,6 +254,9 @@ test("a clean Save with source-release failure stays clean and unlocked", async 
   expect(await screen.findByText(/vault is saved/i)).toBeVisible();
   expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
   expect(screen.getByText("fixture.kdbx")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Lock" })).toBeEnabled();
+  expect(api.saveVault).toHaveBeenCalledOnce();
+  expect(api.lockVault).toHaveBeenCalledOnce();
 });
 
 test("authentication and precommit failures retain the credential flow", async () => {
