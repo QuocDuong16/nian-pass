@@ -13,7 +13,8 @@ for feedback but is intentionally not equivalent to the full gate.
 
 ## Toolchain and local prerequisites
 
-- Rust 1.97.1 with rustfmt, Clippy, and `llvm-tools-preview`
+- Rust 1.98.0 from `.mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
+  `rust-toolchain.toml` mirrors the pin for direct Cargo and editor invocations
 - Node 26.7.0 from `.node-version`
 - Corepack 0.35.0, installed explicitly in Forgejo because Node 26 does not bundle it
 - pnpm 11.22.0 from the root `packageManager`
@@ -49,11 +50,13 @@ binary fails. Cargo always uses `--locked`; pnpm install always uses
 policy, quick, and quality gates. It verifies the committed Tauri-generated
 Android project, API 26 minimum, normal generated ABI set, machine-local ignore
 rules, the narrow `TAURI_DEV_HOST` Vite boundary, a network-free main manifest,
-and debug-only ownership of the development `INTERNET` permission. For M5.1 it
-also ratchets SAF/`ContentResolver`, no-backup streaming staging, opaque names,
-the read-only semantic command whitelist, absence of URI/path DTOs, absence of
-`VaultSession` from mobile staging, and absence of Kotlin KDBX logic. It does
-not claim an Android binary was built.
+and debug-only ownership of the development `INTERNET` permission. For M5.2 it
+also ratchets SAF/`ContentResolver`, least-privilege persisted grants, opaque
+source and transaction names, exact semantic command whitelist, absence of
+URI/path/token frontend DTOs, absence of `VaultSession` from mobile, no force
+Save, complete encrypted-generation checks, `AtomicFile` recovery journal,
+`WRITE_STARTED` ordering, provider read-back, and absence of Kotlin KDBX logic.
+It does not claim an Android binary was built.
 
 `mobile-tools-check` validates Java, SDK 36, Build Tools 36.0.0, NDK, the two
 priority Rust targets, and the repository-pinned Tauri CLI without installing
@@ -185,10 +188,9 @@ plugin behind Nian Pass semantic commands. CSP tokens are unchanged. A future
 milestone may intentionally update this policy only with threat-model,
 capability, CSP, and regression-test review.
 
-M5.1 does not expand the WebView capability or external plugin dependency
-allowlist. Mobile bootstrap uses compile-time Rust target information instead
-of `plugin-os`; the first-party Android source plugin is called only from Rust
-behind the exact semantic mobile command surface. iOS remains passive.
+M5.2 does not expand the WebView capability or external plugin dependency
+allowlist. The first-party Android source plugin is called only from semantic
+Rust commands; React never sees its namespace. iOS remains passive.
 Production CSP tokens remain unchanged.
 
 ## IPC and OpenWiki
@@ -200,14 +202,28 @@ fields so future DTO drift cannot silently expose a secret-bearing addition.
 Full type generation is deferred until a maintained generator reduces risk
 without placing export derives on core secret-bearing types.
 
-`apps/desktop/contracts/mobile-contract.json` reuses the same exact selected,
-snapshot, summary, and entry-detail semantics and adds only stable mobile error
-codes. Rust Serde and TypeScript runtime tests consume that fixture. Focused
-service tests use only committed synthetic KDBX data and prove replacement and
-cancel ownership, wrong-password retry, successful staging cleanup, malformed
-candidate atomicity, generic detail errors, and drop-only Lock. Vitest proves
-Android/iOS routing, filename-only selection, pre-await password clearing,
-retry, secret-free browse/detail, absence of mutation UI, and Lock cleanup.
+`apps/desktop/contracts/mobile-contract.json` covers writable selection, clean
+and dirty snapshots, creation receipts, secret-free entry detail, and every
+stable M5.2 error. Rust Serde and TypeScript exact-key validators consume it.
+Rust tests use only committed synthetic KDBX data and cover unlock/dirty,
+wrong Save credential, external generation, verified candidate commit, dirty
+Lock, and deterministic operation serialization. A fake `MobileDocumentSource`
+runs through the same Rust Save coordinator and injects source preparation,
+pre-write, post-write mismatch, semantic verification, cleanup, verified
+rollback, and unverified rollback outcomes without sleeps. Kotlin policy tests
+cover writable capability, strict transaction identities, exact
+crash-generation classification, final mismatch, verified rollback, and
+rollback uncertainty.
+Vitest uses deferred Promises for pre-await password clearing, Save success,
+precommit failure, external conflict, uncertainty, recovery block, read-only
+providers, and Save/Discard/Cancel dirty Lock behavior.
+
+`mobile-android-check` compiles the real arm64/x86_64 Tauri APK and explicitly
+runs `:app:testUniversalDebugUnitTest`, so tests for the first-party source
+plugin are not confused with the separate `tauri-android` library tests. These
+headless checks do not prove arbitrary third-party DocumentsProvider durability,
+cloud behavior, or fsync guarantees. Device/provider smoke remains optional and
+must be reported separately.
 
 M4.3 extends that fixture only with secret-free `dirty`, creation receipts, and
 close-policy samples. Password, notes, and custom-field request plaintext is

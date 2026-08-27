@@ -12,7 +12,14 @@ import { useSecretDraft } from "./useSecretDraft";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 interface EntryEditFormProps {
-  api: DesktopApi;
+  api: Pick<
+    DesktopApi,
+    | "updateEntry"
+    | "revealEntryTitle"
+    | "revealEntryUsername"
+    | "revealEntryUrl"
+    | "revealEntryNotes"
+  >;
   detail: EntryDetailDto;
   disabled: boolean;
   onApplied: (snapshot: VaultSnapshotDto) => void;

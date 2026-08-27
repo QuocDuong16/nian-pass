@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "android"), allow(dead_code))]
+
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -7,7 +9,21 @@ pub(crate) enum MobileError {
     UnlockFailed,
     UnsupportedVault,
     EntryNotFound,
+    GroupNotFound,
+    InvalidRequest,
+    Conflict,
+    SecretUnavailable,
     Locked,
+    UnsavedChanges,
+    Busy,
+    SaveFailed,
+    SaveAuthenticationFailed,
+    ExternalChange,
+    SaveUncertain,
+    PersistenceUnsupported,
+    RecoveryRequired,
+    ReloadFailed,
+    ReloadAuthenticationFailed,
     Internal,
 }
 
@@ -19,7 +35,21 @@ enum MobileErrorCode {
     UnlockFailed,
     UnsupportedVault,
     EntryNotFound,
+    GroupNotFound,
+    InvalidRequest,
+    Conflict,
+    SecretUnavailable,
     Locked,
+    UnsavedChanges,
+    Busy,
+    SaveFailed,
+    SaveAuthenticationFailed,
+    ExternalChange,
+    SaveUncertain,
+    PersistenceUnsupported,
+    RecoveryRequired,
+    ReloadFailed,
+    ReloadAuthenticationFailed,
     Internal,
 }
 
@@ -37,7 +67,21 @@ impl From<MobileError> for MobileErrorDto {
             MobileError::UnlockFailed => MobileErrorCode::UnlockFailed,
             MobileError::UnsupportedVault => MobileErrorCode::UnsupportedVault,
             MobileError::EntryNotFound => MobileErrorCode::EntryNotFound,
+            MobileError::GroupNotFound => MobileErrorCode::GroupNotFound,
+            MobileError::InvalidRequest => MobileErrorCode::InvalidRequest,
+            MobileError::Conflict => MobileErrorCode::Conflict,
+            MobileError::SecretUnavailable => MobileErrorCode::SecretUnavailable,
             MobileError::Locked => MobileErrorCode::Locked,
+            MobileError::UnsavedChanges => MobileErrorCode::UnsavedChanges,
+            MobileError::Busy => MobileErrorCode::Busy,
+            MobileError::SaveFailed => MobileErrorCode::SaveFailed,
+            MobileError::SaveAuthenticationFailed => MobileErrorCode::SaveAuthenticationFailed,
+            MobileError::ExternalChange => MobileErrorCode::ExternalChange,
+            MobileError::SaveUncertain => MobileErrorCode::SaveUncertain,
+            MobileError::PersistenceUnsupported => MobileErrorCode::PersistenceUnsupported,
+            MobileError::RecoveryRequired => MobileErrorCode::RecoveryRequired,
+            MobileError::ReloadFailed => MobileErrorCode::ReloadFailed,
+            MobileError::ReloadAuthenticationFailed => MobileErrorCode::ReloadAuthenticationFailed,
             MobileError::Internal => MobileErrorCode::Internal,
         };
         Self { code }

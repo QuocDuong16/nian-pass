@@ -6,7 +6,7 @@ TOOLS_BIN := $(TOOLS_ROOT)/bin
 
 NODE_VERSION := $(shell tr -d '\r\n' < .node-version)
 PNPM_VERSION := $(shell node -p "require('./package.json').packageManager.split('@')[1]")
-RUST_VERSION := 1.97.1
+RUST_VERSION := $(shell awk -F'"' '/^rust = / { print $$2 }' .mise.toml)
 
 RUST_COVERAGE_MIN ?= 87
 RUST_COVERAGE_DIFF_MIN ?= 85
@@ -213,7 +213,7 @@ mobile-android-check: mobile-source-check mobile-tools-check
 	@echo "Build the real Tauri Android application as APKs (arm64 + x86_64)..."
 	pnpm --filter @nian-pass/desktop tauri android build --apk --target aarch64 x86_64 --ci
 	@echo "Run focused Android native source tests..."
-	apps/desktop/src-tauri/gen/android/gradlew -p apps/desktop/src-tauri/gen/android testDebugUnitTest
+	apps/desktop/src-tauri/gen/android/gradlew -p apps/desktop/src-tauri/gen/android :app:testUniversalDebugUnitTest
 	@artifact="$$(find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit 2>/dev/null)"; \
 		test -n "$$artifact" || { echo "Android build completed without an APK artifact." >&2; exit 1; }; \
 		echo "Android APK verified: $$artifact"

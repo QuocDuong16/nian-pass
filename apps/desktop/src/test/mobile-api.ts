@@ -1,6 +1,11 @@
 import { vi } from "vitest";
 
-import type { EntryDetailDto, VaultSnapshotDto } from "../types/desktop";
+import type {
+  CreatedEntryDto,
+  CreatedGroupDto,
+  EntryDetailDto,
+  VaultSnapshotDto,
+} from "../types/desktop";
 import type { MobileApi } from "../types/mobile";
 
 export const mobileSnapshot: VaultSnapshotDto = {
@@ -46,11 +51,37 @@ export const mobileDetail: EntryDetailDto = {
 
 export function createMobileApi(overrides: Partial<MobileApi> = {}): MobileApi {
   return {
-    selectVault: vi.fn().mockResolvedValue({ fileName: "fixture.kdbx" }),
+    selectVault: vi
+      .fn()
+      .mockResolvedValue({ fileName: "fixture.kdbx", writable: true }),
     unlockVault: vi.fn().mockResolvedValue(mobileSnapshot),
     getVaultSnapshot: vi.fn().mockResolvedValue(mobileSnapshot),
     getEntryDetail: vi.fn().mockResolvedValue(mobileDetail),
+    revealEntryTitle: vi.fn().mockResolvedValue("Synthetic account"),
+    revealEntryUsername: vi.fn().mockResolvedValue("mobile-user"),
+    revealEntryUrl: vi.fn().mockResolvedValue("https://example.test"),
+    revealEntryNotes: vi.fn().mockResolvedValue("synthetic notes"),
+    revealEntryCustomField: vi.fn().mockResolvedValue("personal"),
+    updateEntry: vi.fn().mockResolvedValue({ ...mobileSnapshot, dirty: true }),
+    createEntry: vi.fn().mockResolvedValue({
+      createdEntryId: "entry-created",
+      snapshot: mobileSnapshot,
+    } satisfies CreatedEntryDto),
+    deleteEntry: vi.fn().mockResolvedValue(mobileSnapshot),
+    moveEntry: vi.fn().mockResolvedValue(mobileSnapshot),
+    createGroup: vi.fn().mockResolvedValue({
+      createdGroupId: "group-created",
+      snapshot: mobileSnapshot,
+    } satisfies CreatedGroupDto),
+    renameGroup: vi.fn().mockResolvedValue(mobileSnapshot),
+    moveGroup: vi.fn().mockResolvedValue(mobileSnapshot),
+    deleteGroup: vi.fn().mockResolvedValue(mobileSnapshot),
+    setEntryCustomField: vi.fn().mockResolvedValue(mobileSnapshot),
+    deleteEntryCustomField: vi.fn().mockResolvedValue(mobileSnapshot),
+    saveVault: vi.fn().mockResolvedValue(mobileSnapshot),
+    reloadVault: vi.fn().mockResolvedValue(mobileSnapshot),
     lockVault: vi.fn().mockResolvedValue(undefined),
+    discardChangesAndLock: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

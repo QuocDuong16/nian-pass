@@ -78,7 +78,15 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/VaultSourcePolicyTest.kt",
     violations,
   );
+  const nativeJournal = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourceJournal.kt",
+    violations,
+  );
   const mobileRust = [
+    "apps/desktop/src-tauri/src/mobile/generation.rs",
+    "apps/desktop/src-tauri/src/mobile/mutations.rs",
+    "apps/desktop/src-tauri/src/mobile/persistence.rs",
     "apps/desktop/src-tauri/src/mobile/session.rs",
     "apps/desktop/src-tauri/src/mobile/state.rs",
     "apps/desktop/src-tauri/src/mobile/source.rs",
@@ -141,12 +149,12 @@ export function runChecks(root) {
     )
   ) {
     violations.push(
-      "M5.1 Android manifest must not expose a filesystem provider or storage permission",
+      "M5.2 Android manifest must not expose a filesystem provider or storage permission",
     );
   }
   if (manifest.includes(internetPermission)) {
     violations.push(
-      "M5.1 release/main Android manifest must not request INTERNET",
+      "M5.2 release/main Android manifest must not request INTERNET",
     );
   }
   const debugPermissions = [
@@ -213,36 +221,41 @@ export function runChecks(root) {
     "noBackupFilesDir",
     "nian-pass-imports",
     "FileOutputStream",
+    "takePersistableUriPermission",
+    "releasePersistableUriPermission",
+    "openFileDescriptor(uri, \"rwt\")",
+    "WRITE_STARTED",
+    "fingerprint(save.candidate)",
+    "fingerprint(save.readBack)",
   ]) {
     if (!nativeBridge.includes(required)) {
-      violations.push(`M5.1 Android source bridge must use ${required}`);
+      violations.push(`M5.2 Android source bridge must use ${required}`);
     }
   }
   for (const [label, pattern] of [
     ["Uri.getPath", /\.getPath\s*\(/],
     ["historical _data column", /["']_data["']/],
-    ["persistable URI grants", /takePersistableUriPermission/],
     ["whole-document byte loading", /readBytes\s*\(|readAllBytes\s*\(|Base64/],
     ["external staging", /externalFilesDir|getExternal|Environment\.DIRECTORY_/],
   ]) {
     if (pattern.test(nativeBridge)) {
-      violations.push(`M5.1 native bridge must not use ${label}`);
+      violations.push(`M5.2 native bridge must not use ${label}`);
     }
   }
   if (!/ByteArray\(DEFAULT_BUFFER_SIZE\)/.test(nativeBridge)) {
-    violations.push("M5.1 native bridge must retain a bounded streaming buffer");
+    violations.push("M5.2 native bridge must retain a bounded streaming buffer");
   }
   if (!/UUID\.randomUUID\(\)/.test(nativePolicy)) {
-    violations.push("M5.1 staging filenames must remain opaque and random");
+    violations.push("M5.2 staging filenames must remain opaque and random");
   }
   if (!nativePolicyTest.includes("isManagedStagingName")) {
-    violations.push("M5.1 native staging policy must retain focused unit tests");
+    violations.push("M5.2 native staging policy must retain focused unit tests");
   }
-  if (/VaultSession::(?:open|save)|\.save\s*\(/.test(mobileRust)) {
-    violations.push("M5.1 mobile Rust must not use VaultSession open/save semantics");
+  if (/\bVaultSession\b/.test(mobileRust)) {
+    violations.push("M5.2 mobile Rust must not use VaultSession semantics");
   }
   if (!mobileRust.includes("KdbxDocument::open")) {
-    violations.push("M5.1 mobile Rust must reuse the authoritative KdbxDocument parser");
+    violations.push("M5.2 mobile Rust must reuse the authoritative KdbxDocument parser");
   }
   if (/\b(?:AES|Argon2|ChaCha|KeyDerivation|Database\.open)\b/i.test(nativeBridge)) {
     violations.push("M5.1 native Kotlin must not implement KDBX or cryptography");
@@ -256,7 +269,25 @@ export function runChecks(root) {
     "mobile_unlock_vault",
     "mobile_vault_snapshot",
     "mobile_entry_detail",
+    "mobile_load_entry_title",
+    "mobile_load_entry_username",
+    "mobile_load_entry_url",
+    "mobile_load_entry_notes",
+    "mobile_load_entry_custom_field",
+    "mobile_update_entry",
+    "mobile_create_entry",
+    "mobile_delete_entry",
+    "mobile_move_entry",
+    "mobile_create_group",
+    "mobile_rename_group",
+    "mobile_move_group",
+    "mobile_delete_group",
+    "mobile_set_entry_custom_field",
+    "mobile_delete_entry_custom_field",
+    "mobile_save_vault",
+    "mobile_reload_vault",
     "mobile_lock_vault",
+    "mobile_discard_changes_and_lock",
   ]);
   if (androidHandler === undefined) {
     violations.push("M5.1 Android semantic command handler is missing");
@@ -265,18 +296,27 @@ export function runChecks(root) {
     const unexpected = commands.filter((command) => !allowedCommands.has(command));
     const missing = [...allowedCommands].filter((command) => !commands.includes(command));
     if (unexpected.length > 0 || missing.length > 0) {
-      violations.push("M5.1 Android command surface must match the read-only whitelist");
+      violations.push("M5.2 Android command surface must match the reviewed semantic whitelist");
     }
   }
   if (/plugin:vault-source|content:\/\//.test(mobileFrontend)) {
-    violations.push("M5.1 frontend must not receive or invoke native document transport");
+    violations.push("M5.2 frontend must not receive or invoke native document transport");
   }
   if (
     /\b(?:contentUri|stagedPath|absolutePath|provider|documentId|uri|path)\s*[?:]/i.test(
       mobileFrontend,
     )
   ) {
-    violations.push("M5.1 mobile TypeScript DTOs must not expose URI or path properties");
+    violations.push("M5.2 mobile TypeScript DTOs must not expose URI or path properties");
+  }
+  if (!nativeJournal.includes("AtomicFile") || !nativeJournal.includes("WRITE_STARTED")) {
+    violations.push("M5.2 destructive provider writes require an AtomicFile recovery journal");
+  }
+  if (!mobileRust.includes("verify_semantic_equivalence") || !mobileRust.includes("EncryptedGeneration")) {
+    violations.push("M5.2 Rust Save must verify candidate semantics and encrypted generations");
+  }
+  if (/force_save|overwrite_anyway|ignore_baseline|skip_external_check/i.test(rustHost + mobileFrontend)) {
+    violations.push("M5.2 must not expose a force-save or baseline bypass");
   }
 
   return violations;

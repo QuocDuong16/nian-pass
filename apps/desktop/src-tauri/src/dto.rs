@@ -5,10 +5,20 @@ use vault_core::{CustomFieldSummary, EntrySummary, FieldProtection, Group, Summa
 use crate::clipboard::{ClipboardClearStatus, ClipboardCopy};
 
 /// Filename metadata returned after a native file selection.
+#[cfg(any(desktop, test))]
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectedVaultDto {
     pub file_name: String,
+}
+
+/// Reviewed mobile source metadata. The opaque native handle stays in Rust.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileSelectedVaultDto {
+    pub file_name: String,
+    pub writable: bool,
 }
 
 /// Secret-free browse snapshot sent to the WebView.
@@ -22,7 +32,6 @@ pub struct VaultSnapshotDto {
 }
 
 /// Secret-free result of entry creation.
-#[cfg(desktop)]
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedEntryDto {
@@ -31,7 +40,6 @@ pub struct CreatedEntryDto {
 }
 
 /// Secret-free result of group creation.
-#[cfg(desktop)]
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedGroupDto {

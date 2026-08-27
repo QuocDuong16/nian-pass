@@ -1,17 +1,76 @@
-import type { EntryDetailDto } from "../../types/desktop";
+import { useEffect, useState } from "react";
+
+import type {
+  EntryDetailDto,
+  GroupDto,
+  VaultSnapshotDto,
+} from "../../types/desktop";
+import type { MobileApi } from "../../types/mobile";
+import { CustomFieldsEditor } from "../vault/CustomFieldsEditor";
+import { EntryActions } from "../vault/EntryActions";
+import { EntryEditForm } from "../vault/EntryEditForm";
 import { Summary } from "../vault/summary";
 
 interface MobileEntryDetailProps {
+  api: MobileApi;
   detail: EntryDetailDto;
+  groups: GroupDto[];
+  disabled: boolean;
+  onSnapshot: (snapshot: VaultSnapshotDto) => void;
+  onDeleted: (snapshot: VaultSnapshotDto) => void;
+  onMoved: (snapshot: VaultSnapshotDto, destination: string) => void;
+  onDraftChange: (active: boolean) => void;
+  onBusyChange: (busy: boolean) => void;
 }
 
-export function MobileEntryDetail({ detail }: MobileEntryDetailProps) {
+export function MobileEntryDetail(props: MobileEntryDetailProps) {
+  const { onBusyChange, onDraftChange } = props;
+  const [editing, setEditing] = useState(false);
+  const [fieldDraft, setFieldDraft] = useState(false);
+  const [actionDraft, setActionDraft] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [fieldBusy, setFieldBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+
+  useEffect(() => {
+    onDraftChange(editing || fieldDraft || actionDraft);
+    return () => {
+      onDraftChange(false);
+    };
+  }, [actionDraft, editing, fieldDraft, onDraftChange]);
+  useEffect(() => {
+    onBusyChange(editBusy || fieldBusy || actionBusy);
+    return () => {
+      onBusyChange(false);
+    };
+  }, [actionBusy, editBusy, fieldBusy, onBusyChange]);
+
+  if (editing) {
+    return (
+      <section className="mobile-detail">
+        <EntryEditForm
+          api={props.api}
+          detail={props.detail}
+          disabled={props.disabled}
+          onBusyChange={setEditBusy}
+          onCancel={() => {
+            setEditing(false);
+          }}
+          onApplied={(snapshot) => {
+            setEditing(false);
+            props.onSnapshot(snapshot);
+          }}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="mobile-detail" aria-labelledby="mobile-detail-title">
       <p className="eyebrow">Entry detail</p>
       <h2 id="mobile-detail-title">
         <Summary
-          value={detail.title}
+          value={props.detail.title}
           missingLabel="Untitled entry"
           emptyLabel="Empty title"
         />
@@ -19,7 +78,7 @@ export function MobileEntryDetail({ detail }: MobileEntryDetailProps) {
       <div className="detail-field">
         <h3>Username</h3>
         <Summary
-          value={detail.username}
+          value={props.detail.username}
           missingLabel="No username"
           emptyLabel="Empty username"
         />
@@ -27,31 +86,46 @@ export function MobileEntryDetail({ detail }: MobileEntryDetailProps) {
       <div className="detail-field">
         <h3>URL</h3>
         <Summary
-          value={detail.url}
+          value={props.detail.url}
           missingLabel="No URL"
           emptyLabel="Empty URL"
         />
       </div>
       <div className="detail-field">
         <h3>Stored fields</h3>
-        <p>{detail.passwordPresent ? "Password stored" : "No password"}</p>
-        <p>{detail.notesPresent ? "Notes stored" : "No notes"}</p>
+        <p>
+          {props.detail.passwordPresent ? "Password stored" : "No password"}
+        </p>
+        <p>{props.detail.notesPresent ? "Notes stored" : "No notes"}</p>
       </div>
-      <div className="detail-field">
-        <h3>Custom fields</h3>
-        {detail.customFields.length === 0 ? (
-          <p>No custom fields</p>
-        ) : (
-          <ul className="custom-field-list">
-            {detail.customFields.map((field) => (
-              <li key={field.name}>
-                <span>{field.name}</span>
-                <span>{field.protection}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <button
+        type="button"
+        disabled={props.disabled}
+        onClick={() => {
+          setEditing(true);
+        }}
+      >
+        Edit entry
+      </button>
+      <CustomFieldsEditor
+        api={props.api}
+        entryId={props.detail.id}
+        fields={props.detail.customFields}
+        disabled={props.disabled}
+        onApplied={props.onSnapshot}
+        onDraftChange={setFieldDraft}
+        onBusyChange={setFieldBusy}
+      />
+      <EntryActions
+        api={props.api}
+        detail={props.detail}
+        groups={props.groups}
+        disabled={props.disabled}
+        onDeleted={props.onDeleted}
+        onMoved={props.onMoved}
+        onDraftChange={setActionDraft}
+        onBusyChange={setActionBusy}
+      />
     </section>
   );
 }

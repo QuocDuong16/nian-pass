@@ -103,8 +103,13 @@ pub fn run() {
 #[cfg(target_os = "android")]
 fn run_mobile() {
     use mobile::commands::{
-        mobile_entry_detail, mobile_lock_vault, mobile_select_vault, mobile_unlock_vault,
-        mobile_vault_snapshot, runtime_info,
+        mobile_create_entry, mobile_create_group, mobile_delete_entry,
+        mobile_delete_entry_custom_field, mobile_delete_group, mobile_discard_changes_and_lock,
+        mobile_entry_detail, mobile_load_entry_custom_field, mobile_load_entry_notes,
+        mobile_load_entry_title, mobile_load_entry_url, mobile_load_entry_username,
+        mobile_lock_vault, mobile_move_entry, mobile_move_group, mobile_reload_vault,
+        mobile_rename_group, mobile_save_vault, mobile_select_vault, mobile_set_entry_custom_field,
+        mobile_unlock_vault, mobile_update_entry, mobile_vault_snapshot, runtime_info,
     };
 
     tauri::Builder::default()
@@ -119,7 +124,25 @@ fn run_mobile() {
             mobile_unlock_vault,
             mobile_vault_snapshot,
             mobile_entry_detail,
-            mobile_lock_vault
+            mobile_load_entry_title,
+            mobile_load_entry_username,
+            mobile_load_entry_url,
+            mobile_load_entry_notes,
+            mobile_load_entry_custom_field,
+            mobile_update_entry,
+            mobile_create_entry,
+            mobile_delete_entry,
+            mobile_move_entry,
+            mobile_create_group,
+            mobile_rename_group,
+            mobile_move_group,
+            mobile_delete_group,
+            mobile_set_entry_custom_field,
+            mobile_delete_entry_custom_field,
+            mobile_save_vault,
+            mobile_reload_vault,
+            mobile_lock_vault,
+            mobile_discard_changes_and_lock
         ])
         .run(tauri::generate_context!())
         .expect("Nian Pass Android runtime failed");

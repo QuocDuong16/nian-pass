@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { DesktopApi } from "../../lib/desktop";
 import type {
   CustomFieldSummaryDto,
   EntryId,
   VaultSnapshotDto,
 } from "../../types/desktop";
+import type { CustomFieldEditorApi } from "../../types/mutation-api";
 import {
   fieldActionLabel,
   fieldLabel,
@@ -20,7 +20,7 @@ type FieldAction =
   | { kind: "delete"; field: CustomFieldSummaryDto };
 
 interface CustomFieldsEditorProps {
-  api: DesktopApi;
+  api: CustomFieldEditorApi;
   entryId: EntryId;
   fields: CustomFieldSummaryDto[];
   disabled: boolean;

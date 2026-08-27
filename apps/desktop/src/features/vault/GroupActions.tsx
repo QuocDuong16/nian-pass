@@ -7,7 +7,10 @@ import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 type GroupAction = "create" | "rename" | "move" | "delete";
 
 interface GroupActionsProps {
-  api: DesktopApi;
+  api: Pick<
+    DesktopApi,
+    "createGroup" | "renameGroup" | "moveGroup" | "deleteGroup"
+  >;
   group: GroupDto;
   snapshot: VaultSnapshotDto;
   disabled: boolean;

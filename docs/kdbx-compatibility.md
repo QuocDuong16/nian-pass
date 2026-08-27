@@ -183,7 +183,7 @@ The pinned CI external environment is:
 
 - KeePassXC CLI: `2.7.4`
 - Package: Debian Bookworm `keepassxc=2.7.4+dfsg.1-2`
-- Container: `rust:1.97.1-bookworm`
+- Container: `rust:1.98.0-bookworm`
 - Fixture: `keepassxc-2.7.12-kdbx41.kdbx`, created by KeePassXC 2.7.12
 - Invocation: `scripts/test-keepassxc-compat.sh --require`
 

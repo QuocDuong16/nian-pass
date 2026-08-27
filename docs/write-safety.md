@@ -144,7 +144,8 @@ can cease to exist at its canonical name and remain under another name. That
 does not satisfy Nian Pass's always-present canonical-path and ordinary failure
 invariants.
 
-Rust 1.97.1's Windows `std::fs::rename` implementation was also inspected. It
+The M3.1 evaluation inspected Rust 1.97.1's Windows `std::fs::rename`
+implementation. It
 uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` and, for an access-denied case,
 falls back to `SetFileInformationByHandle(FileRenameInfoEx)`. These operations
 rename the prepared file identity; they do not provide `ReplaceFileW`'s
@@ -153,6 +154,8 @@ They therefore cannot safely replace a restrictive vault with a temp that may
 have inherited a broader directory DACL.
 
 Safe public wrappers were evaluated rather than introducing local Win32 FFI.
+This is historical M3.1 evidence, not a claim that Rust 1.98.0 changed the
+result; Windows writes remain disabled until that platform is reevaluated.
 `winsafe` 0.0.28 exposes `ReplaceFileW`, but accepts UTF-8 strings rather than
 arbitrary Windows paths and cannot strengthen the operating-system failure
 contract. `atomic-write-file` 0.3.1, `atomicwrites` 0.4.4, and `safe-write` 0.2.0
@@ -273,3 +276,36 @@ returned to or explicitly discarded first. A dirty-idle shield leaves the Rust
 force-locks, or bypasses external-change refusal. Successful explicit Save
 restarts the frontend inactivity deadline; failed, uncertain, or conflicted
 Save never proceeds to Lock.
+
+## Android provider persistence
+
+Android M5.2 does not route `content://` through `VaultSession` and never treats
+staging as a canonical path. `MobileVaultSession` identifies the source by a
+native opaque handle and full encrypted SHA-256 + size baseline. Dirty state is
+the KDBX revision compared with `saved_revision`; mutation is memory-only.
+
+Every dirty Save re-authenticates the unchanged provider generation, serializes
+an encrypted KDBX candidate to `noBackupFilesDir/nian-pass-transactions`, syncs
+and reopens it, and verifies semantic equivalence. Before destructive write,
+native code creates a fingerprint-verified exact ciphertext backup and durable
+`AtomicFile` journal (`PREPARED`, then `WRITE_STARTED` before descriptor open),
+then performs one final complete baseline check. Provider success is followed by
+complete read-back, exact candidate fingerprint comparison, and Rust KDBX reopen
+plus semantic comparison.
+
+The mobile commit point is exact candidate read-back plus successful Rust reopen
+and semantic equivalence. Only then may baseline and saved revision advance.
+Cleanup failure after that point is `save_uncertain` and the canonical snapshot
+may already be clean. Any earlier failure leaves dirty state; wrong credential,
+baseline conflict, candidate/backup/journal failure never intentionally writes.
+After destructive failure, rollback is `save_failed` only when full read-back
+proves the original baseline; otherwise it is `save_uncertain` and recovery
+material remains.
+
+Crash reconciliation uses only exact baseline/candidate generations. Unknown or
+malformed state is `recovery_required` and never overwrites automatically.
+Generic SAF supplies no atomic conditional replace and remote providers may not
+honor local descriptor sync as durable cloud commit. A residual writer race
+exists between final source check and destructive write; read-back detects final
+candidate loss but cannot eliminate every interleaving. Providers without a
+persisted writable grant are browse-only and return `persistence_unsupported`.

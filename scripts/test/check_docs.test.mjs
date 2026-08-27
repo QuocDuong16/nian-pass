@@ -18,7 +18,8 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M5.1 — Mobile Unlock + Browse\nM5.1 Android is read-only.\nM4.5 — Desktop Security UX\nExplicit Save. " +
+    "M5.2 — Android Mobile CRUD + Safe Document Persistence\nRead-only providers have editing and Save disabled. " +
+      "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
       "The active clipboard clears only if it still contains the value written by Nian Pass. " +
@@ -29,15 +30,16 @@ function fixture(t) {
     root,
     "docs/architecture.md",
     "M4.Q quality architecture. Clipboard salt then SHA-256 fingerprint then generation. " +
-      "apps/desktop remains the historical shared host. Android content URI is not a canonical path. " +
-      "VaultSession is NOT used for Android staging.\n",
+      "apps/desktop remains the historical shared host. content:// maps to an opaque source token and encrypted generation baseline. " +
+      "VaultSession is NOT used; MobileVaultSession never owns a URI or fake canonical provider path. " +
+      "A residual cooperative writer race remains and read-back cannot prove every interleaving.\n",
   );
   write(
     root,
     "docs/threat-model.md",
     "Compromised supply-chain dependencies. OS clipboard history may retain data. " +
       "A dirty timeout never performs discard without explicit user intent. " +
-      "iOS is not initialized on Linux; macOS with Xcode reports NOT RUN here.\n",
+      "iOS is not initialized or built on Linux; validation requires macOS with Xcode.\n",
   );
   write(
     root,
@@ -50,7 +52,7 @@ function fixture(t) {
     "Coverage ratchet. Lowering requires architecture or security review. eslint-disable is forbidden. " +
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
-      "Corepack 0.35.0. OpenWiki is not the source of truth. " +
+      "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
       "mobile-tools-check then mobile-android-check.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
@@ -63,8 +65,11 @@ function fixture(t) {
   write(
     root,
     ".forgejo/workflows/quality.yml",
-    "node:26.7.0\nnpm install --global corepack@0.35.0\npnpm@11.22.0\n",
+    "node:26.7.0\nrust:1.98.0-bookworm\nnpm install --global corepack@0.35.0\npnpm@11.22.0\n",
   );
+  write(root, ".mise.toml", '[tools]\nrust = "1.98.0"\n');
+  write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.98.0"\n');
+  write(root, "Makefile", "RUST_VERSION := $(shell awk -F'\\\"' '/^rust = / { print $$2 }' .mise.toml)\n");
   return root;
 }
 
@@ -78,9 +83,19 @@ test("runtime version drift is rejected", (t) => {
   assert.match(runChecks(root).join("\n"), /same exact version/);
 });
 
+test("Rust toolchain drift from mise is rejected", (t) => {
+  const root = fixture(t);
+  write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.97.1"\n');
+  assert.match(runChecks(root).join("\n"), /must mirror mise Rust 1\.98\.0/);
+});
+
 test("missing explicit Corepack bootstrap is rejected", (t) => {
   const root = fixture(t);
-  write(root, ".forgejo/workflows/quality.yml", "node:26.7.0\npnpm@11.22.0\n");
+  write(
+    root,
+    ".forgejo/workflows/quality.yml",
+    "node:26.7.0\nrust:1.98.0-bookworm\npnpm@11.22.0\n",
+  );
   assert.match(
     runChecks(root).join("\n"),
     /Corepack 0\.35\.0 must be installed explicitly/,

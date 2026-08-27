@@ -97,7 +97,7 @@ test("failed unlock stays clear and allows a retry without reopening picker", as
 test("cancelled replacement preserves the pending display selection", async () => {
   const select = vi
     .fn()
-    .mockResolvedValueOnce({ fileName: "fixture.kdbx" })
+    .mockResolvedValueOnce({ fileName: "fixture.kdbx", writable: true })
     .mockResolvedValueOnce(null);
   await selectVault(createMobileApi({ selectVault: select }));
   fireEvent.click(screen.getByRole("button", { name: "Choose another vault" }));
@@ -107,7 +107,7 @@ test("cancelled replacement preserves the pending display selection", async () =
   expect(screen.getByText("fixture.kdbx")).toBeVisible();
 });
 
-test("unlocked browse exposes secret-free detail and no mutation actions", async () => {
+test("unlocked writable browse exposes CRUD but never general Reveal or Copy", async () => {
   const api = await selectVault();
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: "demopass" },
@@ -123,15 +123,12 @@ test("unlocked browse exposes secret-free detail and no mutation actions", async
   expect(screen.getAllByText("Password stored")).toHaveLength(2);
   expect(screen.getAllByText("Notes stored")).toHaveLength(2);
   expect(api.getEntryDetail).toHaveBeenCalledWith("entry-a");
-  for (const action of [
-    "Save",
-    "Edit",
-    "Delete",
-    "Create",
-    "Move",
-    "Reveal",
-    "Copy",
-  ]) {
+  for (const action of ["Save", "Edit entry", "New entry", "New group"]) {
+    expect(
+      screen.getByRole("button", { name: new RegExp(action, "i") }),
+    ).toBeVisible();
+  }
+  for (const action of ["Reveal", "Copy"]) {
     expect(
       screen.queryByRole("button", { name: new RegExp(action, "i") }),
     ).not.toBeInTheDocument();
@@ -158,9 +155,7 @@ test("detail and Lock failures remain generic without discarding the browse view
     "Could not load that entry",
   );
   fireEvent.click(screen.getByRole("button", { name: "Lock" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Could not lock the vault",
-  );
+  expect(await screen.findByText(/could not safely release/i)).toBeVisible();
   expect(screen.getByText("fixture.kdbx")).toBeVisible();
 });
 
@@ -233,4 +228,114 @@ test("a detail response that settles after Lock cannot repopulate presentation s
   });
   expect(api.lockVault).toHaveBeenCalledOnce();
   expect(screen.queryByText("Account type")).not.toBeInTheDocument();
+});
+
+test("mobile entry edit, creation, and custom fields replace state from Rust receipts", async () => {
+  const api = await selectVault();
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Synthetic account/ }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Edit entry" }));
+  expect(screen.queryByDisplayValue("old-password")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "Mobile edited" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      title: "Mobile edited",
+      username: "mobile-user",
+    });
+  });
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Synthetic account/ }),
+  );
+  await screen.findByText("Account type");
+  fireEvent.click(screen.getByRole("button", { name: "Add custom field" }));
+  fireEvent.change(screen.getByLabelText("Field name"), {
+    target: { value: "Mobile field" },
+  });
+  fireEvent.change(screen.getByLabelText("Value"), {
+    target: { value: "component-local secret" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => {
+    expect(api.setEntryCustomField).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      name: "Mobile field",
+      value: "component-local secret",
+      protection: "protected",
+    });
+  });
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "New entry" })).toBeEnabled();
+  });
+  fireEvent.click(screen.getByRole("button", { name: "New entry" }));
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "Created on mobile" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create entry" }));
+  await waitFor(() => {
+    expect(api.createEntry).toHaveBeenCalledWith({
+      groupId: "group-root",
+      title: "Created on mobile",
+      username: "",
+      url: "",
+      password: null,
+      notes: null,
+    });
+  });
+});
+
+test("mobile move, delete, and group callbacks follow canonical Rust snapshots", async () => {
+  const api = await selectVault();
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  await screen.findByRole("button", { name: "New group" });
+
+  fireEvent.click(screen.getByRole("button", { name: "New group" }));
+  fireEvent.change(screen.getByLabelText("Group name"), {
+    target: { value: "Created child" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => {
+    expect(api.createGroup).toHaveBeenCalledWith("group-root", "Created child");
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: /Synthetic account/ }));
+  await screen.findByRole("button", { name: "Move entry" });
+  fireEvent.click(screen.getByRole("button", { name: "Move entry" }));
+  fireEvent.change(screen.getByLabelText("Destination group"), {
+    target: { value: "group-child" },
+  });
+  const confirmMove = screen
+    .getAllByRole("button", { name: "Move entry" })
+    .at(-1);
+  if (confirmMove === undefined) throw new Error("move confirmation missing");
+  fireEvent.click(confirmMove);
+  await waitFor(() => {
+    expect(api.moveEntry).toHaveBeenCalledWith("entry-a", "group-child");
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Accounts" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename group" }));
+  fireEvent.change(screen.getByLabelText("Group name"), {
+    target: { value: "Renamed accounts" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => {
+    expect(api.renameGroup).toHaveBeenCalledWith(
+      "group-child",
+      "Renamed accounts",
+    );
+  });
 });

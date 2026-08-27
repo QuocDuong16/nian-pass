@@ -28,9 +28,13 @@ export function runChecks(root) {
   const workflow = readRequired(root, ".forgejo/workflows/quality.yml", violations);
   const packageSource = readRequired(root, "package.json", violations);
   const nodeVersion = readRequired(root, ".node-version", violations).trim();
+  const mise = readRequired(root, ".mise.toml", violations);
+  const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
+  const makefile = readRequired(root, "Makefile", violations);
 
-  requirePattern(violations, "README.md", readme, /M5\.1\s*[—-]\s*Mobile Unlock \+ Browse/, "current milestone must be M5.1");
-  requirePattern(violations, "README.md", readme, /M5\.1[\s\S]{0,500}read-only/i, "M5.1 Android read-only boundary is missing");
+  requirePattern(violations, "README.md", readme, /M5\.2\s*[—-]\s*Android Mobile CRUD \+ Safe Document Persistence/, "current milestone must be M5.2");
+  requirePattern(violations, "README.md", readme, /read-only providers[\s\S]{0,160}(?:editing|Save) disabled/i, "M5.2 read-only provider boundary is missing");
+  requirePattern(violations, "README.md", readme, /AtomicFile[\s\S]{0,300}save_uncertain[\s\S]{0,160}recovery_required/i, "M5.2 recovery and uncertainty boundary is missing");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
   requirePattern(violations, "README.md", readme, /external[\s\S]{0,180}(?:refus|not automatically merged)/i, "M4.4 external-conflict boundary is missing");
   requirePattern(violations, "README.md", readme, /no Save As[\s\S]{0,100}(?:force overwrite|autosave)/i, "M4.4 persistence non-goals are missing");
@@ -50,9 +54,10 @@ export function runChecks(root) {
   requirePattern(violations, "README.md", readme, /Android 8\.0[\s\S]{0,80}API 26/i, "Android API 26 minimum is missing");
   requirePattern(violations, "README.md", readme, /make mobile-android-check/, "real Android build gate is missing");
   requirePattern(violations, "docs/architecture.md", architecture, /apps\/desktop[\s\S]{0,180}historical/i, "shared Tauri host naming debt is missing");
-  requirePattern(violations, "docs/architecture.md", architecture, /content[ -]URI[\s\S]{0,300}(?:not|isn't)[\s\S]{0,80}canonical/i, "Android URI persistence boundary is missing");
-  requirePattern(violations, "docs/architecture.md", architecture, /VaultSession[\s\S]{0,80}(?:NOT|not)[\s\S]{0,80}Android staging/i, "Android staging must exclude VaultSession");
-  requirePattern(violations, "docs/threat-model.md", threatModel, /macOS with Xcode[\s\S]{0,180}(?:NOT RUN|not initialized|not.*built)/i, "honest iOS validation boundary is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /content:\/\/[\s\S]{0,400}opaque source token[\s\S]{0,240}encrypted generation baseline/i, "Android URI persistence boundary is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /VaultSession`? is NOT used[\s\S]{0,240}never owns a URI[\s\S]{0,120}(?:canonical provider path|fake canonical)/i, "Android staging must exclude VaultSession");
+  requirePattern(violations, "docs/architecture.md", architecture, /residual[\s\S]{0,160}writer race[\s\S]{0,240}cannot prove/i, "Android provider race limitation is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /iOS[\s\S]{0,180}(?:NOT RUN|not initialized|not.*built)[\s\S]{0,180}macOS with Xcode/i, "honest iOS validation boundary is missing");
   requirePattern(violations, "docs/quality.md", quality, /mobile-tools-check[\s\S]{0,300}mobile-android-check/i, "mobile gate policy is missing");
 
   const qualityRequirements = [
@@ -84,6 +89,23 @@ export function runChecks(root) {
   }
   if (nodeVersion !== "" && !workflow.includes(nodeVersion)) {
     violations.push(`.forgejo/workflows/quality.yml: pinned Node ${nodeVersion} is not reused`);
+  }
+  const rustVersion = mise.match(/^rust\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m)?.[1];
+  if (rustVersion === undefined) {
+    violations.push(".mise.toml: Rust must be pinned to an exact version");
+  } else {
+    if (!rustToolchain.includes(`channel = "${rustVersion}"`)) {
+      violations.push(`rust-toolchain.toml: must mirror mise Rust ${rustVersion}`);
+    }
+    if (!makefile.includes("RUST_VERSION := $(shell") || !makefile.includes(".mise.toml")) {
+      violations.push("Makefile: RUST_VERSION must be sourced from .mise.toml");
+    }
+    if (!workflow.includes(`rust:${rustVersion}-bookworm`)) {
+      violations.push(`.forgejo/workflows/quality.yml: pinned Rust ${rustVersion} is not reused`);
+    }
+    if (!quality.includes(`Rust ${rustVersion}`)) {
+      violations.push(`docs/quality.md: pinned Rust ${rustVersion} is not documented`);
+    }
   }
   const corepackVersion = quality.match(/\bCorepack\s+(\d+\.\d+\.\d+)\b/i)?.[1];
   if (corepackVersion === undefined) {

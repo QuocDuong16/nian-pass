@@ -3,7 +3,7 @@
 This is the threat model for the M3 local vault session/filesystem foundation,
 the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
 M4.3 mutation UI, the M4.4 save/conflict flow, the M4.Q quality/security gates,
-and the M5.1 Android read-only mobile flow. It records boundaries and assumptions; it is not a
+and the M5.2 Android CRUD/provider-persistence flow. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
@@ -166,79 +166,65 @@ is machine checked. npm production dependencies are audited separately from
 dev-only tooling. Coverage is a regression guard, not proof of security; exact
 DTO whitelist and state-transition assertions remain required.
 
-## M5.1 Android read-only mobile controls
+## M5.2 Android provider persistence controls
 
-Android registers only the six reviewed semantic commands: `runtime_info`,
-`mobile_select_vault`, `mobile_unlock_vault`, `mobile_vault_snapshot`,
-`mobile_entry_detail`, and `mobile_lock_vault`. React never invokes the native
-plugin namespace. Desktop dialog, clipboard, reveal, mutation, Save,
-close/focus, and dirty-session commands remain on the desktop bootstrap path.
-iOS still registers only `runtime_info` and makes no vault-access claim.
+The URI, provider identity, persisted-grant state, backup paths, journal, and
+opaque source-token map remain native app-private data. React receives only a
+sanitized filename and semantic writable boolean; it cannot invoke the native
+plugin or submit a URI/path/token. Unknown source tokens fail generically.
+Persistable access requests are limited to document read/write flags actually
+granted by Android. Clean Lock/source replacement releases the grant; unresolved
+recovery retains it. No storage/media permission, `FileProvider`, `_data`,
+`Uri.getPath`, release `INTERNET`, cloud API, or HTTP dependency is introduced.
 
-The runtime DTO contains exactly one coarse enum (`desktop`, `android`, or
-`ios`). Exact frontend validation rejects missing keys, extra keys, unknown
-platform strings, device identifiers, and future metadata until separately
-reviewed. No plugin is added to derive this compile-time value.
+Rust `MobileVaultSession` owns the complete `KdbxDocument`, encrypted SHA-256 +
+size baseline, and saved revision. Kotlin never parses or serializes KDBX.
+Mutations call the authoritative KDBX APIs and remain memory-only until explicit
+Save. Existing passwords are not preloaded; narrow edit loads are component
+local and failure cannot become an empty overwrite. Save and reload credentials
+clear before await and become `SecretString`; no credential is retained.
 
-The checked-in Android capability posture remains `core:default`; no filesystem,
-shell, process, HTTP, updater, or broad dialog permission is added. No analytics,
-telemetry, remote logging, browser storage, credentials, or signing configuration
-is introduced. Generated `.gitignore` rules exclude local SDK paths, Gradle
-state/build outputs, signing property files, and native build products.
+Before provider mutation, Rust proves the full staged provider generation still
+equals the unlock baseline, proves the credential opens it, serializes the dirty
+document to an opaque no-backup candidate, syncs it, reopens it, verifies KDBX
+semantic equivalence, and fingerprints the exact ciphertext. Kotlin verifies
+that candidate path belongs to the registered transaction directory, creates
+and syncs an exact encrypted baseline backup, writes an `AtomicFile` journal as
+`PREPARED`, performs another full provider baseline check, then durably advances
+the journal to `WRITE_STARTED` before opening the destructive `rwt` descriptor.
 
-Vite binds to loopback in ordinary development. It uses `TAURI_DEV_HOST` only
-when Tauri mobile development explicitly supplies that host, with a scoped HMR
-configuration. This network-accessible development server is development-only;
-production uses bundled assets and the production CSP is unchanged. M5.1
-production Android builds do not request `INTERNET`; that permission exists
-only in the debug manifest for Tauri mobile development and is source-ratcheted.
+A write return is never Save success. Kotlin stages the complete provider
+read-back and requires the exact candidate generation. Rust then reopens that
+read-back with the Save credential and verifies semantic equivalence. Only this
+point advances the Rust baseline/saved revision and may make dirty false. A
+verified rollback requires complete provider read-back equal to the original
+baseline. Unverified rollback, final mismatch/read failure, or transport
+ambiguity returns `save_uncertain` and preserves required backup/candidate/
+journal data. No Save error continues pending Lock intent.
 
-The native bridge uses `ACTION_OPEN_DOCUMENT`, `CATEGORY_OPENABLE`, provider
-display-name metadata, and `ContentResolver.openInputStream`. It requests no
-storage/media permission, does not use `FileProvider`, `_data`, `Uri.getPath`,
-or persistable URI grants, and never returns the URI to Rust or React. It streams
-with a bounded buffer into an opaque random filename under the app-private
-no-backup import directory. A failed copy deletes its partial file before
-returning generic `picker_failed`; provider exceptions and identifiers are not
-forwarded.
+At startup cleanup and reselection, only Nian Pass journals are inspected.
+Current provider bytes equal to baseline or candidate are known outcomes and may
+be reconciled without overwriting. Unknown bytes, malformed journals, or an
+unreadable ambiguous source return `recovery_required`; timestamps, sizes alone,
+provider names, and journal age never choose a winner. There is no force-save,
+last-writer-wins, automatic M3.5 merge, sibling `.bak`, autosave, or background
+write.
 
-Rust owns one optional pending encrypted selection and one optional decrypted
-`MobileReadSession`, with locked and unlocked states kept disjoint. Pending-file
-RAII cleans replacement, drop, and successful unlock. Plugin startup cleanup
-inspects only Nian Pass's dedicated directory, skips symlinks, and removes only
-recognized opaque import names. These controls reduce retention but do not
-claim physical secure erasure of filesystem blocks.
+Generic SAF does not promise atomic replace, remote durability, or a conditional
+compare-and-swap. There remains a cooperative-writer race between final baseline
+check and destructive provider write. Exact final read-back detects candidate
+loss/corruption and many following races, but cannot prove another writer did not
+briefly commit and get overwritten before Nian Pass wrote. Nian Pass makes no
+generic provider atomicity/fsync claim; providers lacking persistent writable
+capability are explicitly read-only (`persistence_unsupported`).
 
-The password exists in React only for the current attempt, is cleared before
-awaiting Rust, becomes `SecretString` on a blocking worker, and is never stored.
-Wrong credentials map only to `unlock_failed` and retain staging for retry.
-Malformed or unsupported input exposes no parser/header/KDF detail. Candidate
-open and secret-free projection complete before staging cleanup and state swap;
-failure leaves the locked pending state intact. Successful unlock deletes
-staging, installs a path-free read session, and returns only exact validated
-DTOs. Lock drops that session immediately without a credential or dirty prompt.
-
-`MobileReadSession` directly uses the existing `KdbxDocument`; Kotlin contains
-no parser or cryptography. It has no Save, reload, source fingerprint, mutation,
-or mutable-document API. Browse/detail can expose protected markers, visible
-reviewed metadata, field presence, and custom-field name/protection only—never
-password, notes plaintext, custom values, TOTP/passkey material, or attachments.
-The original provider document is untouched. M5.2 must design writes and
-conflict/source identity separately rather than copying modified staging bytes
-back to a URI.
-
-The mobile view clears detail and hides browse presentation when the WebView
-reports hidden. This is visual mitigation, not cryptographic Lock or native
-background enforcement. The Rust read session can remain decrypted while the
-app is backgrounded until explicit Lock; authoritative native lifecycle lock,
-app-switcher/screenshot hardening, configurable auto-lock, biometrics, and
-Keystore integration remain M5.5 work. M5.1 is not production-ready mobile
-security.
-
-Android signing relies only on standard local/debug tooling; no keystore or
-password belongs in the repository. iOS is not initialized or built on Linux.
-Only macOS with Xcode may supply future iOS build evidence, so Linux results
-must state iOS NOT RUN rather than iOS PASS.
+Dirty ordinary Lock returns `unsaved_changes`; only explicit discard-and-lock
+drops dirty state without writing. Save/Reload/selection/Lock and mutations share
+one operation boundary and revision token, preventing stale async completion from
+marking a newer revision clean. Frontend drafts disable Save. General mobile
+Reveal/Copy, Autofill, Keystore, biometrics, sync, iOS persistence, and production
+mobile hardening remain outside M5.2. iOS is NOT RUN on Linux; initialization,
+build, and validation require macOS with Xcode.
 
 ## M4.3 mutation controls
 

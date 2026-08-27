@@ -12,9 +12,9 @@ M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
 coverage ratchets, and Forgejo jobs that call the same targets used locally.
 
-## M5.1 Android mobile unlock and browse
+## M5.2 Android mobile CRUD and provider persistence
 
-M5.1 keeps one application host and one Rust vault implementation. The
+M5.2 keeps one application host and one Rust vault implementation. The
 `apps/desktop` name is historical; the directory now contains the shared Tauri
 host and is not renamed in this milestone.
 
@@ -26,36 +26,31 @@ Desktop       Android       iOS (future)
            shared Rust core
 ```
 
-The Android project at `apps/desktop/src-tauri/gen/android` contains the small
-first-party `VaultSourcePlugin`. Kotlin uses `ACTION_OPEN_DOCUMENT` with
-`CATEGORY_OPENABLE`, obtains the display name from `OpenableColumns`, and
-streams the selected document through `ContentResolver` into an opaque random
-file under `noBackupFilesDir/nian-pass-imports`. Kotlin does not parse KDBX,
-perform cryptography, reconstruct vault models, or retain a URI grant.
+The first-party `VaultSourcePlugin` owns `SourceToken -> SourceRecord` mappings.
+Each record contains the content URI and granted/persisted read/write
+capabilities; neither URI nor token reaches React. Kotlin requests only read,
+write, and persistable document grants, persists only flags actually granted,
+and exposes only `{ fileName, writable }` to presentation code.
 
 ```text
-content:// document
-        ↓
-Android ContentResolver
-        ↓
-private encrypted no-backup staging
-        ↓
-Rust KdbxDocument
-        ↓
-MobileReadSession
-        ↓
-secret-free DTOs
-        ↓
-React
+content://
+→ native SourceRecord
+→ opaque source token
+→ encrypted generation baseline
+→ MobileVaultSession
+→ memory-only KdbxDocument mutations
+→ verified encrypted candidate
+→ private exact backup + AtomicFile journal
+→ final baseline check → provider write → complete read-back
+→ Rust KDBX reopen + semantic verification → new baseline
 ```
 
-The content URI exists only inside the native picker callback. Rust receives an
-internal staged path and display name through a backend-owned plugin handle;
-React receives only the display filename. A staged path is NOT the M3 canonical
-source. `VaultSession` is NOT used for Android staging. `MobileReadSession`
-contains only the opened `KdbxDocument`, exposes narrow snapshot/detail reads,
-and has no Save, reload, source fingerprint, canonical path, or mutable document
-escape hatch. The original document-provider object remains untouched.
+`VaultSession` is NOT used. `MobileVaultSession` owns `KdbxDocument`, opaque
+source identity, encrypted baseline, and `saved_revision`; it never owns a URI
+or fake canonical provider path. Desktop M3 filesystem persistence is unchanged.
+Desktop and mobile both call the authoritative KDBX mutation APIs, preserving
+atomic entry updates, history, timestamps, protection modes, hierarchy checks,
+tombstones, recursive deletion, reserved-field rejection, and revision tracking.
 
 Rust exposes one exact, secret-free runtime bootstrap DTO containing only
 `platform: desktop | android | ios`. It is derived from compile-time target
@@ -63,12 +58,12 @@ configuration, not a plugin or device query, and carries no path, OS version,
 hostname, username, device identifier, or hardware information. React validates
 the exact key and enum before routing. Unknown or expanded values fail closed.
 
-Desktop targets retain the existing dialog, clipboard, `AppState`, and command
-surface. Android installs a separate `MobileVaultService` and registers exactly
-`runtime_info`, `mobile_select_vault`, `mobile_unlock_vault`,
-`mobile_vault_snapshot`, `mobile_entry_detail`, and `mobile_lock_vault`. iOS
-still registers only `runtime_info` and renders an unsupported passive view.
-Neither mobile route mounts desktop close/focus hooks or `DesktopVaultService`.
+Android registers only reviewed semantic selection, unlock, snapshot/detail,
+explicit edit-load, CRUD, Save, reload, Lock, and discard commands. React never
+calls `plugin:vault-source` directly. One Rust operation token serializes Save,
+reload, selection, Lock, and mutation across native awaits; completion checks
+the prepared document revision before marking clean. No synchronous mutex guard
+is held across a native await.
 
 ```text
 Rust application semantics
@@ -79,22 +74,31 @@ Tauri mobile source bridge
 (Android)      (iOS)
 ```
 
-Wrong-password and open failures leave the encrypted pending selection in Rust
-for retry. A successful unlock first opens and projects a candidate, then
-removes staging and atomically installs the read-only session. Replacement drops
-and cleans the old pending file; picker cancellation preserves it. Drop and
-startup cleanup are best-effort and scoped to the dedicated import directory.
-Filesystem deletion is not claimed to physically erase prior encrypted blocks.
-Lock simply drops `MobileReadSession`.
+Mutations stay memory-only until explicit Save and every response is a fresh
+Rust snapshot. Existing passwords are never loaded into edit forms; protected
+metadata, notes, and custom values use narrow edit-mode loads. Local drafts
+disable Save and clear on Apply, Cancel, navigation, Lock, discard, background
+shield unmount, and component unmount.
 
-M5.1 is read-only. Android has no Save, edit, reveal, clipboard secret copy, or
-source persistence command. M5.2 must separately design document-provider
-identity, encrypted-generation baselines, conflict detection, provider write
-and replace semantics, external modification handling, and failure atomicity.
-It must not reinterpret the current staging copy as a writable source.
+The provider protocol is: full baseline stage/check, Save credential check,
+candidate serialize/sync/reopen/semantic check, candidate fingerprint, exact
+baseline backup, durable `PREPARED` journal, final full baseline check, durable
+`WRITE_STARTED`, descriptor `rwt` write and supported sync, full read-back,
+candidate fingerprint match, Rust reopen/semantic verification, baseline and
+saved-revision update, then transaction cleanup. The commit point is the Rust
+semantic verification after exact candidate read-back. Cleanup failure after
+that point returns `save_uncertain` with canonical Rust state already clean.
+
+Crash reconciliation compares only full encrypted generations. Baseline means
+the original survived; candidate means the write committed; either known state
+can be cleaned safely. Any other or malformed journal state becomes
+`recovery_required` without an automatic overwrite. Generic SAF provides no
+cross-provider atomic replace or conditional write; a residual cooperative
+writer race remains between final check and destructive write. Read-back detects
+many races but cannot prove no writer briefly committed and was overwritten.
 
 Android uses API 26 as its minimum because future AutofillService integration
-requires Android 8.0; Autofill is not implemented in M5.1. The normal generated
+requires Android 8.0; Autofill is not implemented in M5.2. The normal generated
 Rust targets are aarch64, armv7, i686, and x86_64, while the headless foundation
 gate builds aarch64 and x86_64 APK inputs. iOS remains architecture-ready but
 not initialized or built on Linux. Official Tauri iOS initialization and a
@@ -138,9 +142,9 @@ React WebView
                 └── vault-core
 
 Android React view
- └── secret-free mobile DTOs / read-only commands
+ └── reviewed mobile DTOs / semantic CRUD and Save commands
       └── MobileVaultService
-           └── MobileReadSession
+           └── MobileVaultSession
                 ├── kdbx
                 └── vault-core
 
@@ -162,10 +166,11 @@ vault-core
 ```
 
 The diagram's `desktop Rust adapter` is also the shared Tauri Rust application
-package path. M5.1 does not create `apps/mobile/src-tauri`; its direct `kdbx`
-dependency is narrow and exists only so `MobileReadSession` can own the same
-authoritative document type. Desktop persistence remains through
-`vault-session`; Android read-only open never enters that path.
+package path. M5.2 does not create `apps/mobile/src-tauri`; its direct `kdbx`
+dependency is narrow and exists only so `MobileVaultSession` can own the same
+authoritative document type and use the existing writer. Desktop persistence
+remains through `vault-session`; Android provider persistence never enters that
+path.
 
 ## M4.2 desktop security boundary
 

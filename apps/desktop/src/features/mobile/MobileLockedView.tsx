@@ -1,9 +1,9 @@
 import type { SyntheticEvent } from "react";
 
-import type { SelectedVaultDto } from "../../types/desktop";
+import type { MobileSelectedVaultDto } from "../../types/mobile";
 
 interface MobileLockedViewProps {
-  selected: SelectedVaultDto | null;
+  selected: MobileSelectedVaultDto | null;
   password: string;
   busy: boolean;
   unlocking: boolean;
@@ -34,7 +34,10 @@ export function MobileLockedView({
         <div className="brand-mark" aria-hidden="true">
           N
         </div>
-        <p className="eyebrow">Android · Read only</p>
+        <p className="eyebrow">
+          Android ·{" "}
+          {selected?.writable === true ? "Explicit Save" : "Read only"}
+        </p>
         <h1 id="mobile-title">Nian Pass</h1>
         {selected === null ? (
           <button

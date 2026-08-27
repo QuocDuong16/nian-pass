@@ -62,6 +62,12 @@ noBackupFilesDir
 nian-pass-imports
 FileOutputStream
 ByteArray(DEFAULT_BUFFER_SIZE)
+takePersistableUriPermission
+releasePersistableUriPermission
+openFileDescriptor(uri, "rwt")
+WRITE_STARTED
+fingerprint(save.candidate)
+fingerprint(save.readBack)
 `,
   );
   write(
@@ -74,6 +80,18 @@ ByteArray(DEFAULT_BUFFER_SIZE)
     "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/VaultSourcePolicyTest.kt",
     "isManagedStagingName\n",
   );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourceJournal.kt",
+    "AtomicFile WRITE_STARTED\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/generation.rs",
+    "struct EncryptedGeneration;\n",
+  );
+  write(root, "apps/desktop/src-tauri/src/mobile/mutations.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/persistence.rs", "verify_semantic_equivalence\n");
   write(
     root,
     "apps/desktop/src-tauri/src/mobile/session.rs",
@@ -91,7 +109,25 @@ mobile_select_vault,
 mobile_unlock_vault,
 mobile_vault_snapshot,
 mobile_entry_detail,
-mobile_lock_vault
+mobile_load_entry_title,
+mobile_load_entry_username,
+mobile_load_entry_url,
+mobile_load_entry_notes,
+mobile_load_entry_custom_field,
+mobile_update_entry,
+mobile_create_entry,
+mobile_delete_entry,
+mobile_move_entry,
+mobile_create_group,
+mobile_rename_group,
+mobile_move_group,
+mobile_delete_group,
+mobile_set_entry_custom_field,
+mobile_delete_entry_custom_field,
+mobile_save_vault,
+mobile_reload_vault,
+mobile_lock_vault,
+mobile_discard_changes_and_lock
 ]
 expect("Nian Pass Android runtime failed");
 }
@@ -210,10 +246,10 @@ takePersistableUriPermission()
   const violations = runChecks(root).join("\n");
   assert.match(violations, /Uri.getPath/);
   assert.match(violations, /whole-document byte loading/);
-  assert.match(violations, /persistable URI grants/);
+  assert.doesNotMatch(violations, /persistable URI grants/);
 });
 
-test("mobile VaultSession and mutation commands are rejected", (t) => {
+test("mobile VaultSession and unreviewed commands are rejected", (t) => {
   const root = fixture(t);
   write(
     root,
@@ -231,7 +267,7 @@ expect("Nian Pass Android runtime failed");
   );
   const violations = runChecks(root).join("\n");
   assert.match(violations, /must not use VaultSession/);
-  assert.match(violations, /read-only whitelist/);
+  assert.match(violations, /reviewed semantic whitelist/);
 });
 
 test("mobile TypeScript transport identifiers are rejected", (t) => {

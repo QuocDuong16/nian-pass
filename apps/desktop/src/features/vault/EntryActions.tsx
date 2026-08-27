@@ -12,7 +12,7 @@ import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 type Action = "move" | "delete";
 
 interface EntryActionsProps {
-  api: DesktopApi;
+  api: Pick<DesktopApi, "deleteEntry" | "moveEntry">;
   detail: EntryDetailDto;
   groups: GroupDto[];
   disabled: boolean;

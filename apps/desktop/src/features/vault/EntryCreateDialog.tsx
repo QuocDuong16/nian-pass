@@ -5,7 +5,7 @@ import type { CreatedEntryDto, GroupId } from "../../types/desktop";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 interface EntryCreateDialogProps {
-  api: DesktopApi;
+  api: Pick<DesktopApi, "createEntry">;
   groupId: GroupId;
   onCreated: (result: CreatedEntryDto) => void;
   onCancel: () => void;

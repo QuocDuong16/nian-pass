@@ -19,26 +19,35 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M5.1 — Mobile Unlock + Browse
+M5.2 — Android Mobile CRUD + Safe Document Persistence
 
-The Desktop MVP remains complete through M4.5. Android now provides real,
-read-only vault access: system document selection, password unlock through the
-existing Rust KDBX implementation, group/entry browse, secret-free entry detail,
-and immediate Lock. Android 8.0 / API 26 remains the minimum. The selected
-document is streamed through `ContentResolver` into private no-backup encrypted
-staging; a path-free, Save-free Rust `MobileReadSession` owns the decrypted
-document after successful unlock. The original provider document is untouched.
+The Desktop MVP remains complete through M4.5. Android now supports system
+document selection, unlock/browse, entry/group/custom-field CRUD, Rust-owned
+dirty state, explicit credentialed Save on safely writable SAF sources,
+external-generation refusal, verified reload/discard, and dirty Lock
+protection. Android 8.0 / API 26 remains the minimum. Read-only providers remain
+browsable with editing and Save disabled.
 
-Android does not support Save, edit, create/delete/move, password or notes
-reveal, clipboard secret copy, Autofill, Keystore, biometrics, or sync. iOS
-document access remains unimplemented and is not claimed as tested from Linux.
+Save is fail-closed: the real content URI stays native-only behind an opaque
+token; Rust fingerprints the complete encrypted generation, verifies the Save
+credential and encrypted candidate, and Kotlin creates an exact private backup
+plus `AtomicFile` recovery journal before destructive provider write. Provider
+read-back must match the candidate and reopen with equivalent KDBX semantics
+before Rust updates the baseline and clears dirty state. Ambiguous post-write
+states return `save_uncertain`; unknown crash generations return
+`recovery_required`. There is no force overwrite or autosave.
+
+Android still does not support Autofill, Keystore, biometrics, general secret
+reveal/copy, sync, or production mobile hardening. iOS document access and
+persistence remain unimplemented and are not claimed as tested from Linux.
 
 `apps/desktop` remains the historical path for the shared Tauri application
 host. Renaming it is deferred to a dedicated mechanical refactor. Desktop and
 Android compile the same Rust application package and share `vault-core` and the
 authoritative `kdbx` adapter. Desktop alone uses `VaultSession` persistence.
-Android staging never enters `VaultSession`; there is no Kotlin KDBX parser,
-second persistence algorithm, or mobile Save path.
+Android never enters `VaultSession`; its separate provider adapter contains no
+Kotlin KDBX parser or cryptography and delegates all KDBX serialization and
+semantic verification to the existing Rust writer.
 
 The current Linux environment can build Android through command-line tooling
 without Android Studio, an emulator, or a connected device. iOS initialization
@@ -226,15 +235,15 @@ make docs-check
 make mobile-source-check
 ```
 
-### Android mobile unlock and browse
+### Android mobile CRUD and safe provider persistence
 
 The committed Tauri-generated project is at
 `apps/desktop/src-tauri/gen/android`. It targets the normal Rust Android ABI
 set (`aarch64`, `armv7`, `i686`, and `x86_64`); the Android build gate
 prioritizes `aarch64` and `x86_64` for a modern physical device and emulator.
-Future AutofillService work requires Android 8.0, so M5.1 retains
+Future AutofillService work requires Android 8.0, so M5.2 retains
 `minSdk = 26` without claiming Autofill is implemented.
-M5.1 Android production builds do not request network permission. Development
+M5.2 Android production builds do not request network permission. Development
 builds use debug-only `INTERNET` access for the Tauri/Vite development host.
 
 Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to a CLI SDK containing Android SDK 36,
@@ -255,25 +264,25 @@ build outputs remain ignored. Optional device development can use
 `pnpm --filter @nian-pass/desktop tauri android dev` after the separate device
 or emulator setup.
 
-Android selection uses `ACTION_OPEN_DOCUMENT` and a temporary provider grant.
-The URI never crosses into React and is never converted into a filesystem path.
-Native Kotlin streams encrypted bytes to an opaque file under
-`noBackupFilesDir/nian-pass-imports`; Rust opens it with `KdbxDocument`, deletes
-staging after successful candidate projection, and owns a read-only session.
-Wrong passwords retain staging for retry. Picker cancellation preserves the
-current pending selection. Startup/drop cleanup is best-effort and scoped to
-the dedicated directory; ordinary deletion is not claimed as physical secure
-erasure.
+Android selection uses `ACTION_OPEN_DOCUMENT` and retains only actually granted
+read/write persistable permissions. The URI never crosses into Rust presentation
+models or React and is never converted into a filesystem path. Native Kotlin
+maps it to an unpredictable token and stages only encrypted KDBX bytes below
+`noBackupFilesDir`; Rust owns the authoritative `MobileVaultSession`. Providers
+without a persisted writable grant remain browse-only. Picker cancellation
+preserves the current selection and dirty sessions cannot be replaced silently.
 
-Optional device/emulator smoke procedure: launch, Open KDBX, select a committed
-synthetic fixture, try a wrong password, retry with `demopass`, browse groups
-and entries, inspect secret-free detail, then Lock. This does not replace the
-automated Rust, Vitest, Kotlin, source-policy, and APK checks.
+Optional device/emulator smoke procedure: open a committed synthetic fixture,
+unlock, edit, Save, Lock, reopen, and verify the edit; then repeat with an
+external modification and verify Save refuses to overwrite it. This does not
+replace the automated Rust, Vitest, Kotlin, source-policy, and APK checks.
 
-M5.2 must separately design safe writes to a document-provider source,
-including source identity, encrypted-generation baselines, conflict detection,
-provider replacement/failure, external modification, and transactional
-guarantees. M5.1 does not copy modified staging bytes back to the URI.
+Explicit Save verifies the full encrypted baseline, password, private encrypted
+candidate, exact private backup, crash journal, final pre-write baseline,
+provider read-back, and final KDBX semantics. The generic SAF writer race is
+narrowed but not claimed eliminated; any missing proof after destructive write
+is `save_uncertain`, and an unknown interrupted generation is
+`recovery_required` rather than guessed or overwritten.
 
 A future `make mobile-ios-check` will be a macOS-only gate after the official
 Tauri iOS project is generated with Xcode available. It must fail clearly on an
