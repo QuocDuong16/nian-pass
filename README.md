@@ -38,13 +38,18 @@ states return `save_uncertain`; unknown crash generations return
 `recovery_required`. There is no force overwrite or autosave.
 
 Autofill source remembering is explicit opt-in. Android retains the selected
-SAF read grant and writes only a versioned source bookmark plus package trust
+SAF READ grant and writes only a versioned source bookmark plus package trust
 associations, encrypted with a non-exportable AES-256-GCM Android Keystore key
 in app-private no-backup storage. Lock always drops the decrypted Rust session;
 the remembered bookmark only lets a cold credential request stage the selected
 KDBX before the user enters its real master password again. Disable Autofill
 deletes the bookmark and trust metadata and releases the retained grant when no
 active vault still owns it.
+
+An active normal M5.2 vault may continue to own READ + WRITE for explicit Save.
+After a remembered vault successfully completes the existing two-phase Lock,
+native Android releases WRITE and verifies that only READ remains before Rust
+drops the decrypted session. Cold Autofill rehydration is always read-only.
 
 Android still does not support biometric quick unlock, master-password or KDBX
 derived-key persistence, passkeys, TOTP autofill, external credential
@@ -295,12 +300,28 @@ passes the exact current username/password directly to the native system-result
 builder. Passwords, package certificate identities, content URIs, AutofillIds,
 and request parcelables never cross WebView IPC.
 
+On API 34+, a direct application request remains an APP target. If
+`CallingAppInfo.isOriginPopulated()` reports a privileged request, Nian Pass
+passes its bundled versioned browser allowlist to `CallingAppInfo.getOrigin()`
+and accepts only a verified HTTPS origin with no userinfo, path, query, or
+fragment. A verified `https://example.com` becomes the WEB target
+`example.com`, while allowlist/certificate failure is unavailable and never
+downgrades to the browser package.
+
 An application association is silently trusted only when both its exact package
 and SHA-256 signing-certificate pin match. First association, signing-key
 changes, and every unverified web association require explicit confirmation.
 Opaque request and candidate tokens are short-lived and single-use. Kotlin does
 not parse KDBX and keeps no password cache; Autofill neither invokes Save nor
 handles external create/save requests.
+
+Credential authentication PendingIntents use a random data-URI identity rather
+than a process-local request counter. After process restart, the private
+credential Activity extracts the Android-supplied begin/final Credential Manager
+request with `PendingIntentHandler`, or the classic Autofill `AssistStructure`,
+revalidates the target, and creates fresh in-memory authority. Framework request
+objects are never written to the encrypted metadata store or any other disk
+cache.
 
 Optional device/emulator smoke procedure: open a committed synthetic fixture,
 unlock, edit, Save, Lock, reopen, and verify the edit; then repeat with an

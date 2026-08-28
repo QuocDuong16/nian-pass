@@ -32,7 +32,7 @@ internal sealed class AndroidRequestRecord(
     token: String,
     target: CredentialTarget,
     createdAt: Long,
-    val option: BeginGetPasswordOption,
+    val option: BeginGetPasswordOption?,
   ) : AndroidRequestRecord(token, target, createdAt)
 
   class Autofill(
@@ -61,6 +61,13 @@ internal class AutofillRequestRegistry(
     cleanupExpired()
     val token = opaqueToken()
     requests[token] = AndroidRequestRecord.Credential(token, target, clock(), option)
+    return token
+  }
+
+  fun registerCredentialFulfillment(target: CredentialTarget): String {
+    cleanupExpired()
+    val token = opaqueToken()
+    requests[token] = AndroidRequestRecord.Credential(token, target, clock(), null)
     return token
   }
 
@@ -113,6 +120,8 @@ internal class AutofillRequestRegistry(
     requests.clear()
   }
 
+  fun isOpaqueToken(value: String?): Boolean = value?.let(TOKEN_PATTERN::matches) == true
+
   private fun cleanupExpired() {
     val oldest = clock() - TTL_MILLIS
     val expired = requests.values.filter { it.createdAt < oldest }.map { it.token }.toSet()
@@ -130,10 +139,12 @@ internal class AutofillRequestRegistry(
 
   companion object {
     internal const val TTL_MILLIS = 120_000L
+    private val TOKEN_PATTERN = Regex("^[0-9a-f]{48}$")
   }
 }
 
 internal object AutofillRuntime {
   val registry = AutofillRequestRegistry()
+  val pendingIntentUses = PendingIntentUseRegistry()
   @Volatile var activeCredentialActivity: CredentialActivity? = null
 }

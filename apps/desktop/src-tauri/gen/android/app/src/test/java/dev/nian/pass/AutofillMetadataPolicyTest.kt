@@ -125,8 +125,90 @@ class AutofillRequestPolicyTest {
     assertTrue(registry.complete(request, candidate) is AndroidRequestRecord.Autofill)
     assertNull(registry.complete(request, candidate))
 
+    registry.clear()
+    val reconstructed = registry.registerCredentialFulfillment(target)
+    val reconstructedCandidate = registry.registerCandidate(reconstructed, "entry-after-restart")
+    assertEquals(
+      "entry-after-restart",
+      registry.candidate(reconstructedCandidate, reconstructed)?.entryId,
+    )
+    assertTrue(
+      registry.complete(reconstructed, reconstructedCandidate) is AndroidRequestRecord.Credential,
+    )
+    assertNull(registry.complete(reconstructed, reconstructedCandidate))
+
     val expired = registry.registerAutofill(target, ParsedAutofillFields(emptyList(), emptyList()))
     now += AutofillRequestRegistry.TTL_MILLIS + 1
     assertNull(registry.request(expired))
+  }
+}
+
+class AutofillGrantPolicyTest {
+  private class FakeGrantController(
+    private var flags: Int,
+    private val failRelease: Boolean = false,
+  ) : PersistedGrantController {
+    val releases = mutableListOf<Int>()
+
+    override fun currentFlags(): Int = flags
+
+    override fun release(flags: Int) {
+      releases += flags
+      if (failRelease) throw SecurityException("synthetic")
+      this.flags = this.flags and flags.inv()
+    }
+  }
+
+  @Test
+  fun readWriteAndReadOnlySourcesBothBookmarkReadOnly() {
+    assertEquals(AutofillGrantPolicy.READ, AutofillGrantPolicy.bookmarkFlags(
+      AutofillGrantPolicy.READ or AutofillGrantPolicy.WRITE,
+    ))
+    assertEquals(
+      AutofillGrantPolicy.READ,
+      AutofillGrantPolicy.bookmarkFlags(AutofillGrantPolicy.READ),
+    )
+  }
+
+  @Test
+  fun sourceWithoutReadCannotEnableAutofill() {
+    assertNull(AutofillGrantPolicy.bookmarkFlags(AutofillGrantPolicy.WRITE))
+    assertNull(AutofillGrantPolicy.bookmarkFlags(0))
+  }
+
+  @Test
+  fun coldRehydrateIsAlwaysReadOnly() {
+    assertFalse(AutofillGrantPolicy.coldSourceWritable())
+  }
+
+  @Test
+  fun rememberedLockReleasesWriteAndRetainsRead() {
+    val grants = FakeGrantController(AutofillGrantPolicy.READ or AutofillGrantPolicy.WRITE)
+    assertTrue(AutofillGrantPolicy.retainReadOnly(grants))
+    assertEquals(listOf(AutofillGrantPolicy.WRITE), grants.releases)
+    assertEquals(AutofillGrantPolicy.READ, grants.currentFlags())
+  }
+
+  @Test
+  fun writeReleaseFailureAbortsNativeLockTransition() {
+    val grants = FakeGrantController(
+      AutofillGrantPolicy.READ or AutofillGrantPolicy.WRITE,
+      failRelease = true,
+    )
+    assertFalse(AutofillGrantPolicy.retainReadOnly(grants))
+    assertEquals(AutofillGrantPolicy.READ or AutofillGrantPolicy.WRITE, grants.currentFlags())
+  }
+
+  @Test
+  fun disableDoesNotReleaseGrantOwnedByActiveNormalSession() {
+    val both = AutofillGrantPolicy.READ or AutofillGrantPolicy.WRITE
+    assertEquals(0, AutofillGrantPolicy.disableReleaseFlags(true, both))
+    assertEquals(both, AutofillGrantPolicy.disableReleaseFlags(false, both))
+  }
+
+  @Test
+  fun legacyReadWriteBookmarkNormalizesToReadOnly() {
+    val legacy = AutofillMetadata("content://synthetic/vault", 3, "Synthetic.kdbx")
+    assertEquals(AutofillGrantPolicy.READ, AutofillGrantPolicy.normalize(legacy)?.grantFlags)
   }
 }

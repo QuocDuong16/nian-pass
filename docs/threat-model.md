@@ -142,13 +142,19 @@ information to an attacker even when their plaintext remains unavailable.
 - A fake Android application reusing a legitimate package name
 - An Android package signing key changing after trust establishment
 - A malicious or unverified browser/WebView target claiming a web domain
+- A privileged browser origin failing verification and being downgraded to the browser package
+- The browser package becoming a confused deputy for arbitrary web origins
+- Process death between an AuthenticationAction and its credential Activity
 - A stale credential request, replayed PendingIntent, or reused request token
+- A sequential PendingIntent request code aliasing after process restart
+- A `singleTop` credential Activity continuing to use its stale prior Intent
 - A deleted entry being fulfilled from stale candidate metadata
 - Password plaintext crossing WebView IPC or being cached by Kotlin
 - AssistStructure form contents being logged or persisted
 - Source URI and trust metadata leaking from native storage or backups
 - A corrupted bookmark, missing/invalidation Keystore key, or wrong AEAD context
 - A cold service process treating a remembered source as an unlocked vault
+- A remembered Autofill source retaining WRITE after normal Lock
 - Autofill fulfillment racing Lock and returning a secret after Lock authority ends
 - Accidental master-password or KDBX derived-key persistence in Android Keystore
 
@@ -261,7 +267,7 @@ data. The credential Activity is private, excluded from recents, and uses
 permission, release `INTERNET`, or network-backed association lookup is added.
 
 Native parsing reads only the requesting package, current SHA-256 signing
-certificate identity, framework web domain, recognized username/email/password
+certificate identity, AndroidX-verified Credential Manager origin, recognized username/email/password
 classifications, and required AutofillIds. It never logs or persists an
 AssistStructure or input-node text. Package name alone never authorizes silent
 release: the exact package association must match in Rust and the native trust
@@ -269,11 +275,22 @@ store must contain the same certificate pin. A missing pin or changed signing
 identity requires explicit confirmation. Web URL matching uses a real parser and
 exact canonical host; an unverified web association always requires intentional
 approval and cannot silently downgrade because network verification is absent.
+For a populated Credential Manager origin, the bundled privileged-browser
+allowlist and `CallingAppInfo.getOrigin()` must validate the exact browser
+package/certificate identity. Failure is unavailable, not APP fallback, so a
+browser cannot act as a confused deputy for every site. Only strict HTTPS origin
+syntax is accepted and exact canonical host matching remains Rust-owned.
 
 The native registry is process-local, expiring, and single-use. Its records and
 candidate mappings are cleared on completion, cancellation, expiry, and Lock
-where possible, and never written to disk. Process death loses the operation
-instead of restoring stale authority. Rust computes secret-free candidates from
+where possible, and never written to disk. It is only a cache: after process
+death the private Activity reconstructs the begin/final Credential Manager
+request using `PendingIntentHandler`, or classic Autofill using Android's
+`EXTRA_ASSIST_STRUCTURE`, and fully revalidates the native target before issuing
+fresh tokens. A stale custom token without framework authority fails. Random
+data-URI PendingIntent identity does not reset with the process, and retained
+`singleTop` handling replaces `getIntent()` state and retires the prior request.
+Rust computes secret-free candidates from
 the current unlocked `KdbxDocument`; protected Title/UserName stay protected in
 bulk DTOs. Final approval revalidates the active request, target match, session,
 and current stable entry ID under the shared operation reservation. Deletion,
@@ -302,9 +319,13 @@ failure, malformed payload, and unknown schema fail closed without exposing the
 URI or crypto exception. Re-enabling Autofill is required.
 
 Enabling source remembering is an explicit transaction over an already unlocked
-source and a valid persisted SAF read grant. Lock still drops the complete Rust
-session and decrypted document; it retains only the opted-in native bookmark and
-grant after native bookkeeping succeeds. Disable removes bookmark and trust
+source and a valid persisted SAF READ grant. A live normal session may retain
+READ + WRITE until Lock so M5.2 Save remains usable. Lock still drops the
+complete Rust session and decrypted document only after native code releases
+WRITE alone and verifies persisted READ=yes, WRITE=no. A failed release aborts
+the existing two-phase Lock, preserving the Rust session. The bookmark stores
+READ only, legacy flags normalize to READ, and cold rehydration is never
+writable. Disable removes bookmark and trust
 metadata and releases the grant when no live source still needs the existing
 two-phase Lock handoff. The bookmark contains no master password, entry password,
 KDBX document key, manually derived/composite key, biometric quick-unlock

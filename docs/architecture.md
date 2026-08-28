@@ -19,8 +19,9 @@ M5.3 adds two Android OS surfaces over one Rust credential core:
 ```text
 Android OS request
 → CredentialProviderService / AutofillService
-→ native target parser and short-lived opaque request token
+→ framework request + native target parser + short-lived opaque request token
 → private credential authentication Activity
+→ reconstruct and revalidate after process restart
 → Rust AutofillBroker over the current MobileVaultSession/KdbxDocument
 → secret-free candidate and explicit user approval
 → narrow current username/password read in Rust
@@ -48,9 +49,43 @@ backend operation, and resolves the current stable entry ID. Lock cannot drop
 the session during this reservation, stale/deleted entries fail closed, and
 successful Lock invalidates backend and native request authority.
 
+Credential Manager target classification is deliberately asymmetric:
+
+```text
+CallingAppInfo without origin → APP(package + signing identity)
+CallingAppInfo with AndroidX-verified HTTPS origin → WEB(host + browser package + signing identity)
+populated origin that fails verification/canonicalization → unavailable
+```
+
+The provider calls the pinned AndroidX 1.6.0
+`CallingAppInfo.isOriginPopulated()` and `getOrigin(privilegedAllowlist)` APIs.
+The allowlist is the bundled, versioned
+`credential_privileged_apps_v1.json` snapshot (Chrome and Firefox release
+identities from Android's linked Google Password Manager public allowlist,
+captured 2026-08-28); it is never fetched at runtime. HTTPS origins are parsed as
+URIs and must contain a host but no userinfo, path, query, or fragment. The
+browser package is never substituted for a populated origin that fails this
+verification.
+
 The process-local native request registry contains only framework-owned request
-objects/AutofillIds and random, expiring, single-use token mappings. It is not
-durable; process death safely causes Android to reissue the request. Passwords
+objects/AutofillIds and random, expiring, single-use token mappings. It is a
+fast-path cache, not the sole authority. `CredentialActivity` uses
+`PendingIntentHandler.retrieveBeginGetCredentialRequest()` for an
+AuthenticationAction and `retrieveProviderGetCredentialRequest()` for a final
+CredentialEntry; classic Autofill reads `AutofillManager.EXTRA_ASSIST_STRUCTURE`
+and reparses the AutofillIds natively. After a process restart the Activity
+revalidates package, signing identity, origin, and password request shape, then
+creates fresh process-local tokens. Missing framework authority plus a stale
+custom token is unavailable. No request Parcelable, Bundle, Parcel,
+AssistStructure, or AutofillId is persisted.
+
+Every explicit mutable PendingIntent has a cryptographically random
+`nianpass://credential/<opaque>` data identity, so identity does not reset or
+alias with a sequential request code after process restart. Extras contain only
+opaque request/candidate authority and a stable non-secret entry ID. `singleTop`
+is retained; `onNewIntent()` calls `setIntent()`, retires the prior intent
+identity, clears stale request state, and reconstructs the new framework
+request. Passwords
 exist in Kotlin only while constructing a final `GetCredentialResponse` or
 authenticated `Dataset` and are never cached, logged, bundled, saved, or routed
 through JavaScript. CreateCredential and Autofill SaveRequest are unsupported;
@@ -63,7 +98,7 @@ Android Keystore non-exportable AES-256-GCM key
 ```
 
 Source remembering is explicit opt-in. The encrypted bookmark contains only the
-content URI, retained SAF flags, safe display metadata, schema version, and
+content URI, READ-only SAF flag, safe display metadata, schema version, and
 trust associations. It contains no master password, KDBX document/derived key,
 entry credential, or vault index. The Keystore key does not require biometric or
 device authentication because it protects metadata at rest, not unlock
@@ -71,6 +106,15 @@ material. Missing/invalid keys, malformed ciphertext, AEAD failure, and schema
 drift fail closed and require re-enabling Autofill. Cold start may rehydrate a
 fresh encrypted provider generation, but real KDBX unlock still requires the
 master password and normal generation verification.
+
+Enabling Autofill records the desired READ-only grant without disrupting a live
+normal M5.2 session that still needs READ + WRITE for Save. During the existing
+two-phase Lock, native Android releases WRITE alone with
+`releasePersistableUriPermission(uri, WRITE)` and verifies persisted READ=yes,
+WRITE=no before Rust completes Lock. Failure aborts Lock and leaves the Rust
+session authoritative. Legacy READ+WRITE bookmarks normalize and rewrite to
+READ; a cold remembered source is always `writable=false`. Disable releases the
+retained grant only when no active normal source still owns it.
 
 ## M5.2 Android mobile CRUD and provider persistence
 

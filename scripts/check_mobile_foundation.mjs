@@ -108,6 +108,31 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillRequestRegistry.kt",
     violations,
   );
+  const autofillIntents = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillIntents.kt",
+    violations,
+  );
+  const credentialTargetPolicy = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialTargetPolicy.kt",
+    violations,
+  );
+  const credentialReconstructor = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialRequestReconstructor.kt",
+    violations,
+  );
+  const autofillGrantPolicy = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillGrantPolicy.kt",
+    violations,
+  );
+  const privilegedAllowlist = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/res/raw/credential_privileged_apps_v1.json",
+    violations,
+  );
   const credentialProviderXml = requireFile(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/res/xml/credential_provider.xml",
@@ -401,6 +426,10 @@ export function runChecks(root) {
     credentialActivity,
     autofillMetadata,
     autofillRegistry,
+    autofillIntents,
+    credentialTargetPolicy,
+    credentialReconstructor,
+    autofillGrantPolicy,
     nativeBridge,
   ].join("\n");
   for (const required of [
@@ -438,6 +467,47 @@ export function runChecks(root) {
   }
   if (!autofillService.includes("callback.onSuccess()")) {
     violations.push("M5.3 Autofill SaveRequest must complete without persistence");
+  }
+  if (
+    !credentialTargetPolicy.includes("isOriginPopulated()") ||
+    !credentialTargetPolicy.includes("getOrigin(") ||
+    !credentialTargetPolicy.includes("credential_privileged_apps_v1") ||
+    !privilegedAllowlist.includes('"package_name": "com.android.chrome"')
+  ) {
+    violations.push("M5.3 Credential Manager web origins require a bundled privileged caller allowlist");
+  }
+  if (
+    !credentialReconstructor.includes("retrieveBeginGetCredentialRequest") ||
+    !credentialReconstructor.includes("retrieveProviderGetCredentialRequest") ||
+    !credentialReconstructor.includes("EXTRA_ASSIST_STRUCTURE") ||
+    !credentialActivity.includes("onNewIntent") ||
+    !credentialActivity.includes("setIntent(intent)")
+  ) {
+    violations.push("M5.3 credential Activity must reconstruct framework requests and refresh singleTop intents");
+  }
+  if (
+    autofillIntents.includes("AtomicInteger") ||
+    !autofillIntents.includes("SecureRandom") ||
+    !autofillIntents.includes("data = Uri.parse") ||
+    autofillIntents.includes("FLAG_UPDATE_CURRENT")
+  ) {
+    violations.push("M5.3 PendingIntent identity must be random, process-independent, and collision-safe");
+  }
+  if (
+    !autofillGrantPolicy.includes("bookmarkFlags") ||
+    !autofillGrantPolicy.includes("retainReadOnly") ||
+    !autofillGrantPolicy.includes("coldSourceWritable(): Boolean = false") ||
+    !autofillMetadata.includes("AutofillGrantPolicy.normalize") ||
+    !nativeBridge.includes("retainAutofillReadGrant")
+  ) {
+    violations.push("M5.3 remembered Autofill sources must retain READ only and cold-rehydrate read-only");
+  }
+  if (
+    /BeginGetCredentialRequest|ProviderGetCredentialRequest|AssistStructure|AutofillId|\bBundle\b|\bParcel\b/.test(
+      autofillMetadata,
+    )
+  ) {
+    violations.push("M5.3 framework request objects must never enter durable Autofill metadata");
   }
   if (!mobileRust.includes("AndroidApp") || !mobileRust.includes("entry_password")) {
     violations.push("M5.3 candidate matching and narrow final secret reads must remain Rust-owned");

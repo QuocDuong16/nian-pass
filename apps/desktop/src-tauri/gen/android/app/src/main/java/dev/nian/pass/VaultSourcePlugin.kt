@@ -100,7 +100,7 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       val token = VaultSourcePolicy.opaqueId()
       val recoveryRequired = reconcileKnownTransactions(uri)
       sources[token] = SourceRecord(
-        uri, persistedFlags, writable, recoveryRequired, staged, queryDisplayName(uri), false,
+        uri, persistedFlags, writable, recoveryRequired, staged, queryDisplayName(uri),
       )
       invoke.resolve(JSObject().apply {
         put("status", "selected")
@@ -310,11 +310,14 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
         true
       }
     }
-    val remembered = source.remembered && autofillStore.loadBookmark()?.sourceUri == source.uri.toString()
-    if (!preserveRecovery && !remembered && source.persistedFlags != 0) {
-      try {
-        activity.contentResolver.releasePersistableUriPermission(source.uri, source.persistedFlags)
-      } catch (_: Exception) {
+    val remembered = autofillStore.loadBookmark()?.sourceUri == source.uri.toString()
+    if (!preserveRecovery) {
+      val transitioned = if (remembered) {
+        retainAutofillReadGrant(source.uri)
+      } else {
+        releasePersistedGrant(source.uri, source.persistedFlags)
+      }
+      if (!transitioned) {
         invoke.resolve(status("failed"))
         return
       }
@@ -350,8 +353,8 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
   fun enableAutofill(invoke: Invoke) {
     try {
       val source = requireSource(invoke.getArgs().getString("sourceToken"))
-      val readFlag = Intent.FLAG_GRANT_READ_URI_PERMISSION
-      if (source.persistedFlags and readFlag == 0) {
+      val autofillFlags = AutofillGrantPolicy.bookmarkFlags(source.persistedFlags)
+      if (autofillFlags == null) {
         invoke.resolve(status("failed"))
         return
       }
@@ -363,14 +366,13 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       val associations = prior?.takeIf { it.sourceUri == source.uri.toString() }?.associations.orEmpty()
       val saved = autofillStore.saveBookmark(
         AutofillMetadata(
-          source.uri.toString(), source.persistedFlags, source.displayName, associations,
+          source.uri.toString(), autofillFlags, source.displayName, associations,
         ),
       )
       if (!saved) {
         invoke.resolve(status("failed"))
         return
       }
-      source.remembered = true
       invoke.resolve(status("ok"))
     } catch (_: Exception) {
       invoke.resolve(status("failed"))
@@ -390,18 +392,13 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(status("failed"))
         return
       }
-      if (active == null && bookmark.grantFlags != 0) {
-        try {
-          activity.contentResolver.releasePersistableUriPermission(
-            Uri.parse(bookmark.sourceUri), bookmark.grantFlags,
-          )
-        } catch (_: Exception) {
-          autofillStore.saveBookmark(bookmark)
-          invoke.resolve(status("failed"))
-          return
-        }
+      val persistedFlags = persistedGrantFlags(Uri.parse(bookmark.sourceUri))
+      val releaseFlags = AutofillGrantPolicy.disableReleaseFlags(active != null, persistedFlags)
+      if (releaseFlags != 0 && !releasePersistedGrant(Uri.parse(bookmark.sourceUri), releaseFlags)) {
+        autofillStore.saveBookmark(bookmark)
+        invoke.resolve(status("failed"))
+        return
       }
-      active?.remembered = false
       AutofillRuntime.registry.clear()
       invoke.resolve(status("ok"))
     } catch (_: Exception) {
@@ -420,11 +417,11 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       val uri = Uri.parse(bookmark.sourceUri)
       val staged = stageProvider(uri, stagingDirectory(), "kdbx")
       val token = VaultSourcePolicy.opaqueId()
-      val writable = bookmark.grantFlags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0
+      val writable = AutofillGrantPolicy.coldSourceWritable()
       val recoveryRequired = reconcileKnownTransactions(uri)
       sources[token] = SourceRecord(
-        uri, bookmark.grantFlags, writable, recoveryRequired, staged,
-        VaultSourcePolicy.displayName(bookmark.displayName), true,
+        uri, AutofillGrantPolicy.READ, writable, recoveryRequired, staged,
+        VaultSourcePolicy.displayName(bookmark.displayName),
       )
       invoke.resolve(JSObject().apply {
         put("status", "selected")
@@ -494,10 +491,11 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
         val username = summaryLabel(candidate.getJSONObject("username"), title)
         val candidateToken = AutofillRuntime.registry.registerCandidate(requestToken, entryId)
         val pendingIntent = AutofillIntents.credentialActivity(
-          activity, requestToken, candidateToken,
+          activity, requestToken, candidateToken, entryId,
         )
+        val option = record.option ?: throw IllegalStateException("query option unavailable")
         response.addCredentialEntry(
-          PasswordCredentialEntry.Builder(activity, username, pendingIntent, record.option)
+          PasswordCredentialEntry.Builder(activity, username, pendingIntent, option)
             .setDisplayName(title)
             .setAutoSelectAllowed(false)
             .build(),
@@ -509,6 +507,7 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       }
       val result = Intent()
       PendingIntentHandler.setBeginGetCredentialResponse(result, response.build())
+      credentialActivity.consumeCurrentRequest()
       credentialActivity.setResult(Activity.RESULT_OK, result)
       credentialActivity.finish()
       invoke.resolve(status("ok"))
@@ -575,6 +574,7 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       if (!trusted && approved && record.target.kind == TargetKind.APP) {
         autofillStore.saveAssociation(record.target.packageName, record.target.signingIdentity)
       }
+      credentialActivity.consumeCurrentRequest()
       credentialActivity.setResult(Activity.RESULT_OK, result)
       credentialActivity.finish()
       invoke.resolve(status("ok"))
@@ -588,6 +588,7 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     val requestToken = invoke.getArgs().getString("requestToken")
     AutofillRuntime.registry.cancel(requestToken)
     AutofillRuntime.activeCredentialActivity?.apply {
+      consumeCurrentRequest()
       setResult(Activity.RESULT_CANCELED)
       finish()
     }
@@ -615,11 +616,46 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     val bookmark = autofillStore.loadBookmark() ?: return null
     return try {
       val uri = Uri.parse(bookmark.sourceUri)
+      val active = sources.values.any { it.uri == uri }
+      if (!active && !retainAutofillReadGrant(uri)) return null
       val persisted = activity.contentResolver.persistedUriPermissions.firstOrNull { it.uri == uri }
-      bookmark.takeIf { persisted?.isReadPermission == true }
+      bookmark.takeIf {
+        it.grantFlags == AutofillGrantPolicy.READ && persisted?.isReadPermission == true
+      }
     } catch (_: Exception) {
       null
     }
+  }
+
+  private fun retainAutofillReadGrant(uri: Uri): Boolean = AutofillGrantPolicy.retainReadOnly(
+    object : PersistedGrantController {
+      override fun currentFlags(): Int = persistedGrantFlags(uri)
+
+      override fun release(flags: Int) {
+        activity.contentResolver.releasePersistableUriPermission(uri, flags)
+      }
+    },
+  )
+
+  private fun releasePersistedGrant(uri: Uri, requestedFlags: Int): Boolean {
+    val actual = persistedGrantFlags(uri)
+    val flags = requestedFlags and actual and (AutofillGrantPolicy.READ or AutofillGrantPolicy.WRITE)
+    if (flags == 0) return actual == 0
+    return try {
+      activity.contentResolver.releasePersistableUriPermission(uri, flags)
+      persistedGrantFlags(uri) and flags == 0
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun persistedGrantFlags(uri: Uri): Int {
+    val persisted = activity.contentResolver.persistedUriPermissions.firstOrNull { it.uri == uri }
+      ?: return 0
+    var flags = 0
+    if (persisted.isReadPermission) flags = flags or AutofillGrantPolicy.READ
+    if (persisted.isWritePermission) flags = flags or AutofillGrantPolicy.WRITE
+    return flags
   }
 
   private fun summaryLabel(value: org.json.JSONObject, fallback: String): String =
@@ -836,7 +872,6 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     @Volatile var recoveryRequired: Boolean,
     val initialStaging: File,
     val displayName: String,
-    @Volatile var remembered: Boolean,
   )
   private data class SaveRecord(
     val token: String,

@@ -117,6 +117,61 @@ fingerprint(save.readBack)
   );
   write(
     root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillIntents.kt",
+    "SecureRandom data = Uri.parse random PendingIntent identity\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialTargetPolicy.kt",
+    "isOriginPopulated() getOrigin(privilegedAllowlist) credential_privileged_apps_v1\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialRequestReconstructor.kt",
+    "retrieveBeginGetCredentialRequest retrieveProviderGetCredentialRequest EXTRA_ASSIST_STRUCTURE\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillGrantPolicy.kt",
+    "bookmarkFlags retainReadOnly coldSourceWritable(): Boolean = false\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/res/raw/credential_privileged_apps_v1.json",
+    '{"apps":[{"info":{"package_name": "com.android.chrome"}}]}\n',
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialActivity.kt",
+    "FLAG_SECURE onNewIntent setIntent(intent)\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillMetadataStore.kt",
+    "AndroidKeyStore AES/GCM/NoPadding setUserAuthenticationRequired(false) AtomicFile noBackupFilesDir AutofillGrantPolicy.normalize\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+    `Intent.ACTION_OPEN_DOCUMENT
+Intent.CATEGORY_OPENABLE
+contentResolver.openInputStream
+OpenableColumns.DISPLAY_NAME
+noBackupFilesDir
+nian-pass-imports
+FileOutputStream
+ByteArray(DEFAULT_BUFFER_SIZE)
+takePersistableUriPermission
+releasePersistableUriPermission
+openFileDescriptor(uri, "rwt")
+WRITE_STARTED
+fingerprint(save.candidate)
+fingerprint(save.readBack)
+retainAutofillReadGrant
+`,
+  );
+  write(
+    root,
     "apps/desktop/src-tauri/gen/android/app/src/main/res/xml/credential_provider.xml",
     '<credential-provider><capability name="android.credentials.TYPE_PASSWORD_CREDENTIAL" /></credential-provider>\n',
   );
@@ -340,6 +395,35 @@ test("M5.3 frontend and Autofill SaveRequest cannot bypass semantic Rust", (t) =
   const violations = runChecks(root).join("\n");
   assert.match(violations, /frontend must not receive or invoke native/);
   assert.match(violations, /SaveRequest must not mutate/);
+});
+
+test("M5.3 origin, reconstruction, PendingIntent, and READ-only grant ratchets cannot drift", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialTargetPolicy.kt",
+    "browser package fallback\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialRequestReconstructor.kt",
+    "custom token only\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillIntents.kt",
+    "AtomicInteger FLAG_UPDATE_CURRENT\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillGrantPolicy.kt",
+    "WRITE retained\n",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /privileged caller allowlist/);
+  assert.match(violations, /reconstruct framework requests/);
+  assert.match(violations, /PendingIntent identity must be random/);
+  assert.match(violations, /retain READ only/);
 });
 
 test("native bridge source-path and whole-buffer shortcuts are rejected", (t) => {

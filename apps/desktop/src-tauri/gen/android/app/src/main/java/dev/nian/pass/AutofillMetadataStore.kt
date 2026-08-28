@@ -142,7 +142,8 @@ internal class AutofillMetadataStore(
 
   @Synchronized
   fun saveBookmark(metadata: AutofillMetadata): Boolean = try {
-    val plaintext = AutofillMetadataCodec.encode(metadata)
+    val normalized = AutofillGrantPolicy.normalize(metadata) ?: return false
+    val plaintext = AutofillMetadataCodec.encode(normalized)
     try {
       writeEnvelope(cipher.encrypt(plaintext, AAD))
     } finally {
@@ -159,7 +160,10 @@ internal class AutofillMetadataStore(
     return try {
       val plaintext = cipher.decrypt(readEnvelope(file.readFully()), AAD)
       try {
-        AutofillMetadataCodec.decode(plaintext)
+        val decoded = AutofillMetadataCodec.decode(plaintext)
+        val normalized = AutofillGrantPolicy.normalize(decoded) ?: return null
+        if (normalized != decoded && !saveBookmark(normalized)) return null
+        normalized
       } finally {
         plaintext.fill(0)
       }

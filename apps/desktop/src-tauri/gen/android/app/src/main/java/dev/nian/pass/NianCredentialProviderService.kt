@@ -26,12 +26,11 @@ class NianCredentialProviderService : CredentialProviderService() {
   ) {
     val option = request.beginGetCredentialOptions.filterIsInstance<BeginGetPasswordOption>().firstOrNull()
     val caller = request.callingAppInfo
-    val signingIdentity = caller?.let(PackageSigningIdentity::fromCallingApp)
-    if (option == null || caller == null || signingIdentity == null) {
+    val target = caller?.let { CredentialTargetClassifier.fromCallingApp(this, it) }
+    if (option == null || target == null) {
       callback.onError(NoCredentialException("credential_unavailable"))
       return
     }
-    val target = CredentialTarget(TargetKind.APP, caller.packageName, signingIdentity)
     val token = AutofillRuntime.registry.registerCredential(target, option)
     cancellationSignal.setOnCancelListener { AutofillRuntime.registry.cancel(token) }
     val action = AuthenticationAction.Builder(

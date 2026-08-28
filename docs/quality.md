@@ -68,6 +68,13 @@ KDBX/credential caches, passkey declarations, broad storage/package permissions,
 and Autofill SaveRequest mutation. Rust target matching, narrow password access,
 SHA-256 certificate identity, AES-GCM Keystore metadata, AtomicFile/no-backup
 storage, and single-use opaque registries are positive source requirements.
+The ratchet also requires the official `CallingAppInfo` origin APIs plus a
+bundled privileged-browser allowlist, `PendingIntentHandler` begin/final request
+reconstruction, native AssistStructure reconstruction, random Intent data
+identity without `AtomicInteger`/`FLAG_UPDATE_CURRENT`, correct `onNewIntent`
+refresh, READ-only bookmark normalization, verified WRITE release before Lock,
+and read-only cold rehydration. Durable metadata is rejected if it references a
+Credential Manager request, AssistStructure, AutofillId, Bundle, or Parcel.
 
 `mobile-tools-check` validates Java, SDK 36, Build Tools 36.0.0, NDK, the two
 priority Rust targets, and the repository-pinned Tauri CLI without installing

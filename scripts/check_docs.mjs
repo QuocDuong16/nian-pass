@@ -67,6 +67,10 @@ export function runChecks(root) {
   requirePattern(violations, "docs/threat-model.md", threatModel, /fake Android application[\s\S]{0,500}signing key[\s\S]{0,500}unverified[\s\S]{0,500}request token/i, "M5.3 credential threats are missing");
   requirePattern(violations, "docs/threat-model.md", threatModel, /setUserAuthenticationRequired\(false\)[\s\S]{0,700}no master password/i, "M5.3 metadata-key policy is missing");
   requirePattern(violations, "docs/quality.md", quality, /credentials:1\.6\.0[\s\S]{0,500}single-use opaque/i, "M5.3 native dependency and token ratchets are missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /populated origin[\s\S]{0,160}unavailable[\s\S]{0,500}isOriginPopulated\(\)[\s\S]{0,200}getOrigin\(privilegedAllowlist\)/i, "M5.3 verified Credential Manager origin policy is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /retrieveBeginGetCredentialRequest\(\)[\s\S]{0,220}retrieveProviderGetCredentialRequest\(\)[\s\S]{0,500}process restart/i, "M5.3 framework request reconstruction is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /READ-only SAF flag[\s\S]{0,1000}READ=yes[\s\S]{0,80}WRITE=no/i, "M5.3 READ-only remembered grant policy is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /confused deputy[\s\S]{0,600}process death[\s\S]{0,500}PendingIntent[\s\S]{0,500}singleTop/i, "M5.3 origin and process-death threats are missing");
 
   const qualityRequirements = [
     [/ratchet/i, "coverage ratchet policy is missing"],

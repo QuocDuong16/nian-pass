@@ -37,7 +37,10 @@ function fixture(t) {
       "VaultSession is NOT used; MobileVaultSession never owns a URI or fake canonical provider path. " +
       "A residual cooperative writer race remains and read-back cannot prove every interleaving. " +
       "Android OS request uses an opaque request token and reaches a backend-only native final result. " +
-      "Android Keystore encrypts the source bookmark with no master password and no derived key.\n",
+      "Android Keystore encrypts the source bookmark with no master password and no derived key. " +
+      "A populated origin failure is unavailable; isOriginPopulated() then getOrigin(privilegedAllowlist). " +
+      "retrieveBeginGetCredentialRequest() and retrieveProviderGetCredentialRequest() rebuild authority after process restart. " +
+      "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n",
   );
   write(
     root,
@@ -46,6 +49,7 @@ function fixture(t) {
       "A dirty timeout never performs discard without explicit user intent. " +
       "iOS is not initialized or built on Linux; validation requires macOS with Xcode. " +
       "A fake Android application, changed signing key, unverified web target, and replayed request token fail closed. " +
+      "A browser confused deputy, process death, stale PendingIntent, and singleTop stale intent fail closed. " +
       "setUserAuthenticationRequired(false) protects metadata with no master password.\n",
   );
   write(
