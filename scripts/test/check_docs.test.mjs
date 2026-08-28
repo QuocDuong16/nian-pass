@@ -18,13 +18,16 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M5.2 — Android Mobile CRUD + Safe Document Persistence\nRead-only providers have editing and Save disabled. " +
+    "M5.3 — Android Credential Provider + Autofill + Keystore\nRead-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
       "The active clipboard clears only if it still contains the value written by Nian Pass. " +
       "The timeout is application-memory only. The privacy shield is not universal screenshot prevention. " +
-      "Android 8.0 / API 26. make mobile-android-check.\n",
+      "Android 8.0 / API 26. make mobile-android-check. " +
+      "CredentialProviderService on API 34 then AutofillService on API 26. " +
+      "Source remembering is explicit opt-in using AES-256-GCM and still requires the master password again. " +
+      "The exact package and SHA-256 signing-certificate pin require explicit confirmation when untrusted.\n",
   );
   write(
     root,
@@ -32,14 +35,18 @@ function fixture(t) {
     "M4.Q quality architecture. Clipboard salt then SHA-256 fingerprint then generation. " +
       "apps/desktop remains the historical shared host. content:// maps to an opaque source token and encrypted generation baseline. " +
       "VaultSession is NOT used; MobileVaultSession never owns a URI or fake canonical provider path. " +
-      "A residual cooperative writer race remains and read-back cannot prove every interleaving.\n",
+      "A residual cooperative writer race remains and read-back cannot prove every interleaving. " +
+      "Android OS request uses an opaque request token and reaches a backend-only native final result. " +
+      "Android Keystore encrypts the source bookmark with no master password and no derived key.\n",
   );
   write(
     root,
     "docs/threat-model.md",
     "Compromised supply-chain dependencies. OS clipboard history may retain data. " +
       "A dirty timeout never performs discard without explicit user intent. " +
-      "iOS is not initialized or built on Linux; validation requires macOS with Xcode.\n",
+      "iOS is not initialized or built on Linux; validation requires macOS with Xcode. " +
+      "A fake Android application, changed signing key, unverified web target, and replayed request token fail closed. " +
+      "setUserAuthenticationRequired(false) protects metadata with no master password.\n",
   );
   write(
     root,
@@ -53,7 +60,7 @@ function fixture(t) {
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
       "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
-      "mobile-tools-check then mobile-android-check.\n",
+      "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");

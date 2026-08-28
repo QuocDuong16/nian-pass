@@ -58,6 +58,17 @@ Save, complete encrypted-generation checks, `AtomicFile` recovery journal,
 `WRITE_STARTED` ordering, provider read-back, and absence of Kotlin KDBX logic.
 It does not claim an Android binary was built.
 
+For M5.3 the same source ratchet additionally requires both framework services,
+their exact binding permissions and metadata, a private credential Activity,
+password-only Credential Manager capability, and the exact
+`androidx.credentials:credentials:1.6.0` dependency without Play Services auth,
+alpha, or floating versions. It rejects direct frontend credential-plugin calls,
+password-bearing candidate DTOs, SharedPreferences/plaintext bookmarks, Kotlin
+KDBX/credential caches, passkey declarations, broad storage/package permissions,
+and Autofill SaveRequest mutation. Rust target matching, narrow password access,
+SHA-256 certificate identity, AES-GCM Keystore metadata, AtomicFile/no-backup
+storage, and single-use opaque registries are positive source requirements.
+
 `mobile-tools-check` validates Java, SDK 36, Build Tools 36.0.0, NDK, the two
 priority Rust targets, and the repository-pinned Tauri CLI without installing
 anything. `mobile-android-check` invokes `tauri android build --apk` for
@@ -65,6 +76,10 @@ aarch64 and x86_64, runs the focused Kotlin unit tests, and requires a real APK
 artifact containing the native source bridge. It needs neither an
 emulator nor a device and remains separate from `quality-check`, so ordinary
 Linux/desktop CI never silently skips or unexpectedly requires an Android SDK.
+The binary gate also inspects the merged manifest for both credential services,
+their binding permissions, password-only provider metadata, and the private
+credential Activity, then dumps APK permissions to prove release still has no
+`INTERNET` or broad storage/package permission.
 
 iOS validation is explicitly separate. A future `mobile-ios-check` must run on
 macOS with Xcode after official Tauri iOS initialization. Linux does not fabricate
@@ -217,6 +232,19 @@ rollback uncertainty.
 Vitest uses deferred Promises for pre-await password clearing, Save success,
 precommit failure, external conflict, uncertainty, recovery block, read-only
 providers, and Save/Discard/Cancel dirty Lock behavior.
+
+M5.3 extends the contract only with exact-key, secret-free status, request, and
+candidate DTOs; validators reject extra `password`, `secret`, URI, certificate,
+AutofillId, or AssistStructure fields. Rust tests cover exact `AndroidApp` and
+canonical-host matching, hostile lookalike domains, current stable-entry
+revalidation, deleted candidates, and deterministic Autofill-versus-Lock
+serialization. Kotlin/JVM tests cover the metadata codec and AEAD policy,
+tampered IV/ciphertext/AAD, corrupt schema, missing key behavior, parser field
+classification, package/certificate trust, and single-use tokens without sleeps.
+Instrumentation tests exercise the real Android Keystore, no-backup ciphertext,
+corruption failure, missing-key failure, and deletion. React tests cover cold
+locked authentication, candidate selection, unverified confirmation, cancel,
+completion/Lock cleanup, and the absence of password component state.
 
 `mobile-android-check` compiles the real arm64/x86_64 Tauri APK and explicitly
 runs `:app:testUniversalDebugUnitTest`, so tests for the first-party source

@@ -24,12 +24,17 @@ function fixture(t) {
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/build.gradle.kts",
-    "android { compileSdk = 36; defaultConfig { minSdk = 26 } }\n",
+    'android { compileSdk = 36; defaultConfig { minSdk = 26 } }\ndependencies { implementation("androidx.credentials:credentials:1.6.0") }\n',
   );
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml",
-    "<manifest><application /></manifest>\n",
+    `<manifest><application>
+<activity android:name=".CredentialActivity" android:excludeFromRecents="true" android:exported="false" />
+<service android:name=".NianCredentialProviderService" android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE"><intent-filter><action android:name="android.service.credentials.CredentialProviderService" /></intent-filter><meta-data android:name="android.credentials.provider" /></service>
+<service android:name=".NianAutofillService" android:permission="android.permission.BIND_AUTOFILL_SERVICE"><intent-filter><action android:name="android.service.autofill.AutofillService" /></intent-filter><meta-data android:name="android.autofill" /></service>
+</application></manifest>
+`,
   );
   write(
     root,
@@ -87,6 +92,47 @@ fingerprint(save.readBack)
   );
   write(
     root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/NianCredentialProviderService.kt",
+    "CredentialProviderService AuthenticationAction SHA-256\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/NianAutofillService.kt",
+    "AutofillService callback.onSuccess()\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialActivity.kt",
+    "FLAG_SECURE\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillMetadataStore.kt",
+    "AndroidKeyStore AES/GCM/NoPadding setUserAuthenticationRequired(false) AtomicFile noBackupFilesDir\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillRequestRegistry.kt",
+    "opaque request registry\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/res/xml/credential_provider.xml",
+    '<credential-provider><capability name="android.credentials.TYPE_PASSWORD_CREDENTIAL" /></credential-provider>\n',
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/res/xml/autofill_service.xml",
+    "<autofill-service />\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/autofill.rs",
+    "AndroidApp entry_password\n",
+  );
+  write(root, "apps/desktop/src-tauri/src/mobile/autofill_commands.rs");
+  write(
+    root,
     "apps/desktop/src-tauri/src/mobile/generation.rs",
     "struct EncryptedGeneration;\n",
   );
@@ -98,7 +144,9 @@ fingerprint(save.readBack)
     "KdbxDocument::open(staged_path, password)\n",
   );
   write(root, "apps/desktop/src-tauri/src/mobile/state.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/state_autofill.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/source.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/source_autofill.rs");
   write(
     root,
     "apps/desktop/src-tauri/src/lib.rs",
@@ -128,16 +176,32 @@ mobile_save_vault,
 mobile_reload_vault,
 mobile_lock_vault,
 mobile_discard_changes_and_lock
+mobile_autofill_status
+mobile_enable_autofill_for_vault
+mobile_disable_autofill_for_vault
+mobile_autofill_request
+mobile_autofill_candidates
+mobile_autofill_publish_candidates
+mobile_autofill_approve
+mobile_autofill_cancel
+mobile_open_autofill_settings
 ]
 expect("Nian Pass Android runtime failed");
 }
 `,
   );
-  for (const path of [
-    "apps/desktop/src/lib/mobile.ts",
+  write(root, "apps/desktop/src/lib/mobile.ts");
+  write(root, "apps/desktop/src/lib/mobile-autofill.ts");
+  write(
+    root,
     "apps/desktop/src/types/mobile.ts",
+    "export interface AutofillCandidateDto {\nentryId: string;\ntitle: SummaryTextDto;\nusername: SummaryTextDto;\n}\n",
+  );
+  for (const path of [
     "apps/desktop/src/features/mobile/MobileVaultApp.tsx",
     "apps/desktop/src/features/mobile/MobileLockedView.tsx",
+    "apps/desktop/src/features/mobile/MobileAutofillPanel.tsx",
+    "apps/desktop/src/features/mobile/MobileAutofillSettings.tsx",
   ]) {
     write(root, path);
   }
@@ -223,6 +287,59 @@ test("dangerous debug permissions are rejected", (t) => {
     '<manifest><uses-permission android:name="android.permission.INTERNET" /><uses-permission android:name="android.permission.CAMERA" /></manifest>\n',
   );
   assert.match(runChecks(root).join("\n"), /must not request CAMERA/);
+});
+
+test("M5.3 service binding and password-only capability are required", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/res/xml/credential_provider.xml",
+    '<credential-provider><capability name="androidx.credentials.TYPE_PUBLIC_KEY_CREDENTIAL" /></credential-provider>\n',
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml",
+    "<manifest><application /></manifest>\n",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /password-only/);
+  assert.match(violations, /BIND_CREDENTIAL_PROVIDER_SERVICE/);
+  assert.match(violations, /BIND_AUTOFILL_SERVICE/);
+});
+
+test("M5.3 dependency and native metadata persistence cannot drift", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/build.gradle.kts",
+    'android { compileSdk = 36; defaultConfig { minSdk = 26 } }\ndependencies { implementation("androidx.credentials:credentials:1.7.0-alpha01"); implementation("androidx.credentials:credentials-play-services-auth:+") }\n',
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillMetadataStore.kt",
+    "AndroidKeyStore AES/GCM/NoPadding setUserAuthenticationRequired(false) AtomicFile noBackupFilesDir SharedPreferences\n",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /must pin.*1.6.0/);
+  assert.match(violations, /must not float/);
+  assert.match(violations, /SharedPreferences/);
+});
+
+test("M5.3 frontend and Autofill SaveRequest cannot bypass semantic Rust", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src/lib/mobile.ts",
+    'invoke("plugin:autofill|fulfill")\n',
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/NianAutofillService.kt",
+    "AutofillService SaveInfo setSaveInfo callback.onSuccess()\n",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /frontend must not receive or invoke native/);
+  assert.match(violations, /SaveRequest must not mutate/);
 });
 
 test("native bridge source-path and whole-buffer shortcuts are rejected", (t) => {

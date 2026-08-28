@@ -5,6 +5,9 @@ use crate::dto::{
     FieldProtectionDto, GroupDto, MobileSelectedVaultDto, SummaryTextDto, VaultSnapshotDto,
 };
 
+use super::autofill::{
+    AutofillCandidateDto, AutofillRequestKindDto, MobileAutofillRequestDto, MobileAutofillStatusDto,
+};
 use super::{MobileError, errors::MobileErrorDto};
 
 #[test]
@@ -76,6 +79,8 @@ fn committed_mobile_contract_matches_rust_serialization() {
         MobileError::RecoveryRequired,
         MobileError::ReloadFailed,
         MobileError::ReloadAuthenticationFailed,
+        MobileError::AutofillUnavailable,
+        MobileError::CredentialUnavailable,
         MobileError::Internal,
     ]
     .into_iter()
@@ -115,6 +120,37 @@ fn committed_mobile_contract_matches_rust_serialization() {
     assert_eq!(
         to_value(detail).expect("detail should serialize"),
         contract["entryDetail"]
+    );
+    assert_eq!(
+        to_value(MobileAutofillStatusDto {
+            supported: true,
+            source_enabled: true,
+            provider_selected: false,
+        })
+        .expect("autofill status should serialize"),
+        contract["autofillStatus"]
+    );
+    assert_eq!(
+        to_value(MobileAutofillRequestDto {
+            request_token: "opaque-request-token".to_owned(),
+            kind: AutofillRequestKindDto::Autofill,
+            target_display: "example.com".to_owned(),
+            requires_confirmation: true,
+            selected_entry_id: None,
+        })
+        .expect("autofill request should serialize"),
+        contract["autofillRequest"]
+    );
+    assert_eq!(
+        to_value(AutofillCandidateDto {
+            entry_id: "entry-example".to_owned(),
+            title: SummaryTextDto::Visible {
+                value: "Example".to_owned(),
+            },
+            username: SummaryTextDto::Protected,
+        })
+        .expect("autofill candidate should serialize"),
+        contract["autofillCandidate"]
     );
     assert_eq!(json!(errors), contract["errors"]);
 }

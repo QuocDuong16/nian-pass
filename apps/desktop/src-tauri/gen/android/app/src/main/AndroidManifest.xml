@@ -22,5 +22,40 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".CredentialActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.NianPass.Credential" />
+
+        <service
+            android:name=".NianCredentialProviderService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Nian Pass"
+            android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.credentials.CredentialProviderService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.credentials.provider"
+                android:resource="@xml/credential_provider" />
+        </service>
+
+        <service
+            android:name=".NianAutofillService"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Nian Pass"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service" />
+        </service>
+
     </application>
 </manifest>

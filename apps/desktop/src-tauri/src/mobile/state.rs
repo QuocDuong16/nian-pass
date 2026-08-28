@@ -55,9 +55,9 @@ pub(crate) struct MobileSelectionOperation {
 /// and all mutations across native awaits.
 pub(crate) struct MobileVaultService {
     pending: Option<PendingMobileSelection>,
-    session: Option<MobileVaultSession>,
-    active_operation: Option<u64>,
-    next_operation: u64,
+    pub(super) session: Option<MobileVaultSession>,
+    pub(super) active_operation: Option<u64>,
+    pub(super) next_operation: u64,
 }
 
 impl MobileVaultService {
@@ -78,6 +78,28 @@ impl MobileVaultService {
             return Err(MobileError::Conflict);
         }
         Ok(())
+    }
+
+    pub(crate) const fn is_unlocked(&self) -> bool {
+        self.session.is_some()
+    }
+
+    pub(crate) const fn has_pending_selection(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    pub(crate) fn pending_selection(&self) -> Option<MobileSelectedVaultDto> {
+        self.pending.as_ref().map(|pending| MobileSelectedVaultDto {
+            file_name: pending.file_name.clone(),
+            writable: pending.writable,
+        })
+    }
+
+    pub(crate) fn source_token(&self) -> Result<String, MobileError> {
+        self.session
+            .as_ref()
+            .map(|session| session.source_handle().as_str().to_owned())
+            .ok_or(MobileError::Locked)
     }
 
     pub(crate) fn begin_selection(&mut self) -> Result<MobileSelectionOperation, MobileError> {
@@ -371,6 +393,7 @@ fn remove_private_file(path: &Path) -> Result<(), MobileError> {
 mod tests {
     use super::{MobileError, MobileVaultService};
     use crate::mobile::{
+        autofill::AndroidCredentialTarget,
         mutations::{
             MobileCreateEntryRequest, MobileCreateGroupRequest, MobileMoveEntryRequest,
             MobileMoveGroupRequest, MobileRenameGroupRequest, MobileSetCustomFieldRequest,
@@ -420,6 +443,20 @@ mod tests {
 
     fn request<T: DeserializeOwned>(value: Value) -> T {
         serde_json::from_value(value).expect("request")
+    }
+
+    fn unlocked(service: &mut MobileVaultService, path: PathBuf) {
+        selected(service, path, true);
+        service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock fixture");
+    }
+
+    fn app_target(package_name: &str) -> AndroidCredentialTarget {
+        AndroidCredentialTarget::App {
+            package_name: package_name.to_owned(),
+            signing_identity: "synthetic-cert".to_owned(),
+        }
     }
 
     #[test]
@@ -920,6 +957,180 @@ mod tests {
         ));
         assert!(matches!(service.begin_reload(), Err(MobileError::Busy)));
         service.finish_operation(operation.id);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn android_app_matching_is_exact_and_package_name_alone_never_authorizes_release() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let entry_id = service.snapshot().expect("snapshot").entries[0].id.clone();
+        service
+            .set_custom_field(request::<MobileSetCustomFieldRequest>(json!({
+                "entryId": entry_id,
+                "name": "AndroidApp",
+                "value": "dev.example.login",
+                "protection": "protected"
+            })))
+            .expect("association");
+
+        let exact = service
+            .autofill_candidates(&app_target("dev.example.login"))
+            .expect("exact candidates");
+        assert_eq!(exact.len(), 1);
+        assert!(
+            service
+                .autofill_candidates(&app_target("dev.example"))
+                .expect("different candidates")
+                .is_empty()
+        );
+        assert!(
+            service
+                .autofill_candidates(&app_target("dev.example.login.evil"))
+                .expect("suffix candidates")
+                .is_empty()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn web_matching_uses_exact_canonical_host_for_current_document() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let root_group = service.snapshot().expect("snapshot").root_group_id;
+        let created = service
+            .create_entry(request::<MobileCreateEntryRequest>(json!({
+                "groupId": root_group,
+                "title": "Web account",
+                "username": "web-user",
+                "url": "https://LOGIN.example.com/account",
+                "password": "WEB-PASSWORD",
+                "notes": null
+            })))
+            .expect("create web entry");
+        let web_target = |domain: &str| AndroidCredentialTarget::Web {
+            package_name: "dev.example.browser".to_owned(),
+            web_domain: domain.to_owned(),
+            browser_signing_identity: "certificate".to_owned(),
+        };
+        assert!(
+            service
+                .autofill_candidates(&web_target("login.example.com"))
+                .expect("exact web candidates")
+                .iter()
+                .any(|candidate| candidate.entry_id == created.created_entry_id)
+        );
+        assert!(
+            service
+                .autofill_candidates(&web_target("example.com"))
+                .expect("parent web candidates")
+                .iter()
+                .all(|candidate| candidate.entry_id != created.created_entry_id)
+        );
+        assert!(
+            service
+                .autofill_candidates(&web_target("evil-example.com"))
+                .expect("lookalike web candidates")
+                .iter()
+                .all(|candidate| candidate.entry_id != created.created_entry_id)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_deleted_candidate_releases_no_secret() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let entry_id = service.snapshot().expect("snapshot").entries[0].id.clone();
+        service
+            .set_custom_field(request::<MobileSetCustomFieldRequest>(json!({
+                "entryId": entry_id,
+                "name": "AndroidApp",
+                "value": "dev.example.login",
+                "protection": "unprotected"
+            })))
+            .expect("association");
+        assert_eq!(
+            service
+                .autofill_candidates(&app_target("dev.example.login"))
+                .expect("candidates")[0]
+                .entry_id,
+            entry_id
+        );
+        service
+            .delete_entry(entry_id.clone())
+            .expect("delete entry");
+        assert!(matches!(
+            service.begin_autofill_fulfillment(
+                "opaque-request".to_owned(),
+                &entry_id,
+                &app_target("dev.example.login")
+            ),
+            Err(MobileError::CredentialUnavailable)
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn active_autofill_fulfillment_serializes_lock_without_sleeps() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let entry_id = service.snapshot().expect("snapshot").entries[0].id.clone();
+        service
+            .set_custom_field(request::<MobileSetCustomFieldRequest>(json!({
+                "entryId": entry_id,
+                "name": "AndroidApp",
+                "value": "dev.example.login",
+                "protection": "protected"
+            })))
+            .expect("association");
+        let prepared = service
+            .begin_autofill_fulfillment(
+                "opaque-request".to_owned(),
+                &entry_id,
+                &app_target("dev.example.login"),
+            )
+            .expect("reserve fulfillment");
+        assert!(matches!(service.begin_lock(), Err(MobileError::Busy)));
+        assert!(matches!(
+            service.begin_discard_and_lock(),
+            Err(MobileError::Busy)
+        ));
+        service
+            .complete_autofill_fulfillment(prepared.operation)
+            .expect("complete fulfillment");
+        assert!(service.begin_discard_and_lock().is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn autofill_state_queries_distinguish_pending_locked_and_unlocked_sources() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        assert!(!service.is_unlocked());
+        assert!(!service.has_pending_selection());
+        assert!(service.pending_selection().is_none());
+        assert!(matches!(service.source_token(), Err(MobileError::Locked)));
+
+        selected(&mut service, path, true);
+        assert!(service.has_pending_selection());
+        assert_eq!(
+            service.pending_selection().expect("pending").file_name,
+            "vault.kdbx"
+        );
+        service
+            .unlock(&SecretString::new("demopass".to_owned()))
+            .expect("unlock");
+        assert!(service.is_unlocked());
+        assert!(!service.has_pending_selection());
+        assert_eq!(
+            service.source_token().expect("source token"),
+            "0123456789abcdef0123456789abcdef"
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -83,7 +83,7 @@ pub(crate) fn runtime_info() -> RuntimeInfoDto {
 }
 
 #[cfg(target_os = "android")]
-fn lock_service(
+pub(super) fn lock_service(
     state: &MobileAppState,
 ) -> Result<std::sync::MutexGuard<'_, MobileVaultService>, MobileErrorDto> {
     state

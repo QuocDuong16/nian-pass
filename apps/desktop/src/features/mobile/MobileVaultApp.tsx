@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { MobileCommandError } from "../../lib/mobile";
 import type { VaultSnapshotDto } from "../../types/desktop";
 import type { MobileApi, MobileSelectedVaultDto } from "../../types/mobile";
+import type { MobileAutofillRequestDto } from "../../types/mobile";
+import { MobileAutofillPanel } from "./MobileAutofillPanel";
 import { MobileLockedView } from "./MobileLockedView";
 import { MobileUnlockedView } from "./MobileUnlockedView";
 
@@ -19,6 +21,39 @@ export function MobileVaultApp({ api }: MobileVaultAppProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hidden, setHidden] = useState(document.hidden);
+  const [autofillRequest, setAutofillRequest] =
+    useState<MobileAutofillRequestDto | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .getAutofillRequest()
+      .then((launch) => {
+        if (!active || launch === null) return;
+        setAutofillRequest(launch.request);
+        if (launch.selectedVault !== null) {
+          setSelected(launch.selectedVault);
+          setPhase("selected_locked");
+          return;
+        }
+        return api
+          .getVaultSnapshot()
+          .then((current) => {
+            if (!active) return;
+            setSnapshot(current);
+            setPhase("unlocked");
+          })
+          .catch(() => {
+            // A locked provider without a remembered source remains a valid state.
+          });
+      })
+      .catch(() => {
+        // Normal launcher starts have no Android credential request.
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -79,8 +114,13 @@ export function MobileVaultApp({ api }: MobileVaultAppProps) {
     setSelected(null);
     setSnapshot(null);
     setError(null);
+    setAutofillRequest(null);
     setPhase("no_selection");
   };
+
+  if (phase === "unlocked" && snapshot !== null && autofillRequest !== null) {
+    return <MobileAutofillPanel api={api} request={autofillRequest} />;
+  }
 
   if (phase === "unlocked" && snapshot !== null && selected !== null) {
     return (

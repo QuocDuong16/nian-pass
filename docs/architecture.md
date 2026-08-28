@@ -12,6 +12,66 @@ M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
 coverage ratchets, and Forgejo jobs that call the same targets used locally.
 
+## M5.3 Android credential retrieval
+
+M5.3 adds two Android OS surfaces over one Rust credential core:
+
+```text
+Android OS request
+→ CredentialProviderService / AutofillService
+→ native target parser and short-lived opaque request token
+→ private credential authentication Activity
+→ Rust AutofillBroker over the current MobileVaultSession/KdbxDocument
+→ secret-free candidate and explicit user approval
+→ narrow current username/password read in Rust
+→ backend-only native final result
+→ Android OS
+```
+
+The services can start in a cold process and never assume a WebView, foreground
+`MainActivity`, mounted React tree, or unlocked Rust session. A locked session is
+a normal state: Credential Manager returns an `AuthenticationAction`, while the
+classic service returns response authentication. Only the private,
+`excludeFromRecents` credential Activity hosts unlock/selection and applies
+`FLAG_SECURE`. React sees a safe display target, opaque token, request status,
+secret-free candidate labels, and the selected entry ID; it never sees an entry
+password, Android AutofillId, AssistStructure, signing certificate, content URI,
+or credential request Parcelable.
+
+Candidate matching remains Rust-owned. App candidates require an exact
+`AndroidApp` custom-field package match; silent release additionally requires a
+stored SHA-256 signing-certificate pin for the same package. Web targets use a
+proper URL parser and exact canonical-host policy. An unverified app/web target
+requires explicit confirmation, and a signing-key change cannot silently fill.
+Final fulfillment repeats target/current-entry matching, reserves the shared
+backend operation, and resolves the current stable entry ID. Lock cannot drop
+the session during this reservation, stale/deleted entries fail closed, and
+successful Lock invalidates backend and native request authority.
+
+The process-local native request registry contains only framework-owned request
+objects/AutofillIds and random, expiring, single-use token mappings. It is not
+durable; process death safely causes Android to reissue the request. Passwords
+exist in Kotlin only while constructing a final `GetCredentialResponse` or
+authenticated `Dataset` and are never cached, logged, bundled, saved, or routed
+through JavaScript. CreateCredential and Autofill SaveRequest are unsupported;
+M5.3 is read-only and never triggers the M5.2 Save protocol.
+
+```text
+Android Keystore non-exportable AES-256-GCM key
+→ authenticated, versioned source bookmark + package trust metadata
+→ AtomicFile ciphertext in noBackupFilesDir
+```
+
+Source remembering is explicit opt-in. The encrypted bookmark contains only the
+content URI, retained SAF flags, safe display metadata, schema version, and
+trust associations. It contains no master password, KDBX document/derived key,
+entry credential, or vault index. The Keystore key does not require biometric or
+device authentication because it protects metadata at rest, not unlock
+material. Missing/invalid keys, malformed ciphertext, AEAD failure, and schema
+drift fail closed and require re-enabling Autofill. Cold start may rehydrate a
+fresh encrypted provider generation, but real KDBX unlock still requires the
+master password and normal generation verification.
+
 ## M5.2 Android mobile CRUD and provider persistence
 
 M5.2 keeps one application host and one Rust vault implementation. The
@@ -105,8 +165,8 @@ cross-provider atomic replace or conditional write; a residual cooperative
 writer race remains between final check and destructive write. Read-back detects
 many races but cannot prove no writer briefly committed and was overwritten.
 
-Android uses API 26 as its minimum because future AutofillService integration
-requires Android 8.0; Autofill is not implemented in M5.2. The normal generated
+Android uses API 26 as its minimum for the M5.3 AutofillService fallback; API
+34+ additionally registers the password-only Credential Manager provider. The normal generated
 Rust targets are aarch64, armv7, i686, and x86_64, while the headless foundation
 gate builds aarch64 and x86_64 APK inputs. iOS remains architecture-ready but
 not initialized or built on Linux. Official Tauri iOS initialization and a
@@ -150,9 +210,10 @@ React WebView
                 └── vault-core
 
 Android React view
- └── reviewed mobile DTOs / semantic CRUD and Save commands
+ └── reviewed mobile DTOs / semantic CRUD, Save, and Autofill commands
       └── MobileVaultService
            └── MobileVaultSession
+                ├── Rust Autofill matching and narrow fulfillment
                 ├── kdbx
                 └── vault-core
 

@@ -2,11 +2,24 @@ package dev.nian.pass
 
 import android.app.Activity
 import android.content.Intent
+import android.content.ComponentName
 import android.database.Cursor
 import android.net.Uri
+import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.credentials.CredentialManager as FrameworkCredentialManager
 import android.provider.OpenableColumns
+import android.provider.Settings
+import android.service.autofill.Dataset
+import android.view.autofill.AutofillManager
+import android.view.autofill.AutofillValue
+import android.widget.RemoteViews
 import android.webkit.WebView
+import androidx.credentials.GetCredentialResponse
+import androidx.credentials.PasswordCredential
+import androidx.credentials.provider.BeginGetCredentialResponse
+import androidx.credentials.provider.PasswordCredentialEntry
+import androidx.credentials.provider.PendingIntentHandler
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -26,6 +39,7 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
   private val sources = ConcurrentHashMap<String, SourceRecord>()
   private val saves = ConcurrentHashMap<String, SaveRecord>()
   private val reads = ConcurrentHashMap<String, ReadRecord>()
+  private val autofillStore by lazy { AutofillMetadataStore(activity.applicationContext) }
 
   override fun load(webView: WebView) {
     cleanupStaleImports()
@@ -85,7 +99,9 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       val staged = stageProvider(uri, stagingDirectory(), "kdbx")
       val token = VaultSourcePolicy.opaqueId()
       val recoveryRequired = reconcileKnownTransactions(uri)
-      sources[token] = SourceRecord(uri, persistedFlags, writable, recoveryRequired, staged)
+      sources[token] = SourceRecord(
+        uri, persistedFlags, writable, recoveryRequired, staged, queryDisplayName(uri), false,
+      )
       invoke.resolve(JSObject().apply {
         put("status", "selected")
         put("stagedPath", staged.absolutePath)
@@ -294,7 +310,8 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
         true
       }
     }
-    if (!preserveRecovery && source.persistedFlags != 0) {
+    val remembered = source.remembered && autofillStore.loadBookmark()?.sourceUri == source.uri.toString()
+    if (!preserveRecovery && !remembered && source.persistedFlags != 0) {
       try {
         activity.contentResolver.releasePersistableUriPermission(source.uri, source.persistedFlags)
       } catch (_: Exception) {
@@ -304,8 +321,310 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     }
     source.initialStaging.delete()
     sources.remove(token)
+    AutofillRuntime.registry.clear()
     invoke.resolve(status("ok"))
   }
+
+  @Command
+  fun autofillStatus(invoke: Invoke) {
+    val bookmark = validBookmark()
+    val manager = activity.getSystemService(AutofillManager::class.java)
+    val credentialProviderSelected = if (Build.VERSION.SDK_INT >= 34) {
+      try {
+        activity.getSystemService(FrameworkCredentialManager::class.java)
+          ?.isEnabledCredentialProviderService(
+            ComponentName(activity, NianCredentialProviderService::class.java),
+          ) == true
+      } catch (_: Exception) {
+        false
+      }
+    } else false
+    invoke.resolve(JSObject().apply {
+      put("supported", Build.VERSION.SDK_INT >= 26)
+      put("sourceEnabled", bookmark != null)
+      put("providerSelected", credentialProviderSelected || manager?.hasEnabledAutofillServices() == true)
+    })
+  }
+
+  @Command
+  fun enableAutofill(invoke: Invoke) {
+    try {
+      val source = requireSource(invoke.getArgs().getString("sourceToken"))
+      val readFlag = Intent.FLAG_GRANT_READ_URI_PERMISSION
+      if (source.persistedFlags and readFlag == 0) {
+        invoke.resolve(status("failed"))
+        return
+      }
+      val prior = autofillStore.loadBookmark()
+      if (prior != null && prior.sourceUri != source.uri.toString()) {
+        invoke.resolve(status("failed"))
+        return
+      }
+      val associations = prior?.takeIf { it.sourceUri == source.uri.toString() }?.associations.orEmpty()
+      val saved = autofillStore.saveBookmark(
+        AutofillMetadata(
+          source.uri.toString(), source.persistedFlags, source.displayName, associations,
+        ),
+      )
+      if (!saved) {
+        invoke.resolve(status("failed"))
+        return
+      }
+      source.remembered = true
+      invoke.resolve(status("ok"))
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @Command
+  fun disableAutofill(invoke: Invoke) {
+    val bookmark = autofillStore.loadBookmark()
+    if (bookmark == null) {
+      invoke.resolve(status("ok"))
+      return
+    }
+    try {
+      val active = sources.values.firstOrNull { it.uri.toString() == bookmark.sourceUri }
+      if (!autofillStore.deleteBookmark()) {
+        invoke.resolve(status("failed"))
+        return
+      }
+      if (active == null && bookmark.grantFlags != 0) {
+        try {
+          activity.contentResolver.releasePersistableUriPermission(
+            Uri.parse(bookmark.sourceUri), bookmark.grantFlags,
+          )
+        } catch (_: Exception) {
+          autofillStore.saveBookmark(bookmark)
+          invoke.resolve(status("failed"))
+          return
+        }
+      }
+      active?.remembered = false
+      AutofillRuntime.registry.clear()
+      invoke.resolve(status("ok"))
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @Command
+  fun rehydrateAutofillSource(invoke: Invoke) {
+    val bookmark = validBookmark()
+    if (bookmark == null) {
+      invoke.resolve(status("unavailable"))
+      return
+    }
+    try {
+      val uri = Uri.parse(bookmark.sourceUri)
+      val staged = stageProvider(uri, stagingDirectory(), "kdbx")
+      val token = VaultSourcePolicy.opaqueId()
+      val writable = bookmark.grantFlags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION != 0
+      val recoveryRequired = reconcileKnownTransactions(uri)
+      sources[token] = SourceRecord(
+        uri, bookmark.grantFlags, writable, recoveryRequired, staged,
+        VaultSourcePolicy.displayName(bookmark.displayName), true,
+      )
+      invoke.resolve(JSObject().apply {
+        put("status", "selected")
+        put("stagedPath", staged.absolutePath)
+        put("fileName", VaultSourcePolicy.displayName(bookmark.displayName))
+        put("sourceToken", token)
+        put("writable", writable)
+        put("recoveryRequired", recoveryRequired)
+      })
+    } catch (_: Exception) {
+      invoke.resolve(status("unavailable"))
+    }
+  }
+
+  @Command
+  fun describeAutofillRequest(invoke: Invoke) {
+    val credentialActivity = AutofillRuntime.activeCredentialActivity
+    val requestToken = credentialActivity?.intent?.getStringExtra(AutofillIntents.EXTRA_REQUEST_TOKEN)
+    val candidateToken = credentialActivity?.intent?.getStringExtra(AutofillIntents.EXTRA_CANDIDATE_TOKEN)
+    val record = requestToken?.let(AutofillRuntime.registry::request)
+    if (record == null || PackageSigningIdentity.fromPackage(activity, record.target.packageName) != record.target.signingIdentity) {
+      invoke.resolve(status("unavailable"))
+      return
+    }
+    val candidate = candidateToken?.let { AutofillRuntime.registry.candidate(it, requestToken) }
+    if (candidateToken != null && candidate == null) {
+      invoke.resolve(status("unavailable"))
+      return
+    }
+    val trusted = record.target.kind == TargetKind.APP && autofillStore.isTrusted(
+      record.target.packageName, record.target.signingIdentity,
+    )
+    invoke.resolve(JSObject().apply {
+      put("status", "available")
+      put("requestToken", requestToken)
+      put("kind", when {
+        record is AndroidRequestRecord.Autofill -> "autofill"
+        candidate != null -> "credential_fulfillment"
+        else -> "credential_query"
+      })
+      put("targetKind", record.target.kind.name.lowercase())
+      put("packageName", record.target.packageName)
+      put("signingIdentity", record.target.signingIdentity)
+      record.target.webDomain?.let { put("webDomain", it) }
+      put("trusted", trusted)
+      candidate?.let { put("selectedEntryId", it.entryId) }
+    })
+  }
+
+  @Command
+  fun publishAutofillCandidates(invoke: Invoke) {
+    val credentialActivity = AutofillRuntime.activeCredentialActivity
+    val args = invoke.getArgs()
+    val requestToken = args.getString("requestToken")
+    val record = AutofillRuntime.registry.request(requestToken) as? AndroidRequestRecord.Credential
+    if (credentialActivity == null || record == null) {
+      invoke.resolve(status("failed"))
+      return
+    }
+    try {
+      val candidates = args.getJSONArray("candidates")
+      val response = BeginGetCredentialResponse.Builder()
+      for (index in 0 until candidates.length()) {
+        val candidate = candidates.getJSONObject(index)
+        val entryId = candidate.getString("entryId")
+        val title = summaryLabel(candidate.getJSONObject("title"), "Nian Pass account")
+        val username = summaryLabel(candidate.getJSONObject("username"), title)
+        val candidateToken = AutofillRuntime.registry.registerCandidate(requestToken, entryId)
+        val pendingIntent = AutofillIntents.credentialActivity(
+          activity, requestToken, candidateToken,
+        )
+        response.addCredentialEntry(
+          PasswordCredentialEntry.Builder(activity, username, pendingIntent, record.option)
+            .setDisplayName(title)
+            .setAutoSelectAllowed(false)
+            .build(),
+        )
+      }
+      if (candidates.length() == 0) {
+        invoke.resolve(status("failed"))
+        return
+      }
+      val result = Intent()
+      PendingIntentHandler.setBeginGetCredentialResponse(result, response.build())
+      credentialActivity.setResult(Activity.RESULT_OK, result)
+      credentialActivity.finish()
+      invoke.resolve(status("ok"))
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @Command
+  fun fulfillAutofill(invoke: Invoke) {
+    val credentialActivity = AutofillRuntime.activeCredentialActivity
+    val args = invoke.getArgs()
+    val requestToken = args.getString("requestToken")
+    val entryId = args.getString("entryId")
+    val approved = args.optBoolean("approved", false)
+    val username = args.getString("username")
+    val password = args.getString("password")
+    val candidateToken = credentialActivity?.intent?.getStringExtra(AutofillIntents.EXTRA_CANDIDATE_TOKEN)
+    val record = AutofillRuntime.registry.request(requestToken)
+    val candidate = candidateToken?.let { AutofillRuntime.registry.candidate(it, requestToken) }
+    val trusted = record?.target?.kind == TargetKind.APP && record.let {
+      autofillStore.isTrusted(it.target.packageName, it.target.signingIdentity)
+    }
+    if (
+      credentialActivity == null || record == null ||
+      (record is AndroidRequestRecord.Credential && (candidate == null || candidate.entryId != entryId)) ||
+      (!trusted && !approved)
+      || PackageSigningIdentity.fromPackage(activity, record.target.packageName) != record.target.signingIdentity
+    ) {
+      invoke.resolve(status("failed"))
+      return
+    }
+    try {
+      val result = Intent()
+      when (record) {
+        is AndroidRequestRecord.Credential -> {
+          PendingIntentHandler.setGetCredentialResponse(
+            result,
+            GetCredentialResponse(PasswordCredential(username, password)),
+          )
+        }
+        is AndroidRequestRecord.Autofill -> {
+          val presentation = RemoteViews(activity.packageName, android.R.layout.simple_list_item_1).apply {
+            setTextViewText(android.R.id.text1, "Nian Pass credential")
+          }
+          val dataset = Dataset.Builder(presentation).apply {
+            record.fields.usernameIds.forEach { id ->
+              setValue(id, AutofillValue.forText(username), presentation)
+            }
+            record.fields.passwordIds.forEach { id ->
+              setValue(id, AutofillValue.forText(password), presentation)
+            }
+          }.build()
+          result.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, dataset)
+          if (Build.VERSION.SDK_INT >= 31) {
+            result.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT_EPHEMERAL_DATASET, true)
+          }
+        }
+      }
+      if (AutofillRuntime.registry.complete(requestToken, candidateToken) == null) {
+        invoke.resolve(status("failed"))
+        return
+      }
+      if (!trusted && approved && record.target.kind == TargetKind.APP) {
+        autofillStore.saveAssociation(record.target.packageName, record.target.signingIdentity)
+      }
+      credentialActivity.setResult(Activity.RESULT_OK, result)
+      credentialActivity.finish()
+      invoke.resolve(status("ok"))
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @Command
+  fun cancelAutofill(invoke: Invoke) {
+    val requestToken = invoke.getArgs().getString("requestToken")
+    AutofillRuntime.registry.cancel(requestToken)
+    AutofillRuntime.activeCredentialActivity?.apply {
+      setResult(Activity.RESULT_CANCELED)
+      finish()
+    }
+    invoke.resolve(status("ok"))
+  }
+
+  @Command
+  fun openAutofillSettings(invoke: Invoke) {
+    try {
+      val intent = if (Build.VERSION.SDK_INT >= 34) {
+        Intent("android.settings.CREDENTIAL_PROVIDER")
+      } else {
+        Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).apply {
+          data = Uri.parse("package:${activity.packageName}")
+        }
+      }
+      activity.startActivity(intent)
+      invoke.resolve(status("ok"))
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  private fun validBookmark(): AutofillMetadata? {
+    val bookmark = autofillStore.loadBookmark() ?: return null
+    return try {
+      val uri = Uri.parse(bookmark.sourceUri)
+      val persisted = activity.contentResolver.persistedUriPermissions.firstOrNull { it.uri == uri }
+      bookmark.takeIf { persisted?.isReadPermission == true }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun summaryLabel(value: org.json.JSONObject, fallback: String): String =
+    if (value.optString("kind") == "visible") value.optString("value").ifEmpty { fallback }
+    else fallback
 
   private fun requireSource(token: String): SourceRecord {
     if (!VaultSourcePolicy.isOpaqueId(token)) throw IllegalArgumentException("invalid source")
@@ -516,6 +835,8 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     val writable: Boolean,
     @Volatile var recoveryRequired: Boolean,
     val initialStaging: File,
+    val displayName: String,
+    @Volatile var remembered: Boolean,
   )
   private data class SaveRecord(
     val token: String,

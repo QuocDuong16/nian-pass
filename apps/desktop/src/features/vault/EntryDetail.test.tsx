@@ -237,10 +237,22 @@ test("notes require reveal, preserve line breaks, hide, and time out", async () 
 });
 
 test("blur and hidden visibility clear both revealed secrets", async () => {
-  await renderReady();
+  const revealPassword = vi.fn().mockResolvedValue(PASSWORD);
+  const revealNotes = vi.fn().mockResolvedValue(NOTES);
+  await renderReady(
+    api({
+      revealEntryPassword: revealPassword,
+      revealEntryNotes: revealNotes,
+    }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
   fireEvent.click(screen.getByRole("button", { name: "Reveal notes" }));
-  await act(async () => Promise.resolve());
+  await act(async () => {
+    await Promise.all([
+      revealPassword.mock.results[0]?.value,
+      revealNotes.mock.results[0]?.value,
+    ]);
+  });
   expect(screen.getByText(PASSWORD)).toBeVisible();
   act(() => {
     window.dispatchEvent(new Event("blur"));
@@ -249,7 +261,9 @@ test("blur and hidden visibility clear both revealed secrets", async () => {
   expect(screen.queryByText(/test-secret-notes-M4\.2/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
-  await act(async () => Promise.resolve());
+  await act(async () => {
+    await revealPassword.mock.results[1]?.value;
+  });
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     value: "hidden",

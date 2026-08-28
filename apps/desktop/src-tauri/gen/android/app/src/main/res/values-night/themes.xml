@@ -3,4 +3,8 @@
     <style name="Theme.nian_pass_desktop" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
     </style>
+    <style name="Theme.NianPass.Credential" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowIsTranslucent">false</item>
+    </style>
 </resources>

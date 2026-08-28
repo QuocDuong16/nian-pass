@@ -4,6 +4,7 @@ import type { VaultSnapshotDto } from "../../types/desktop";
 import type { MobileApi, MobileSelectedVaultDto } from "../../types/mobile";
 import { DirtyExitDialog } from "../vault/DirtyExitDialog";
 import { MobileSaveDialogs } from "./MobileSaveDialogs";
+import { MobileAutofillSettings } from "./MobileAutofillSettings";
 import { MobileVaultBrowser } from "./MobileVaultBrowser";
 import { useMobileSaveFlow } from "./useMobileSaveFlow";
 
@@ -153,6 +154,7 @@ export function MobileUnlockedView(props: Props) {
           {lockError}
         </p>
       )}
+      <MobileAutofillSettings api={props.api} />
       <MobileVaultBrowser
         api={props.api}
         snapshot={snapshot}

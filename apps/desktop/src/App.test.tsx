@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -166,12 +167,16 @@ test("group and entry selection exercise the browse-only navigation state", asyn
 });
 
 test("group change resets entry selection and removes revealed secrets", async () => {
-  render(<App api={api()} />);
+  const desktop = api();
+  render(<App api={desktop} />);
   await selectAndEnterPassword();
   fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
   fireEvent.click(
     await screen.findByRole("button", { name: /Example Account/ }),
   );
+  await act(async () => {
+    await vi.mocked(desktop.getEntryDetail).mock.results.at(-1)?.value;
+  });
   fireEvent.click(
     await screen.findByRole("button", { name: "Reveal password" }),
   );
@@ -231,6 +236,9 @@ test("Lock clears a revealed secret before the backend promise completes", async
   fireEvent.click(
     await screen.findByRole("button", { name: /Example Account/ }),
   );
+  await act(async () => {
+    await vi.mocked(desktop.getEntryDetail).mock.results.at(-1)?.value;
+  });
   fireEvent.click(
     await screen.findByRole("button", { name: "Reveal password" }),
   );

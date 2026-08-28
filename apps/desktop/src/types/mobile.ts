@@ -8,6 +8,7 @@ import type {
   SetCustomFieldRequest,
   UpdateEntryRequest,
   VaultSnapshotDto,
+  SummaryTextDto,
 } from "./desktop";
 
 export interface MobileSelectedVaultDto {
@@ -36,7 +37,34 @@ export type MobileErrorCode =
   | "recovery_required"
   | "reload_failed"
   | "reload_authentication_failed"
+  | "autofill_unavailable"
+  | "credential_unavailable"
   | "internal";
+
+export interface MobileAutofillStatusDto {
+  supported: boolean;
+  sourceEnabled: boolean;
+  providerSelected: boolean;
+}
+
+export interface MobileAutofillRequestDto {
+  requestToken: string;
+  kind: "credential_query" | "credential_fulfillment" | "autofill";
+  targetDisplay: string;
+  requiresConfirmation: boolean;
+  selectedEntryId: string | null;
+}
+
+export interface MobileAutofillLaunchDto {
+  request: MobileAutofillRequestDto;
+  selectedVault: MobileSelectedVaultDto | null;
+}
+
+export interface AutofillCandidateDto {
+  entryId: EntryId;
+  title: SummaryTextDto;
+  username: SummaryTextDto;
+}
 
 export interface MobileApi {
   selectVault: () => Promise<MobileSelectedVaultDto | null>;
@@ -76,4 +104,19 @@ export interface MobileApi {
   reloadVault: (password: string) => Promise<VaultSnapshotDto>;
   lockVault: () => Promise<void>;
   discardChangesAndLock: () => Promise<void>;
+  getAutofillStatus: () => Promise<MobileAutofillStatusDto>;
+  enableAutofill: () => Promise<MobileAutofillStatusDto>;
+  disableAutofill: () => Promise<MobileAutofillStatusDto>;
+  getAutofillRequest: () => Promise<MobileAutofillLaunchDto | null>;
+  getAutofillCandidates: (
+    requestToken: string,
+  ) => Promise<AutofillCandidateDto[]>;
+  publishAutofillCandidates: (requestToken: string) => Promise<void>;
+  approveAutofill: (
+    requestToken: string,
+    entryId: EntryId,
+    approved: boolean,
+  ) => Promise<void>;
+  cancelAutofill: (requestToken: string) => Promise<void>;
+  openAutofillSettings: () => Promise<void>;
 }

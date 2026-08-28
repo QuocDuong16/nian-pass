@@ -17,8 +17,9 @@ const PLUGIN_IDENTIFIER: &str = "dev.nian.pass";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case", tag = "status", deny_unknown_fields)]
-enum NativeSelectionResponse {
+pub(super) enum NativeSelectionResponse {
     Cancelled,
+    Unavailable,
     Selected {
         #[serde(rename = "stagedPath")]
         staged_path: PathBuf,
@@ -42,8 +43,8 @@ pub(crate) struct StagedMobileSelection {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SourceRequest<'a> {
-    source_token: &'a str,
+pub(super) struct SourceRequest<'a> {
+    pub(super) source_token: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -100,7 +101,7 @@ struct ReleaseRequest<'a> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case", tag = "status", deny_unknown_fields)]
-enum NativeVoidResponse {
+pub(super) enum NativeVoidResponse {
     Ok,
     Failed,
     SaveUncertain,
@@ -120,7 +121,7 @@ enum NativeReadResponse {
 }
 
 #[derive(Clone)]
-pub(crate) struct AndroidVaultSource(PluginHandle<tauri::Wry>);
+pub(crate) struct AndroidVaultSource(pub(super) PluginHandle<tauri::Wry>);
 
 impl AndroidVaultSource {
     pub(crate) async fn select(&self) -> Result<Option<StagedMobileSelection>, MobileError> {
@@ -130,7 +131,7 @@ impl AndroidVaultSource {
             .await
             .map_err(|_| MobileError::PickerFailed)?;
         Ok(match response {
-            NativeSelectionResponse::Cancelled => None,
+            NativeSelectionResponse::Cancelled | NativeSelectionResponse::Unavailable => None,
             NativeSelectionResponse::Selected {
                 staged_path,
                 file_name,
@@ -145,6 +146,24 @@ impl AndroidVaultSource {
                 recovery_required,
             }),
         })
+    }
+
+    pub(super) async fn void_command<A: Serialize>(
+        &self,
+        name: &str,
+        args: A,
+    ) -> Result<(), MobileError> {
+        match self
+            .0
+            .run_mobile_plugin_async::<NativeVoidResponse>(name, args)
+            .await
+            .map_err(|_| MobileError::AutofillUnavailable)?
+        {
+            NativeVoidResponse::Ok => Ok(()),
+            NativeVoidResponse::Failed | NativeVoidResponse::SaveUncertain => {
+                Err(MobileError::AutofillUnavailable)
+            }
+        }
     }
 
     pub(crate) async fn stage_current(

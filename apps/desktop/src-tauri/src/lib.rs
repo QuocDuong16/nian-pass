@@ -102,6 +102,12 @@ pub fn run() {
 
 #[cfg(target_os = "android")]
 fn run_mobile() {
+    use mobile::autofill_commands::{
+        mobile_autofill_approve, mobile_autofill_cancel, mobile_autofill_candidates,
+        mobile_autofill_publish_candidates, mobile_autofill_request, mobile_autofill_status,
+        mobile_disable_autofill_for_vault, mobile_enable_autofill_for_vault,
+        mobile_open_autofill_settings,
+    };
     use mobile::commands::{
         mobile_create_entry, mobile_create_group, mobile_delete_entry,
         mobile_delete_entry_custom_field, mobile_delete_group, mobile_discard_changes_and_lock,
@@ -142,7 +148,16 @@ fn run_mobile() {
             mobile_save_vault,
             mobile_reload_vault,
             mobile_lock_vault,
-            mobile_discard_changes_and_lock
+            mobile_discard_changes_and_lock,
+            mobile_autofill_status,
+            mobile_enable_autofill_for_vault,
+            mobile_disable_autofill_for_vault,
+            mobile_autofill_request,
+            mobile_autofill_candidates,
+            mobile_autofill_publish_candidates,
+            mobile_autofill_approve,
+            mobile_autofill_cancel,
+            mobile_open_autofill_settings
         ])
         .run(tauri::generate_context!())
         .expect("Nian Pass Android runtime failed");

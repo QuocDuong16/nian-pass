@@ -35,6 +35,81 @@ test("committed mobile contract passes exact runtime validation", () => {
   expect(contract.errors.map(parseMobileErrorCode)).toEqual(contract.errors);
 });
 
+test("autofill adapter accepts only secret-free exact-key contracts", async () => {
+  invoke
+    .mockResolvedValueOnce(contract.autofillStatus)
+    .mockResolvedValueOnce({
+      request: contract.autofillRequest,
+      selectedVault: contract.selectedVault,
+    })
+    .mockResolvedValueOnce([contract.autofillCandidate])
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce(null);
+
+  await expect(mobileApi.getAutofillStatus()).resolves.toEqual(
+    contract.autofillStatus,
+  );
+  await expect(mobileApi.getAutofillRequest()).resolves.toEqual({
+    request: contract.autofillRequest,
+    selectedVault: contract.selectedVault,
+  });
+  await expect(
+    mobileApi.getAutofillCandidates("opaque-request-token"),
+  ).resolves.toEqual([contract.autofillCandidate]);
+  await mobileApi.approveAutofill(
+    "opaque-request-token",
+    "entry-example",
+    true,
+  );
+  await mobileApi.cancelAutofill("opaque-request-token");
+
+  expect(invoke).toHaveBeenNthCalledWith(4, "mobile_autofill_approve", {
+    requestToken: "opaque-request-token",
+    entryId: "entry-example",
+    approved: true,
+  });
+  expect(invoke).toHaveBeenNthCalledWith(5, "mobile_autofill_cancel", {
+    requestToken: "opaque-request-token",
+  });
+});
+
+test("autofill source and provider setup adapters remain semantic", async () => {
+  invoke
+    .mockResolvedValueOnce({
+      ...contract.autofillStatus,
+      sourceEnabled: true,
+    })
+    .mockResolvedValueOnce(contract.autofillStatus)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce(null);
+
+  await mobileApi.enableAutofill();
+  await mobileApi.disableAutofill();
+  await mobileApi.publishAutofillCandidates("opaque-request-token");
+  await mobileApi.openAutofillSettings();
+
+  expect(invoke).toHaveBeenNthCalledWith(
+    1,
+    "mobile_enable_autofill_for_vault",
+    undefined,
+  );
+  expect(invoke).toHaveBeenNthCalledWith(
+    2,
+    "mobile_disable_autofill_for_vault",
+    undefined,
+  );
+  expect(invoke).toHaveBeenNthCalledWith(
+    3,
+    "mobile_autofill_publish_candidates",
+    { requestToken: "opaque-request-token" },
+  );
+  expect(invoke).toHaveBeenNthCalledWith(
+    4,
+    "mobile_open_autofill_settings",
+    undefined,
+  );
+});
+
 test("mobile adapter invokes semantic source and vault commands", async () => {
   invoke
     .mockResolvedValueOnce(contract.selectedVault)
@@ -199,6 +274,24 @@ test("mobile DTO validation rejects extra transport and secret keys", async () =
   await expect(mobileApi.getEntryDetail("entry-example")).rejects.toEqual(
     new MobileCommandError("internal"),
   );
+
+  for (const forbidden of [
+    "password",
+    "secret",
+    "uri",
+    "sourceUri",
+    "certificate",
+    "autofillId",
+    "assistStructure",
+  ]) {
+    invoke.mockResolvedValueOnce({
+      ...contract.autofillCandidate,
+      [forbidden]: "forbidden",
+    });
+    await expect(
+      mobileApi.getAutofillCandidates("opaque-request-token"),
+    ).rejects.toEqual(new MobileCommandError("internal"));
+  }
 });
 
 test("selection and void validators reject malformed native transport", async () => {

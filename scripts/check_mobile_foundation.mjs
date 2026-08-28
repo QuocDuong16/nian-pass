@@ -83,13 +83,52 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourceJournal.kt",
     violations,
   );
+  const credentialProvider = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/NianCredentialProviderService.kt",
+    violations,
+  );
+  const autofillService = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/NianAutofillService.kt",
+    violations,
+  );
+  const credentialActivity = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialActivity.kt",
+    violations,
+  );
+  const autofillMetadata = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillMetadataStore.kt",
+    violations,
+  );
+  const autofillRegistry = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillRequestRegistry.kt",
+    violations,
+  );
+  const credentialProviderXml = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/res/xml/credential_provider.xml",
+    violations,
+  );
+  const autofillServiceXml = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/res/xml/autofill_service.xml",
+    violations,
+  );
   const mobileRust = [
     "apps/desktop/src-tauri/src/mobile/generation.rs",
+    "apps/desktop/src-tauri/src/mobile/autofill.rs",
+    "apps/desktop/src-tauri/src/mobile/autofill_commands.rs",
     "apps/desktop/src-tauri/src/mobile/mutations.rs",
     "apps/desktop/src-tauri/src/mobile/persistence.rs",
     "apps/desktop/src-tauri/src/mobile/session.rs",
     "apps/desktop/src-tauri/src/mobile/state.rs",
     "apps/desktop/src-tauri/src/mobile/source.rs",
+    "apps/desktop/src-tauri/src/mobile/source_autofill.rs",
+    "apps/desktop/src-tauri/src/mobile/state_autofill.rs",
   ]
     .map((path) => requireFile(root, path, violations))
     .join("\n");
@@ -100,9 +139,12 @@ export function runChecks(root) {
   );
   const mobileFrontend = [
     "apps/desktop/src/lib/mobile.ts",
+    "apps/desktop/src/lib/mobile-autofill.ts",
     "apps/desktop/src/types/mobile.ts",
     "apps/desktop/src/features/mobile/MobileVaultApp.tsx",
     "apps/desktop/src/features/mobile/MobileLockedView.tsx",
+    "apps/desktop/src/features/mobile/MobileAutofillPanel.tsx",
+    "apps/desktop/src/features/mobile/MobileAutofillSettings.tsx",
   ]
     .map((path) => requireFile(root, path, violations))
     .join("\n");
@@ -142,6 +184,48 @@ export function runChecks(root) {
     violations.push(
       "Tauri Rust library must emit staticlib, cdylib, and rlib artifacts",
     );
+  }
+  for (const [component, permission, action, metadata] of [
+    [
+      "NianCredentialProviderService",
+      "android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE",
+      "android.service.credentials.CredentialProviderService",
+      "android.credentials.provider",
+    ],
+    [
+      "NianAutofillService",
+      "android.permission.BIND_AUTOFILL_SERVICE",
+      "android.service.autofill.AutofillService",
+      "android.autofill",
+    ],
+  ]) {
+    for (const required of [component, permission, action, metadata]) {
+      if (!manifest.includes(required)) {
+        violations.push(`M5.3 manifest registration is missing ${required}`);
+      }
+    }
+  }
+  if (
+    !manifest.includes('android:name=".CredentialActivity"') ||
+    !manifest.includes('android:excludeFromRecents="true"') ||
+    !manifest.includes('android:exported="false"')
+  ) {
+    violations.push("M5.3 credential Activity must be private and excluded from recents");
+  }
+  if (
+    !credentialProviderXml.includes("android.credentials.TYPE_PASSWORD_CREDENTIAL") ||
+    /PUBLIC_KEY|PASSKEY/i.test(credentialProviderXml)
+  ) {
+    violations.push("M5.3 Credential Provider capability must be password-only");
+  }
+  if (!autofillServiceXml.includes("autofill-service")) {
+    violations.push("M5.3 AutofillService metadata XML is missing");
+  }
+  if (!/androidx\.credentials:credentials:1\.6\.0/.test(gradle)) {
+    violations.push("M5.3 must pin androidx.credentials:credentials:1.6.0");
+  }
+  if (/credentials-play-services-auth|credentials:[^"\n]*(?:\+|latest|alpha)/i.test(gradle)) {
+    violations.push("M5.3 credential dependencies must not float, use alpha, or add Play Services auth");
   }
   if (
     /FileProvider|FILE_PROVIDER_PATHS|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|READ_MEDIA_/.test(
@@ -288,6 +372,15 @@ export function runChecks(root) {
     "mobile_reload_vault",
     "mobile_lock_vault",
     "mobile_discard_changes_and_lock",
+    "mobile_autofill_status",
+    "mobile_enable_autofill_for_vault",
+    "mobile_disable_autofill_for_vault",
+    "mobile_autofill_request",
+    "mobile_autofill_candidates",
+    "mobile_autofill_publish_candidates",
+    "mobile_autofill_approve",
+    "mobile_autofill_cancel",
+    "mobile_open_autofill_settings",
   ]);
   if (androidHandler === undefined) {
     violations.push("M5.1 Android semantic command handler is missing");
@@ -299,8 +392,64 @@ export function runChecks(root) {
       violations.push("M5.2 Android command surface must match the reviewed semantic whitelist");
     }
   }
-  if (/plugin:vault-source|content:\/\//.test(mobileFrontend)) {
+  if (/plugin:(?:vault-source|autofill|credential)|content:\/\//.test(mobileFrontend)) {
     violations.push("M5.2 frontend must not receive or invoke native document transport");
+  }
+  const nativeCredential = [
+    credentialProvider,
+    autofillService,
+    credentialActivity,
+    autofillMetadata,
+    autofillRegistry,
+    nativeBridge,
+  ].join("\n");
+  for (const required of [
+    "CredentialProviderService",
+    "AuthenticationAction",
+    "AutofillService",
+    "FLAG_SECURE",
+    "SHA-256",
+    "AndroidKeyStore",
+    "AES/GCM/NoPadding",
+    "setUserAuthenticationRequired(false)",
+    "AtomicFile",
+    "noBackupFilesDir",
+  ]) {
+    if (!nativeCredential.includes(required)) {
+      violations.push(`M5.3 native credential boundary must retain ${required}`);
+    }
+  }
+  for (const forbidden of [
+    "getSharedPreferences",
+    "SharedPreferences",
+    "Log.d(",
+    "Log.v(",
+    "DatabaseKey",
+    "Argon2",
+    "composite key",
+    "master password",
+  ]) {
+    if (nativeCredential.toLowerCase().includes(forbidden.toLowerCase())) {
+      violations.push(`M5.3 native credential boundary must not contain ${forbidden}`);
+    }
+  }
+  if (/\bnew\s+SaveInfo\b|\bSaveInfo\s*\(|setSaveInfo|mobile_(?:create|update|save)_/i.test(autofillService)) {
+    violations.push("M5.3 Autofill SaveRequest must not mutate or advertise SaveInfo");
+  }
+  if (!autofillService.includes("callback.onSuccess()")) {
+    violations.push("M5.3 Autofill SaveRequest must complete without persistence");
+  }
+  if (!mobileRust.includes("AndroidApp") || !mobileRust.includes("entry_password")) {
+    violations.push("M5.3 candidate matching and narrow final secret reads must remain Rust-owned");
+  }
+  const candidateContract = mobileFrontend.match(
+    /export interface AutofillCandidateDto\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+  if (
+    candidateContract === undefined ||
+    /password|secret|uri|certificate|autofillId|assistStructure/i.test(candidateContract)
+  ) {
+    violations.push("M5.3 candidate DTO must exist and remain secret/native-identifier free");
   }
   if (
     /\b(?:contentUri|stagedPath|absolutePath|provider|documentId|uri|path)\s*[?:]/i.test(

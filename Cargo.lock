@@ -2368,6 +2368,7 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
  "tokio",
+ "url",
  "vault-core",
  "vault-session",
 ]

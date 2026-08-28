@@ -24,6 +24,8 @@ pub(crate) enum MobileError {
     RecoveryRequired,
     ReloadFailed,
     ReloadAuthenticationFailed,
+    AutofillUnavailable,
+    CredentialUnavailable,
     Internal,
 }
 
@@ -50,6 +52,8 @@ enum MobileErrorCode {
     RecoveryRequired,
     ReloadFailed,
     ReloadAuthenticationFailed,
+    AutofillUnavailable,
+    CredentialUnavailable,
     Internal,
 }
 
@@ -82,6 +86,8 @@ impl From<MobileError> for MobileErrorDto {
             MobileError::RecoveryRequired => MobileErrorCode::RecoveryRequired,
             MobileError::ReloadFailed => MobileErrorCode::ReloadFailed,
             MobileError::ReloadAuthenticationFailed => MobileErrorCode::ReloadAuthenticationFailed,
+            MobileError::AutofillUnavailable => MobileErrorCode::AutofillUnavailable,
+            MobileError::CredentialUnavailable => MobileErrorCode::CredentialUnavailable,
             MobileError::Internal => MobileErrorCode::Internal,
         };
         Self { code }

@@ -3,7 +3,8 @@
 This is the threat model for the M3 local vault session/filesystem foundation,
 the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
 M4.3 mutation UI, the M4.4 save/conflict flow, the M4.Q quality/security gates,
-and the M5.2 Android CRUD/provider-persistence flow. It records boundaries and assumptions; it is not a
+the M5.2 Android CRUD/provider-persistence flow, and the M5.3 Android credential
+retrieval flow. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
@@ -138,6 +139,18 @@ information to an attacker even when their plaintext remains unavailable.
 - Mobile signing keys or signing passwords entering version control
 - A mobile development server being exposed outside its required development boundary
 - A Linux build being misreported as iOS validation
+- A fake Android application reusing a legitimate package name
+- An Android package signing key changing after trust establishment
+- A malicious or unverified browser/WebView target claiming a web domain
+- A stale credential request, replayed PendingIntent, or reused request token
+- A deleted entry being fulfilled from stale candidate metadata
+- Password plaintext crossing WebView IPC or being cached by Kotlin
+- AssistStructure form contents being logged or persisted
+- Source URI and trust metadata leaking from native storage or backups
+- A corrupted bookmark, missing/invalidation Keystore key, or wrong AEAD context
+- A cold service process treating a remembered source as an unlocked vault
+- Autofill fulfillment racing Lock and returning a secret after Lock authority ends
+- Accidental master-password or KDBX derived-key persistence in Android Keystore
 
 ## M4.Q desktop and repository controls
 
@@ -222,8 +235,9 @@ Dirty ordinary Lock returns `unsaved_changes`; only explicit discard-and-lock
 drops dirty state without writing. Save/Reload/selection/Lock and mutations share
 one operation boundary and revision token, preventing stale async completion from
 marking a newer revision clean. Frontend drafts disable Save. General mobile
-Reveal/Copy, Autofill, Keystore, biometrics, sync, iOS persistence, and production
-mobile hardening remain outside M5.2. iOS is NOT RUN on Linux; initialization,
+Reveal/Copy, credential retrieval, Keystore metadata, biometrics, sync, iOS
+persistence, and production mobile hardening remain outside M5.2. M5.3 adds only
+the credential retrieval and metadata protection described below. iOS is NOT RUN on Linux; initialization,
 build, and validation require macOS with Xcode.
 
 Mobile Lock is a two-phase transaction: Rust reserves the shared operation and
@@ -234,6 +248,74 @@ leaves the original dirty session unlocked. If Save succeeded before a
 Save-and-Lock release failure, the Save is not rolled back and the session stays
 clean and unlocked. These failure states intentionally keep backend and frontend
 truthful without reacquiring or reconstructing the source document.
+
+## M5.3 Android credential retrieval controls
+
+Credential Manager and AutofillService are framework-bound exported services,
+protected respectively by `BIND_CREDENTIAL_PROVIDER_SERVICE` and
+`BIND_AUTOFILL_SERVICE`; they are not generic exported command endpoints. Their
+authentication PendingIntents explicitly target Nian Pass, contain only random
+opaque tokens, and use mutable semantics only where Android must attach result
+data. The credential Activity is private, excluded from recents, and uses
+`FLAG_SECURE`. No accessibility service, overlay, broad package query, storage
+permission, release `INTERNET`, or network-backed association lookup is added.
+
+Native parsing reads only the requesting package, current SHA-256 signing
+certificate identity, framework web domain, recognized username/email/password
+classifications, and required AutofillIds. It never logs or persists an
+AssistStructure or input-node text. Package name alone never authorizes silent
+release: the exact package association must match in Rust and the native trust
+store must contain the same certificate pin. A missing pin or changed signing
+identity requires explicit confirmation. Web URL matching uses a real parser and
+exact canonical host; an unverified web association always requires intentional
+approval and cannot silently downgrade because network verification is absent.
+
+The native registry is process-local, expiring, and single-use. Its records and
+candidate mappings are cleared on completion, cancellation, expiry, and Lock
+where possible, and never written to disk. Process death loses the operation
+instead of restoring stale authority. Rust computes secret-free candidates from
+the current unlocked `KdbxDocument`; protected Title/UserName stay protected in
+bulk DTOs. Final approval revalidates the active request, target match, session,
+and current stable entry ID under the shared operation reservation. Deletion,
+mutation mismatch, replay, and Lock all fail as credential unavailable. Dirty
+in-memory credentials may be read because that Rust document is authoritative,
+but Autofill never calls Save or clears dirty state.
+
+Only after final validation does Rust narrowly read the current username and
+password and invoke the backend-only native bridge. React cannot invoke the
+native fulfillment method and never receives a password, protected custom value,
+AutofillId, AssistStructure, certificate, URI, or framework Parcelable. Kotlin
+uses the returned password only to build the one-use framework response; it has
+no singleton/global password field, SharedPreferences secret, Bundle secret,
+saved-state secret, shadow vault, or persisted vault index. Java/Kotlin strings
+cannot promise secure erasure, so the control is narrow lifetime rather than a
+false zeroization claim.
+
+The source bookmark and per-source package trust associations are a versioned
+metadata record encrypted by a non-exportable Android Keystore AES-256-GCM key
+with a fresh IV and stable purpose-specific AAD. Only ciphertext and IV are
+atomically stored below `noBackupFilesDir`. The key has
+`setUserAuthenticationRequired(false)` because M5.3 protects metadata at rest,
+not KDBX unlock material. It stores no master password and no KDBX derived key.
+Missing/invalidated keys, modified IV/ciphertext, AEAD
+failure, malformed payload, and unknown schema fail closed without exposing the
+URI or crypto exception. Re-enabling Autofill is required.
+
+Enabling source remembering is an explicit transaction over an already unlocked
+source and a valid persisted SAF read grant. Lock still drops the complete Rust
+session and decrypted document; it retains only the opted-in native bookmark and
+grant after native bookkeeping succeeds. Disable removes bookmark and trust
+metadata and releases the grant when no live source still needs the existing
+two-phase Lock handoff. The bookmark contains no master password, entry password,
+KDBX document key, manually derived/composite key, biometric quick-unlock
+material, or full vault index. Cold rehydration stages a fresh encrypted
+generation and still requires the normal master-password unlock.
+
+Credential creation/import, Autofill SaveRequest mutation, passkeys, TOTP
+autofill, biometric/device-credential quick unlock, derived unlock material,
+auto-lock/full background lifecycle, global screenshot/app-switcher policy,
+sync, and iOS remain outside M5.3. Those lifecycle and quick-unlock policies are
+deferred to M5.5; M5.4 is the separate future iOS milestone.
 
 ## M4.3 mutation controls
 

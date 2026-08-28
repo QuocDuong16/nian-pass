@@ -5,6 +5,11 @@ import type {
   MobileErrorCode,
   MobileSelectedVaultDto,
 } from "../types/mobile";
+import {
+  parseAutofillCandidates,
+  parseAutofillLaunch,
+  parseAutofillStatus,
+} from "./mobile-autofill";
 import { parseEntryDetail, parseSecretString } from "./entry-validation";
 import {
   nonEmptyString,
@@ -35,6 +40,8 @@ const mobileErrorCodes = new Set<MobileErrorCode>([
   "recovery_required",
   "reload_failed",
   "reload_authentication_failed",
+  "autofill_unavailable",
+  "credential_unavailable",
   "internal",
 ]);
 
@@ -163,4 +170,28 @@ export const mobileApi: MobileApi = {
   lockVault: () => call("mobile_lock_vault", parseVoid),
   discardChangesAndLock: () =>
     call("mobile_discard_changes_and_lock", parseVoid),
+  getAutofillStatus: () => call("mobile_autofill_status", parseAutofillStatus),
+  enableAutofill: () =>
+    call("mobile_enable_autofill_for_vault", parseAutofillStatus),
+  disableAutofill: () =>
+    call("mobile_disable_autofill_for_vault", parseAutofillStatus),
+  getAutofillRequest: () =>
+    call("mobile_autofill_request", (value) =>
+      value === null ? null : parseAutofillLaunch(value),
+    ),
+  getAutofillCandidates: (requestToken) =>
+    call("mobile_autofill_candidates", parseAutofillCandidates, {
+      requestToken,
+    }),
+  publishAutofillCandidates: (requestToken) =>
+    call("mobile_autofill_publish_candidates", parseVoid, { requestToken }),
+  approveAutofill: (requestToken, entryId, approved) =>
+    call("mobile_autofill_approve", parseVoid, {
+      requestToken,
+      entryId,
+      approved,
+    }),
+  cancelAutofill: (requestToken) =>
+    call("mobile_autofill_cancel", parseVoid, { requestToken }),
+  openAutofillSettings: () => call("mobile_open_autofill_settings", parseVoid),
 };

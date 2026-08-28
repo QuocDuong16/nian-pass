@@ -82,6 +82,27 @@ export function createMobileApi(overrides: Partial<MobileApi> = {}): MobileApi {
     reloadVault: vi.fn().mockResolvedValue(mobileSnapshot),
     lockVault: vi.fn().mockResolvedValue(undefined),
     discardChangesAndLock: vi.fn().mockResolvedValue(undefined),
+    getAutofillStatus: vi.fn().mockResolvedValue({
+      supported: true,
+      sourceEnabled: false,
+      providerSelected: false,
+    }),
+    enableAutofill: vi.fn().mockResolvedValue({
+      supported: true,
+      sourceEnabled: true,
+      providerSelected: false,
+    }),
+    disableAutofill: vi.fn().mockResolvedValue({
+      supported: true,
+      sourceEnabled: false,
+      providerSelected: false,
+    }),
+    getAutofillRequest: vi.fn().mockResolvedValue(null),
+    getAutofillCandidates: vi.fn().mockResolvedValue([]),
+    publishAutofillCandidates: vi.fn().mockResolvedValue(undefined),
+    approveAutofill: vi.fn().mockResolvedValue(undefined),
+    cancelAutofill: vi.fn().mockResolvedValue(undefined),
+    openAutofillSettings: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }

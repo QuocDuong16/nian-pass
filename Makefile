@@ -213,9 +213,11 @@ mobile-android-check: mobile-source-check mobile-tools-check
 	@echo "Build the real Tauri Android application as APKs (arm64 + x86_64)..."
 	pnpm --filter @nian-pass/desktop tauri android build --apk --target aarch64 x86_64 --ci
 	@echo "Run focused Android native source tests..."
-	apps/desktop/src-tauri/gen/android/gradlew -p apps/desktop/src-tauri/gen/android :app:testUniversalDebugUnitTest
+	apps/desktop/src-tauri/gen/android/gradlew -p apps/desktop/src-tauri/gen/android \
+		:app:testUniversalDebugUnitTest :app:compileUniversalDebugAndroidTestKotlin
 	@artifact="$$(find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print -quit 2>/dev/null)"; \
 		test -n "$$artifact" || { echo "Android build completed without an APK artifact." >&2; exit 1; }; \
+		scripts/verify_android_release.sh "$$artifact" && \
 		echo "Android APK verified: $$artifact"
 
 architecture-check:

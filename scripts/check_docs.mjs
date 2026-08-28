@@ -32,7 +32,7 @@ export function runChecks(root) {
   const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
   const makefile = readRequired(root, "Makefile", violations);
 
-  requirePattern(violations, "README.md", readme, /M5\.2\s*[—-]\s*Android Mobile CRUD \+ Safe Document Persistence/, "current milestone must be M5.2");
+  requirePattern(violations, "README.md", readme, /M5\.3\s*[—-]\s*Android Credential Provider \+ Autofill \+ Keystore/, "current milestone must be M5.3");
   requirePattern(violations, "README.md", readme, /read-only providers[\s\S]{0,160}(?:editing|Save) disabled/i, "M5.2 read-only provider boundary is missing");
   requirePattern(violations, "README.md", readme, /AtomicFile[\s\S]{0,300}save_uncertain[\s\S]{0,160}recovery_required/i, "M5.2 recovery and uncertainty boundary is missing");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
@@ -59,6 +59,14 @@ export function runChecks(root) {
   requirePattern(violations, "docs/architecture.md", architecture, /residual[\s\S]{0,160}writer race[\s\S]{0,240}cannot prove/i, "Android provider race limitation is missing");
   requirePattern(violations, "docs/threat-model.md", threatModel, /iOS[\s\S]{0,180}(?:NOT RUN|not initialized|not.*built)[\s\S]{0,180}macOS with Xcode/i, "honest iOS validation boundary is missing");
   requirePattern(violations, "docs/quality.md", quality, /mobile-tools-check[\s\S]{0,300}mobile-android-check/i, "mobile gate policy is missing");
+  requirePattern(violations, "README.md", readme, /CredentialProviderService[\s\S]{0,160}API 34[\s\S]{0,200}AutofillService[\s\S]{0,160}API 26/i, "M5.3 Android credential surfaces are missing");
+  requirePattern(violations, "README.md", readme, /explicit opt-in[\s\S]{0,500}AES-256-GCM[\s\S]{0,500}master password again/i, "M5.3 source remembering boundary is missing");
+  requirePattern(violations, "README.md", readme, /package[\s\S]{0,100}SHA-256 signing-certificate pin[\s\S]{0,220}explicit confirmation/i, "M5.3 signing trust policy is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /Android OS request[\s\S]{0,500}opaque request token[\s\S]{0,600}backend-only native final result/i, "M5.3 credential fulfillment architecture is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /Keystore[\s\S]{0,260}source bookmark[\s\S]{0,400}no master password[\s\S]{0,160}derived key/i, "M5.3 Keystore non-secret boundary is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /fake Android application[\s\S]{0,500}signing key[\s\S]{0,500}unverified[\s\S]{0,500}request token/i, "M5.3 credential threats are missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /setUserAuthenticationRequired\(false\)[\s\S]{0,700}no master password/i, "M5.3 metadata-key policy is missing");
+  requirePattern(violations, "docs/quality.md", quality, /credentials:1\.6\.0[\s\S]{0,500}single-use opaque/i, "M5.3 native dependency and token ratchets are missing");
 
   const qualityRequirements = [
     [/ratchet/i, "coverage ratchet policy is missing"],

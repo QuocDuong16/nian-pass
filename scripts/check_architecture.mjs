@@ -101,7 +101,8 @@ export function runChecks(root, budget) {
     const name = projectPath(root, path);
     if (
       name !== "apps/desktop/src-tauri/src/commands.rs" &&
-      name !== "apps/desktop/src-tauri/src/mobile/commands.rs"
+      name !== "apps/desktop/src-tauri/src/mobile/commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/mobile/autofill_commands.rs"
     ) {
       checkPattern(
         violations,

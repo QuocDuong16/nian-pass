@@ -19,14 +19,14 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M5.2 — Android Mobile CRUD + Safe Document Persistence
+M5.3 — Android Credential Provider + Autofill + Keystore
 
-The Desktop MVP remains complete through M4.5. Android now supports system
-document selection, unlock/browse, entry/group/custom-field CRUD, Rust-owned
-dirty state, explicit credentialed Save on safely writable SAF sources,
-external-generation refusal, verified reload/discard, and dirty Lock
-protection. Android 8.0 / API 26 remains the minimum. Read-only providers remain
-browsable with editing and Save disabled.
+The Desktop MVP remains complete through M4.5 and the M5.2 Android CRUD/Save
+protocol remains unchanged. Android now adds password retrieval through a
+`CredentialProviderService` on API 34+ and an `AutofillService` fallback on API
+26–33. Both use the same Rust-owned matching and fulfillment core. Android 8.0
+/ API 26 remains the minimum. Read-only providers remain browsable with editing
+and Save disabled.
 
 Save is fail-closed: the real content URI stays native-only behind an opaque
 token; Rust fingerprints the complete encrypted generation, verifies the Save
@@ -37,9 +37,20 @@ before Rust updates the baseline and clears dirty state. Ambiguous post-write
 states return `save_uncertain`; unknown crash generations return
 `recovery_required`. There is no force overwrite or autosave.
 
-Android still does not support Autofill, Keystore, biometrics, general secret
-reveal/copy, sync, or production mobile hardening. iOS document access and
-persistence remain unimplemented and are not claimed as tested from Linux.
+Autofill source remembering is explicit opt-in. Android retains the selected
+SAF read grant and writes only a versioned source bookmark plus package trust
+associations, encrypted with a non-exportable AES-256-GCM Android Keystore key
+in app-private no-backup storage. Lock always drops the decrypted Rust session;
+the remembered bookmark only lets a cold credential request stage the selected
+KDBX before the user enters its real master password again. Disable Autofill
+deletes the bookmark and trust metadata and releases the retained grant when no
+active vault still owns it.
+
+Android still does not support biometric quick unlock, master-password or KDBX
+derived-key persistence, passkeys, TOTP autofill, external credential
+save/create, sync, or full M5.5 lifecycle hardening. iOS document access,
+persistence, and Password AutoFill remain unimplemented and are not claimed as
+tested from Linux.
 
 `apps/desktop` remains the historical path for the shared Tauri application
 host. Renaming it is deferred to a dedicated mechanical refactor. Desktop and
@@ -235,15 +246,17 @@ make docs-check
 make mobile-source-check
 ```
 
-### Android mobile CRUD and safe provider persistence
+### Android credential retrieval and safe provider persistence
 
 The committed Tauri-generated project is at
 `apps/desktop/src-tauri/gen/android`. It targets the normal Rust Android ABI
 set (`aarch64`, `armv7`, `i686`, and `x86_64`); the Android build gate
 prioritizes `aarch64` and `x86_64` for a modern physical device and emulator.
-Future AutofillService work requires Android 8.0, so M5.2 retains
-`minSdk = 26` without claiming Autofill is implemented.
-M5.2 Android production builds do not request network permission. Development
+M5.3 retains `minSdk = 26`: API 34+ uses the Android Credential Manager provider
+API for password credentials, while API 26–33 uses the classic AutofillService.
+The provider dependency is pinned to `androidx.credentials:credentials:1.6.0`;
+no Play Services auth provider is used. Android production builds do not
+request network permission. Development
 builds use debug-only `INTERNET` access for the Tauri/Vite development host.
 
 Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to a CLI SDK containing Android SDK 36,
@@ -272,10 +285,37 @@ maps it to an unpredictable token and stages only encrypted KDBX bytes below
 without a persisted writable grant remain browse-only. Picker cancellation
 preserves the current selection and dirty sessions cannot be replaced silently.
 
+In Settings, **Enable Autofill for this vault** performs the explicit source
+opt-in, and **Open system settings** launches Android's provider settings rather
+than toggling provider state. A locked or cold provider returns only an
+authentication action/dataset. After normal KDBX unlock, Rust matches
+`AndroidApp` by exact package and web URLs by exact canonical host, returns
+secret-free candidates, revalidates the selected stable entry and target, then
+passes the exact current username/password directly to the native system-result
+builder. Passwords, package certificate identities, content URIs, AutofillIds,
+and request parcelables never cross WebView IPC.
+
+An application association is silently trusted only when both its exact package
+and SHA-256 signing-certificate pin match. First association, signing-key
+changes, and every unverified web association require explicit confirmation.
+Opaque request and candidate tokens are short-lived and single-use. Kotlin does
+not parse KDBX and keeps no password cache; Autofill neither invokes Save nor
+handles external create/save requests.
+
 Optional device/emulator smoke procedure: open a committed synthetic fixture,
 unlock, edit, Save, Lock, reopen, and verify the edit; then repeat with an
 external modification and verify Save refuses to overwrite it. This does not
 replace the automated Rust, Vitest, Kotlin, source-policy, and APK checks.
+
+Optional credential smoke uses only a synthetic vault. On API 34+, enable Nian
+Pass as a credential provider, enable Autofill for the synthetic vault, Lock,
+open a test login form, authenticate through Nian Pass, select an entry, and
+verify the system fills it. On API 26–33, enable Nian Pass as the AutofillService
+and run the equivalent authenticated-dataset flow. For security smoke, install
+the same package name with another signing certificate and confirm it is not
+silently trusted; an unverified web target must also show explicit confirmation.
+
+M5.4 — iOS Password AutoFill + Keychain is the next milestone and is not started.
 
 Explicit Save verifies the full encrypted baseline, password, private encrypted
 candidate, exact private backup, crash journal, final pre-write baseline,

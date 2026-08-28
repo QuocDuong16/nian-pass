@@ -114,6 +114,23 @@
     "notesPresent": true,
     "customFields": [{ "name": "Account type", "protection": "unprotected" }]
   },
+  "autofillStatus": {
+    "supported": true,
+    "sourceEnabled": true,
+    "providerSelected": false
+  },
+  "autofillRequest": {
+    "requestToken": "opaque-request-token",
+    "kind": "autofill",
+    "targetDisplay": "example.com",
+    "requiresConfirmation": true,
+    "selectedEntryId": null
+  },
+  "autofillCandidate": {
+    "entryId": "entry-example",
+    "title": { "kind": "visible", "value": "Example" },
+    "username": { "kind": "protected" }
+  },
   "errors": [
     "picker_failed",
     "no_vault_selected",
@@ -135,6 +152,8 @@
     "recovery_required",
     "reload_failed",
     "reload_authentication_failed",
+    "autofill_unavailable",
+    "credential_unavailable",
     "internal"
   ]
 }
