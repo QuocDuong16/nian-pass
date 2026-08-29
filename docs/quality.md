@@ -88,9 +88,12 @@ their binding permissions, password-only provider metadata, and the private
 credential Activity, then dumps APK permissions to prove release still has no
 `INTERNET` or broad storage/package permission.
 
-iOS validation is explicitly separate. A future `mobile-ios-check` must run on
-macOS with Xcode after official Tauri iOS initialization. Linux does not fabricate
-an Xcode project or report an iOS pass.
+iOS validation is explicitly separate. The dedicated `mobile-ios-tools-check`,
+`mobile-ios-source-check`, and `mobile-ios-check` targets now exist, but the full
+gate is intentionally macOS/Xcode-only. It fails closed until official Tauri iOS
+initialization has produced the Apple project and the real host plus embedded
+Credential Provider Extension can be built and verified. Linux does not
+fabricate an Xcode project or report an iOS pass.
 
 Rust policy keeps `unsafe_code = forbid` unchanged and denies warnings,
 unused must-use values, `dbg!`, `todo!`, `unimplemented!`, production unwraps,
@@ -275,11 +278,23 @@ Android request probing and renders no Save/CRUD actions.
 `mobile-ios-tools-check` is intentionally macOS-only. It requires Xcode,
 selected iPhone device/simulator SDKs, pinned Tauri CLI, the iOS device and
 Apple-silicon simulator Rust targets, and CocoaPods only when the official
-generated graph uses a Podfile. `mobile-ios-check` additionally runs the
-deterministic Apple source ratchet, builds through the pinned Tauri CLI, requires
-one embedded `.appex`, and inspects signed host/extension entitlements for the
-AutoFill provider capability, the same App Group, shared Keychain access, and
-password-only extension capabilities. It is excluded from Linux
+generated graph uses a Podfile. `mobile-ios-source-check` is structural
+source/build-graph policy: Swift production sources must contain the real
+Credential Provider and host document adapter, call the exact reviewed Rust FFI
+lifecycle, keep KDBX semantics out of Swift, and use fail-closed Keychain policy;
+entitlements, the extension plist, and `project.pbxproj` are validated only for
+their own responsibilities. Marker strings in `project.pbxproj` are not Swift
+implementation evidence.
+
+`mobile-ios-check` composes that source ratchet with the actual pinned-Tauri
+Xcode build, requires one embedded `.appex`, and inspects signed host/extension
+entitlements for the AutoFill provider capability, the same App Group, shared
+Keychain access, and password-only extension capabilities. The artifact verifier
+does not treat absence of FFI names from `nm` as failure because release Mach-O
+stripping/LTO may remove internal static-link symbol names; the required Swift C
+calls plus a successful link are the deterministic build evidence. Neither
+source markers nor artifact structure prove runtime Password AutoFill. A real
+simulator/device system smoke remains separate. The gate is excluded from Linux
 `quality-check`; a Linux failure to run it is a required BLOCKED verdict, not a
 substitute PASS.
 

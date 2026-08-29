@@ -808,6 +808,14 @@ allocation triples only once; arbitrary dangling non-null pointers remain
 outside what Rust can validate and require Swift ownership discipline plus
 Xcode integration tests.
 
+A Credential Provider target could compile while bypassing the reviewed Rust
+FFI and reimplementing credential or KDBX semantics in Swift. The source policy
+therefore requires executable-looking calls to every reviewed open, candidate,
+identity, final-credential, free, and close ABI symbol, rejects comment-only
+markers and conservative duplicate-KDBX patterns, and requires the actual Swift
+Credential Provider subclass. The macOS gate must still build and inspect the
+embedded extension; neither layer substitutes for system AutoFill smoke.
+
 App Group, Keychain access-group, Data Protection, extension capability, or
 embedding mistakes can invalidate the intended sandbox. Source ratchets and the
 macOS artifact gate inspect both host and extension entitlements, shared group

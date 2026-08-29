@@ -865,6 +865,16 @@ Every export contains panics as a generic status; pointer/length/null checks are
 bounded, no business logic lives in unsafe blocks, and credential buffers are
 explicitly zeroized and freed. An opaque random handle owns one extension-local
 `KdbxDocument` plus mirror generation and becomes invalid immediately on close.
+These seven symbols are the reviewed M5.4 ABI contract; renaming one requires the
+checker, tests, and documentation to change together.
+
+An Xcode project is not valid merely because it defines an AutoFill extension
+target and entitlements. Production Swift must subclass
+`ASCredentialProviderViewController`, route open, candidate, identity, final
+credential, free, and close operations through `ios-credential-ffi`, and leave
+KDBX parsing, matching, and credential semantics in Rust. The source ratchet
+classifies Swift, entitlements, plist files, and `project.pbxproj` separately so
+the build graph cannot impersonate implementation source.
 
 The Apple generated project and Swift implementation are not present in the
 current Linux checkout. This section defines and documents the implemented Rust
