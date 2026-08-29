@@ -874,7 +874,10 @@ target and entitlements. Production Swift must subclass
 credential, free, and close operations through `ios-credential-ffi`, and leave
 KDBX parsing, matching, and credential semantics in Rust. The source ratchet
 classifies Swift, entitlements, plist files, and `project.pbxproj` separately so
-the build graph cannot impersonate implementation source.
+the build graph cannot impersonate implementation source. Credential Provider to
+Rust FFI evidence is target-scoped, not repository-scoped: the checker resolves
+the extension target's `PBXSourcesBuildPhase` and accepts subclass/API/ABI usage
+only from the production Swift files reached through that phase.
 
 The Apple generated project and Swift implementation are not present in the
 current Linux checkout. This section defines and documents the implemented Rust

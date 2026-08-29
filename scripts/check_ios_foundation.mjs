@@ -8,6 +8,10 @@ import {
   swiftExecutableText,
   synchronizablePolicy,
 } from "./lib/swift_source_policy.mjs";
+import {
+  credentialProviderSwiftPaths,
+  stripPbxComments,
+} from "./lib/pbx_source_policy.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const appleRoot = "apps/desktop/src-tauri/gen/apple";
@@ -114,7 +118,9 @@ function hasTruePlistKey(source, key) {
 }
 
 function validateBuildGraph(groups, violations) {
-  const graph = groups.pbxproj.map(({ source }) => source).join("\n");
+  const graph = groups.pbxproj
+    .map(({ source }) => stripPbxComments(source))
+    .join("\n");
   if (groups.pbxproj.length === 0) {
     violations.push(`${appleRoot}: real Xcode build graph is missing`);
     return;
@@ -143,33 +149,65 @@ function validateBuildGraph(groups, violations) {
   }
 }
 
-function validateSwift(groups, violations) {
+function validateSwift(project, groups, credentialPaths, violations) {
+  const byPath = new Map(
+    groups.swift.map((record) => [
+      relative(project, record.path).replaceAll("\\", "/"),
+      record,
+    ]),
+  );
+  const credentialSwift = [];
+  for (const path of credentialPaths ?? []) {
+    if (!isProductionSwift(path)) {
+      violations.push(
+        `Credential Provider target must not include non-production Swift source ${path}`,
+      );
+      continue;
+    }
+    const record = byPath.get(path);
+    if (!record) {
+      violations.push(
+        `Credential Provider target references missing Swift source ${path}`,
+      );
+      continue;
+    }
+    credentialSwift.push(record);
+  }
   const commentsStripped = groups.swift
     .map(({ source }) => stripSwiftComments(source))
     .join("\n");
   const executable = groups.swift
     .map(({ source }) => swiftExecutableText(source))
     .join("\n");
+  const credentialExecutable = credentialSwift
+    .map(({ source }) => swiftExecutableText(source))
+    .join("\n");
   const credentialSubclass =
     /\bclass\s+[A-Za-z_]\w*(?:\s*<[^>{}]*>)?\s*:\s*[^{}]*\bASCredentialProviderViewController\b/u;
 
-  if (!credentialSubclass.test(executable)) {
+  if (
+    credentialPaths !== null &&
+    !credentialSubclass.test(credentialExecutable)
+  ) {
     violations.push(
-      "iOS Swift Credential Provider implementation missing ASCredentialProviderViewController subclass",
+      "Credential Provider target Swift source is missing ASCredentialProviderViewController subclass",
     );
   }
-  for (const symbol of ffiSymbols) {
-    if (!hasSwiftCall(executable, symbol)) {
+  for (const symbol of credentialPaths === null ? [] : ffiSymbols) {
+    if (!hasSwiftCall(credentialExecutable, symbol)) {
       violations.push(
-        `iOS Credential Provider Swift source must use ${symbol}`,
+        `Credential Provider target Swift source must use ${symbol}`,
       );
     }
   }
-  for (const marker of [
-    ...credentialApis,
-    ...hostApis,
-    ...nativeIntegrationMarkers,
-  ]) {
+  for (const marker of credentialPaths === null ? [] : credentialApis) {
+    if (!credentialExecutable.includes(marker)) {
+      violations.push(
+        `Credential Provider target Swift source is missing ${marker}`,
+      );
+    }
+  }
+  for (const marker of [...hostApis, ...nativeIntegrationMarkers]) {
     if (!executable.includes(marker))
       violations.push(`iOS production Swift source is missing ${marker}`);
   }
@@ -287,7 +325,21 @@ export function runChecks(root = repositoryRoot) {
   const violations = [];
   const groups = classifyFiles(project);
   validateBuildGraph(groups, violations);
-  validateSwift(groups, violations);
+  let credentialPaths = null;
+  if (groups.pbxproj.length > 0) {
+    try {
+      credentialPaths = credentialProviderSwiftPaths(
+        groups.pbxproj.map(({ source }) => source),
+      );
+    } catch (error) {
+      violations.push(
+        error instanceof Error
+          ? error.message
+          : "Unable to resolve Credential Provider PBX source membership",
+      );
+    }
+  }
+  validateSwift(project, groups, credentialPaths, violations);
   validateEntitlements(groups, violations);
   validatePlists(groups, violations);
   return violations;

@@ -278,13 +278,18 @@ Android request probing and renders no Save/CRUD actions.
 `mobile-ios-tools-check` is intentionally macOS-only. It requires Xcode,
 selected iPhone device/simulator SDKs, pinned Tauri CLI, the iOS device and
 Apple-silicon simulator Rust targets, and CocoaPods only when the official
-generated graph uses a Podfile. `mobile-ios-source-check` is structural
-source/build-graph policy: Swift production sources must contain the real
-Credential Provider and host document adapter, call the exact reviewed Rust FFI
-lifecycle, keep KDBX semantics out of Swift, and use fail-closed Keychain policy;
-entitlements, the extension plist, and `project.pbxproj` are validated only for
-their own responsibilities. Marker strings in `project.pbxproj` are not Swift
-implementation evidence.
+generated graph uses a Podfile. The paired `mobile-ios-check` performs the real
+Xcode build and requires one embedded `.appex`. `mobile-ios-source-check` is
+structural source/build-graph policy: it resolves the one app-extension
+`PBXNativeTarget` through its `PBXSourcesBuildPhase`, `PBXBuildFile`,
+`PBXFileReference`, and parent `PBXGroup` paths. That exact production Swift set
+must contain the real Credential Provider subclass and the complete reviewed
+Rust FFI lifecycle;
+host-target or unreferenced Swift calls cannot satisfy the extension requirement.
+All production Swift still keeps KDBX semantics out of Swift and uses fail-closed
+Keychain policy. Entitlements, the extension plist, and `project.pbxproj` are
+validated only for their own responsibilities; PBX comments and marker strings
+are not implementation or source-membership evidence.
 
 `mobile-ios-check` composes that source ratchet with the actual pinned-Tauri
 Xcode build, requires one embedded `.appex`, and inspects signed host/extension
