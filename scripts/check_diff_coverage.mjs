@@ -130,6 +130,7 @@ function isExcluded(file) {
     file.includes("/generated/") ||
     file.endsWith(".d.ts") ||
     file.endsWith("build.rs") ||
+    file.endsWith("_tests.rs") ||
     /\.(?:test|spec)\.(?:ts|tsx|js|jsx)$/.test(file) ||
     /(?:^|\/)(?:vite|vitest|eslint|prettier)\.config\./.test(file)
   );
@@ -163,10 +164,23 @@ function rustTargetOs(platform = process.platform) {
 function rustProductionLines(file, changed, cwd = process.cwd(), targetOs = rustTargetOs()) {
   if (!file.endsWith(".rs")) return changed;
   const source = withoutRustTestItems(readFileSync(resolve(cwd, file), "utf8"), true);
-  const fileTarget = source.match(
+  const directTarget = source.match(
     /^\s*#!\[cfg\(target_os\s*=\s*"([^"]+)"\)\]/,
   )?.[1];
-  if (fileTarget !== undefined && fileTarget !== targetOs) return new Set();
+  if (directTarget !== undefined && directTarget !== targetOs) return new Set();
+  const anyTargetExpression = source.match(/^\s*#!\[cfg\(any\(([^)]*)\)\)\]/)?.[1];
+  if (anyTargetExpression !== undefined) {
+    const targetClauses = anyTargetExpression.split(",").map((clause) => clause.trim());
+    const targetValues = targetClauses.map(
+      (clause) => clause.match(/^target_os\s*=\s*"([^"]+)"$/)?.[1],
+    );
+    if (
+      targetValues.every((value) => value !== undefined) &&
+      !targetValues.includes(targetOs)
+    ) {
+      return new Set();
+    }
+  }
   if (!/\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*(?:<[^>{}]*>)?\s*\(/.test(source)) {
     return new Set();
   }

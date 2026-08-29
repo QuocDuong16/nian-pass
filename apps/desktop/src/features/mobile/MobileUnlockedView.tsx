@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { VaultSnapshotDto } from "../../types/desktop";
 import type { MobileApi, MobileSelectedVaultDto } from "../../types/mobile";
+import type { RuntimePlatform } from "../../types/runtime";
 import { DirtyExitDialog } from "../vault/DirtyExitDialog";
 import { MobileSaveDialogs } from "./MobileSaveDialogs";
 import { MobileAutofillSettings } from "./MobileAutofillSettings";
@@ -13,10 +14,12 @@ interface Props {
   selected: MobileSelectedVaultDto;
   initialSnapshot: VaultSnapshotDto;
   hidden: boolean;
+  platform: Extract<RuntimePlatform, "android" | "ios">;
   onLocked: () => void;
 }
 
 export function MobileUnlockedView(props: Props) {
+  const readOnly = props.platform === "ios";
   const [snapshot, setSnapshot] = useState(props.initialSnapshot);
   const [hasDraft, setHasDraft] = useState(false);
   const [mutationPending, setMutationPending] = useState(false);
@@ -47,7 +50,7 @@ export function MobileUnlockedView(props: Props) {
     );
   }
 
-  const busy = flow.busy || mutationPending || lockPending;
+  const busy = (!readOnly && flow.busy) || mutationPending || lockPending;
   const editsDisabled = busy || !props.selected.writable || flow.blocked;
   const saveDisabled =
     busy ||
@@ -70,7 +73,7 @@ export function MobileUnlockedView(props: Props) {
       props.onLocked();
     } catch {
       setLockError(
-        "Nian Pass could not safely release the active Android source.",
+        "Nian Pass could not safely release the active document source.",
       );
     } finally {
       setLockPending(false);
@@ -102,8 +105,10 @@ export function MobileUnlockedView(props: Props) {
           </span>
           <div>
             <p className="eyebrow">
-              Android ·{" "}
-              {props.selected.writable ? "Explicit Save" : "Read only"}
+              {props.platform === "ios" ? "iOS" : "Android"} ·{" "}
+              {readOnly || !props.selected.writable
+                ? "Read only"
+                : "Explicit Save"}
             </p>
             <h1>Nian Pass</h1>
             <p className="mobile-file-name">{props.selected.fileName}</p>
@@ -115,24 +120,26 @@ export function MobileUnlockedView(props: Props) {
           </div>
         </div>
         <div className="top-bar-actions">
-          <span className="save-status" aria-live="polite">
+          <span className="save-status" aria-live="polite" hidden={readOnly}>
             {flow.saved && !snapshot.dirty ? "Saved" : ""}
           </span>
-          <button
-            type="button"
-            aria-label="Save vault"
-            disabled={saveDisabled}
-            title={
-              hasDraft
-                ? "Apply or cancel the current draft before saving"
-                : undefined
-            }
-            onClick={() => {
-              flow.start("save");
-            }}
-          >
-            Save
-          </button>
+          {readOnly ? null : (
+            <button
+              type="button"
+              aria-label="Save vault"
+              disabled={saveDisabled}
+              title={
+                hasDraft
+                  ? "Apply or cancel the current draft before saving"
+                  : undefined
+              }
+              onClick={() => {
+                flow.start("save");
+              }}
+            >
+              Save
+            </button>
+          )}
           <button
             className="secondary-button lock-button"
             type="button"
@@ -143,7 +150,7 @@ export function MobileUnlockedView(props: Props) {
           </button>
         </div>
       </header>
-      {!props.selected.writable ? (
+      {!props.selected.writable && !readOnly ? (
         <p className="shell-error" role="status">
           This provider did not grant persistent writable access. Browsing
           remains available; editing and Save are disabled.
@@ -154,16 +161,17 @@ export function MobileUnlockedView(props: Props) {
           {lockError}
         </p>
       )}
-      <MobileAutofillSettings api={props.api} />
+      <MobileAutofillSettings api={props.api} platform={props.platform} />
       <MobileVaultBrowser
         api={props.api}
         snapshot={snapshot}
         disabled={editsDisabled}
+        readOnly={readOnly}
         onSnapshot={setSnapshot}
         onDraftChange={setHasDraft}
         onBusyChange={setMutationPending}
       />
-      {dirtyExit ? (
+      {dirtyExit && !readOnly ? (
         <DirtyExitDialog
           intent="lock"
           busy={busy}
@@ -177,17 +185,19 @@ export function MobileUnlockedView(props: Props) {
           }}
         />
       ) : null}
-      <MobileSaveDialogs
-        flow={flow.flow}
-        password={flow.password}
-        onPassword={flow.setPassword}
-        onCancel={flow.cancel}
-        onSave={() => void flow.submitSave()}
-        onReloadChoice={flow.beginReload}
-        onReloadCancel={flow.cancelReload}
-        onReload={() => void flow.submitReload()}
-        onDismissUncertain={flow.dismissUncertain}
-      />
+      {readOnly ? null : (
+        <MobileSaveDialogs
+          flow={flow.flow}
+          password={flow.password}
+          onPassword={flow.setPassword}
+          onCancel={flow.cancel}
+          onSave={() => void flow.submitSave()}
+          onReloadChoice={flow.beginReload}
+          onReloadCancel={flow.cancelReload}
+          onReload={() => void flow.submitReload()}
+          onDismissUncertain={flow.dismissUncertain}
+        />
+      )}
     </main>
   );
 }

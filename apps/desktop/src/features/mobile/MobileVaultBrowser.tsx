@@ -12,6 +12,7 @@ interface Props {
   api: MobileApi;
   snapshot: VaultSnapshotDto;
   disabled: boolean;
+  readOnly?: boolean;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDraftChange: (active: boolean) => void;
   onBusyChange: (busy: boolean) => void;
@@ -126,29 +127,33 @@ export function MobileVaultBrowser(props: Props) {
               setDetailDraft(false);
             }}
           />
-          <GroupActions
-            api={props.api}
-            group={selectedGroup}
-            snapshot={props.snapshot}
-            disabled={props.disabled}
-            onDraftChange={setGroupDraft}
-            onBusyChange={setGroupBusy}
-            onChanged={(next, groupId) => {
-              setSelectedGroupId(groupId);
-              acceptSnapshot(next, null);
-            }}
-          />
+          {props.readOnly === true ? null : (
+            <GroupActions
+              api={props.api}
+              group={selectedGroup}
+              snapshot={props.snapshot}
+              disabled={props.disabled}
+              onDraftChange={setGroupDraft}
+              onBusyChange={setGroupBusy}
+              onChanged={(next, groupId) => {
+                setSelectedGroupId(groupId);
+                acceptSnapshot(next, null);
+              }}
+            />
+          )}
         </div>
         <div className="entry-column">
-          <button
-            type="button"
-            disabled={props.disabled}
-            onClick={() => {
-              setCreating(true);
-            }}
-          >
-            New entry
-          </button>
+          {props.readOnly === true ? null : (
+            <button
+              type="button"
+              disabled={props.disabled}
+              onClick={() => {
+                setCreating(true);
+              }}
+            >
+              New entry
+            </button>
+          )}
           <EntryList
             group={selectedGroup}
             entries={entries}
@@ -158,7 +163,9 @@ export function MobileVaultBrowser(props: Props) {
         </div>
         {detail === null ? (
           <section className="detail-pane detail-empty">
-            Select an entry to inspect or edit it.
+            {props.readOnly === true
+              ? "Select an entry to inspect it."
+              : "Select an entry to inspect or edit it."}
           </section>
         ) : (
           <MobileEntryDetail
@@ -167,6 +174,7 @@ export function MobileVaultBrowser(props: Props) {
             detail={detail}
             groups={props.snapshot.groups}
             disabled={props.disabled}
+            readOnly={props.readOnly === true}
             onDraftChange={setDetailDraft}
             onBusyChange={setDetailBusy}
             onSnapshot={acceptSnapshot}
@@ -179,7 +187,7 @@ export function MobileVaultBrowser(props: Props) {
             }}
           />
         )}
-        {creating && !props.disabled ? (
+        {creating && !props.disabled && props.readOnly !== true ? (
           <EntryCreateDialog
             api={props.api}
             groupId={selectedGroup.id}

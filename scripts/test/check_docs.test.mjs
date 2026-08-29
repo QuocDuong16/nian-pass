@@ -18,7 +18,7 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M5.3 — Android Credential Provider + Autofill + Keystore\nRead-only providers have editing and Save disabled. " +
+    "M5.4 — iOS Password AutoFill + Keychain — BLOCKED\nRead-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
@@ -40,7 +40,10 @@ function fixture(t) {
       "Android Keystore encrypts the source bookmark with no master password and no derived key. " +
       "A populated origin failure is unavailable; isOriginPopulated() then getOrigin(privilegedAllowlist). " +
       "retrieveBeginGetCredentialRequest() and retrieveProviderGetCredentialRequest() rebuild authority after process restart. " +
-      "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n",
+      "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n" +
+      "UIDocumentPickerViewController uses NSFileCoordinator before an encrypted App Group mirror. " +
+      "Host-only access group stores the bookmark; Keychain NEVER stores a master password. " +
+      "np_ios_open_vault uses explicit FFI ownership and panic containment.\n",
   );
   write(
     root,
@@ -50,7 +53,8 @@ function fixture(t) {
       "iOS is not initialized or built on Linux; validation requires macOS with Xcode. " +
       "A fake Android application, changed signing key, unverified web target, and replayed request token fail closed. " +
       "A browser confused deputy, process death, stale PendingIntent, and singleTop stale intent fail closed. " +
-      "setUserAuthenticationRequired(false) protects metadata with no master password.\n",
+      "setUserAuthenticationRequired(false) protects metadata with no master password.\n" +
+      "The extension is a separate short-lived process. Mirror size and SHA-256 reject tampering before identity release.\n",
   );
   write(
     root,
@@ -64,7 +68,8 @@ function fixture(t) {
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
       "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
-      "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n",
+      "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
+      "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");

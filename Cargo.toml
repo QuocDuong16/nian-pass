@@ -2,6 +2,8 @@
 members = [
     "apps/cli",
     "apps/desktop/src-tauri",
+    "crates/credential-provider-core",
+    "crates/ios-credential-ffi",
     "crates/kdbx",
     "crates/vault-core",
     "crates/vault-session",
@@ -28,6 +30,7 @@ url = "=2.5.8"
 uuid = "=1.24.1"
 vault-core = { path = "crates/vault-core" }
 zeroize = "=1.9.0"
+credential-provider-core = { path = "crates/credential-provider-core" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

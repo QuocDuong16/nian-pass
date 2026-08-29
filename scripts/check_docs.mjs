@@ -32,7 +32,7 @@ export function runChecks(root) {
   const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
   const makefile = readRequired(root, "Makefile", violations);
 
-  requirePattern(violations, "README.md", readme, /M5\.3\s*[—-]\s*Android Credential Provider \+ Autofill \+ Keystore/, "current milestone must be M5.3");
+  requirePattern(violations, "README.md", readme, /M5\.4\s*[—-]\s*iOS Password AutoFill \+ Keychain\s*[—-]\s*BLOCKED/, "current milestone must report M5.4 blocked");
   requirePattern(violations, "README.md", readme, /read-only providers[\s\S]{0,160}(?:editing|Save) disabled/i, "M5.2 read-only provider boundary is missing");
   requirePattern(violations, "README.md", readme, /AtomicFile[\s\S]{0,300}save_uncertain[\s\S]{0,160}recovery_required/i, "M5.2 recovery and uncertainty boundary is missing");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
@@ -71,6 +71,11 @@ export function runChecks(root) {
   requirePattern(violations, "docs/architecture.md", architecture, /retrieveBeginGetCredentialRequest\(\)[\s\S]{0,220}retrieveProviderGetCredentialRequest\(\)[\s\S]{0,500}process restart/i, "M5.3 framework request reconstruction is missing");
   requirePattern(violations, "docs/architecture.md", architecture, /READ-only SAF flag[\s\S]{0,1000}READ=yes[\s\S]{0,80}WRITE=no/i, "M5.3 READ-only remembered grant policy is missing");
   requirePattern(violations, "docs/threat-model.md", threatModel, /confused deputy[\s\S]{0,600}process death[\s\S]{0,500}PendingIntent[\s\S]{0,500}singleTop/i, "M5.3 origin and process-death threats are missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /UIDocumentPickerViewController[\s\S]{0,500}NSFileCoordinator[\s\S]{0,800}encrypted App Group mirror/i, "M5.4 iOS host and mirror boundary is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /Host-only access group[\s\S]{0,500}Keychain NEVER[\s\S]{0,160}master password/i, "M5.4 Keychain separation is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /np_ios_open_vault[\s\S]{0,900}panic/i, "M5.4 FFI ownership and panic boundary is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /separate short-lived process[\s\S]{0,1800}size[\s\S]{0,120}SHA-256[\s\S]{0,1800}identity/i, "M5.4 extension, mirror, and identity threats are missing");
+  requirePattern(violations, "docs/quality.md", quality, /mobile-ios-tools-check[\s\S]{0,700}mobile-ios-check[\s\S]{0,700}embedded `?\.appex/i, "M5.4 macOS build gate policy is missing");
 
   const qualityRequirements = [
     [/ratchet/i, "coverage ratchet policy is missing"],

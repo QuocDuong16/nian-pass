@@ -60,6 +60,7 @@ fn committed_mobile_contract_matches_rust_serialization() {
     };
     let errors = [
         MobileError::PickerFailed,
+        MobileError::SourceUnavailable,
         MobileError::NoVaultSelected,
         MobileError::UnlockFailed,
         MobileError::UnsupportedVault,
@@ -80,6 +81,8 @@ fn committed_mobile_contract_matches_rust_serialization() {
         MobileError::ReloadFailed,
         MobileError::ReloadAuthenticationFailed,
         MobileError::AutofillUnavailable,
+        MobileError::AutofillNotConfigured,
+        MobileError::AutofillRefreshFailed,
         MobileError::CredentialUnavailable,
         MobileError::Internal,
     ]

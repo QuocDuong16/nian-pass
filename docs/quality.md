@@ -212,7 +212,8 @@ capability, CSP, and regression-test review.
 
 M5.2 does not expand the WebView capability or external plugin dependency
 allowlist. The first-party Android source plugin is called only from semantic
-Rust commands; React never sees its namespace. iOS remains passive.
+Rust commands; React never sees its namespace. M5.4 adds a semantic iOS Rust
+adapter contract but does not grant its plugin namespace to React.
 Production CSP tokens remain unchanged.
 
 ## IPC and OpenWiki
@@ -259,6 +260,35 @@ plugin are not confused with the separate `tauri-android` library tests. These
 headless checks do not prove arbitrary third-party DocumentsProvider durability,
 cloud behavior, or fsync guarantees. Device/provider smoke remains optional and
 must be reported separately.
+
+M5.4 adds `credential-provider-core` and `ios-credential-ffi` to the ordinary
+Linux Rust workspace gates. Tests cover exact iOS domain/URL matching,
+lookalike rejection, protected identity metadata omission, secret-free
+candidate/identity JSON, wrong password, generation tampering before parse,
+final stable-entry revalidation, stale-handle replay, explicit close/free, path
+confinement, malformed null/length shapes, and panic containment. Android tests
+remain the regression authority for exact `AndroidApp`, canonical web matching,
+stale entry rejection, and Autofill/Lock serialization after the shared-core
+extraction. Frontend tests prove iOS mounts the mobile unlock/browse flow without
+Android request probing and renders no Save/CRUD actions.
+
+`mobile-ios-tools-check` is intentionally macOS-only. It requires Xcode,
+selected iPhone device/simulator SDKs, pinned Tauri CLI, the iOS device and
+Apple-silicon simulator Rust targets, and CocoaPods only when the official
+generated graph uses a Podfile. `mobile-ios-check` additionally runs the
+deterministic Apple source ratchet, builds through the pinned Tauri CLI, requires
+one embedded `.appex`, and inspects signed host/extension entitlements for the
+AutoFill provider capability, the same App Group, shared Keychain access, and
+password-only extension capabilities. It is excluded from Linux
+`quality-check`; a Linux failure to run it is a required BLOCKED verdict, not a
+substitute PASS.
+
+The workspace keeps `unsafe_code = forbid` globally. Only
+`crates/ios-credential-ffi` opts into unsafe code, with
+`unsafe_op_in_unsafe_fn = deny`; raw operations are restricted to the exact
+`src/ffi.rs` pointer/allocator boundary. Business matching, KDBX parsing,
+session registry, generation hashing, and JSON projection remain safe Rust.
+Architecture policy must never broaden this exception by wildcard.
 
 M4.3 extends that fixture only with secret-free `dirty`, creation receipts, and
 close-policy samples. Password, notes, and custom-field request plaintext is

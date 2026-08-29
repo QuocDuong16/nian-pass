@@ -34,6 +34,32 @@ test("Android selection displays only the reviewed filename", async () => {
   expect(screen.queryByText(/\/data\/user/i)).not.toBeInTheDocument();
 });
 
+test("iOS unlock mounts a strict read-only browse and never probes Android requests", async () => {
+  const api = createMobileApi({
+    selectVault: vi.fn().mockResolvedValue({
+      fileName: "ios-fixture.kdbx",
+      writable: false,
+    }),
+  });
+  render(<MobileVaultApp api={api} platform="ios" />);
+  fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
+  fireEvent.change(await screen.findByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  expect(await screen.findByText(/iOS · Read only/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /Synthetic account/ }));
+  expect(await screen.findByText(/Account type · unprotected/)).toBeVisible();
+  for (const action of ["Save", "Edit entry", "New entry", "New group"]) {
+    expect(
+      screen.queryByRole("button", { name: new RegExp(action, "i") }),
+    ).not.toBeInTheDocument();
+  }
+  expect(api.getAutofillRequest).not.toHaveBeenCalled();
+  expect(api.updateEntry).not.toHaveBeenCalled();
+  expect(api.saveVault).not.toHaveBeenCalled();
+});
+
 test("picker failure remains a generic presentation error", async () => {
   render(
     <MobileVaultApp

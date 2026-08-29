@@ -150,11 +150,11 @@ test("password reveal is explicit, loading-safe, and times out from state", asyn
 test("Hide removes password immediately and cancels its timer", async () => {
   const revealPassword = vi.fn().mockResolvedValue(PASSWORD);
   await renderReady(api({ revealEntryPassword: revealPassword }));
-  vi.useFakeTimers();
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
-  await act(async () => {
-    await revealPassword.mock.results[0]?.value;
-  });
+  expect(
+    await screen.findByText(PASSWORD, {}, { timeout: 5_000 }),
+  ).toBeVisible();
+  vi.useFakeTimers();
   fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
   expect(screen.queryByText(PASSWORD)).not.toBeInTheDocument();
   act(() => {
@@ -197,7 +197,9 @@ test("an already revealed password clears when entry selection changes", async (
   const desktop = api();
   const { rerender } = await renderReady(desktop, "entry-a");
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
-  expect(await screen.findByText(PASSWORD)).toBeVisible();
+  expect(
+    await screen.findByText(PASSWORD, {}, { timeout: 5_000 }),
+  ).toBeVisible();
   rerender(
     <EntryDetail
       api={desktop}
@@ -217,18 +219,19 @@ test("an already revealed password clears when entry selection changes", async (
 test("notes require reveal, preserve line breaks, hide, and time out", async () => {
   const revealNotes = vi.fn().mockResolvedValue(NOTES);
   await renderReady(api({ revealEntryNotes: revealNotes }));
-  vi.useFakeTimers();
   fireEvent.click(screen.getByRole("button", { name: "Reveal notes" }));
-  await act(async () => {
-    await revealNotes.mock.results[0]?.value;
-  });
-  expect(screen.getByText(/test-secret-notes-M4\.2/).textContent).toBe(NOTES);
+  expect(
+    (await screen.findByText(/test-secret-notes-M4\.2/, {}, { timeout: 5_000 }))
+      .textContent,
+  ).toBe(NOTES);
   fireEvent.click(screen.getByRole("button", { name: "Hide notes" }));
   expect(screen.queryByText(/test-secret-notes-M4\.2/)).not.toBeInTheDocument();
 
+  vi.useFakeTimers();
   fireEvent.click(screen.getByRole("button", { name: "Reveal notes" }));
   await act(async () => {
     await revealNotes.mock.results[1]?.value;
+    await Promise.resolve();
   });
   act(() => {
     vi.advanceTimersByTime(SECRET_REVEAL_MS + 1);
@@ -247,13 +250,12 @@ test("blur and hidden visibility clear both revealed secrets", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
   fireEvent.click(screen.getByRole("button", { name: "Reveal notes" }));
-  await act(async () => {
-    await Promise.all([
-      revealPassword.mock.results[0]?.value,
-      revealNotes.mock.results[0]?.value,
-    ]);
-  });
-  expect(screen.getByText(PASSWORD)).toBeVisible();
+  expect(
+    await screen.findByText(PASSWORD, {}, { timeout: 5_000 }),
+  ).toBeVisible();
+  expect(
+    await screen.findByText(/test-secret-notes-M4\.2/, {}, { timeout: 5_000 }),
+  ).toBeVisible();
   act(() => {
     window.dispatchEvent(new Event("blur"));
   });
@@ -261,9 +263,9 @@ test("blur and hidden visibility clear both revealed secrets", async () => {
   expect(screen.queryByText(/test-secret-notes-M4\.2/)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
-  await act(async () => {
-    await revealPassword.mock.results[1]?.value;
-  });
+  expect(
+    await screen.findByText(PASSWORD, {}, { timeout: 5_000 }),
+  ).toBeVisible();
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     value: "hidden",

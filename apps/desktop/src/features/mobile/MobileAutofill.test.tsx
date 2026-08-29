@@ -48,7 +48,7 @@ function credentialApi(overrides: Partial<MobileApi> = {}) {
 }
 
 async function unlockCredentialRequest(api = credentialApi()) {
-  render(<MobileVaultApp api={api} />);
+  render(<MobileVaultApp api={api} platform="android" />);
   expect(await screen.findByText("fixture.kdbx")).toBeVisible();
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: "attempt-only" },
@@ -118,7 +118,7 @@ test("an already-unlocked Rust session serves the credential route without anoth
       selectedVault: null,
     }),
   });
-  render(<MobileVaultApp api={api} />);
+  render(<MobileVaultApp api={api} platform="android" />);
   expect(await screen.findByText("Fill credentials for:")).toBeVisible();
   expect(api.getVaultSnapshot).toHaveBeenCalledOnce();
   expect(api.unlockVault).not.toHaveBeenCalled();
@@ -126,7 +126,7 @@ test("an already-unlocked Rust session serves the credential route without anoth
 
 test("Autofill source settings explicitly enable, disable, and open Android setup", async () => {
   const api = createMobileApi();
-  render(<MobileAutofillSettings api={api} />);
+  render(<MobileAutofillSettings api={api} platform="android" />);
   const enable = await screen.findByRole("button", {
     name: "Enable Autofill for this vault",
   });
@@ -145,11 +145,53 @@ test("Autofill source settings explicitly enable, disable, and open Android setu
   expect(api.openAutofillSettings).toHaveBeenCalledOnce();
 });
 
+test("iOS Password AutoFill refreshes only an enabled encrypted mirror", async () => {
+  const enabled = {
+    supported: true,
+    sourceEnabled: true,
+    providerSelected: false,
+  };
+  const api = createMobileApi({
+    getAutofillStatus: vi.fn().mockResolvedValue(enabled),
+    refreshAutofill: vi.fn().mockResolvedValue(enabled),
+  });
+  render(<MobileAutofillSettings api={api} platform="ios" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Refresh encrypted mirror" }),
+  );
+  await waitFor(() => {
+    expect(api.refreshAutofill).toHaveBeenCalledOnce();
+  });
+  expect(
+    screen.getByRole("button", { name: "Open iOS AutoFill settings" }),
+  ).toBeVisible();
+});
+
+test("iOS mirror refresh failures remain generic", async () => {
+  const api = createMobileApi({
+    getAutofillStatus: vi.fn().mockResolvedValue({
+      supported: true,
+      sourceEnabled: true,
+      providerSelected: true,
+    }),
+    refreshAutofill: vi.fn().mockRejectedValue(new Error("private-path")),
+  });
+  render(<MobileAutofillSettings api={api} platform="ios" />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Refresh encrypted mirror" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Nian Pass could not refresh the encrypted AutoFill mirror.",
+  );
+});
+
 test("Autofill settings failures stay generic", async () => {
   const api = createMobileApi({
     getAutofillStatus: vi.fn().mockRejectedValue(new Error("source-uri")),
   });
-  const { unmount } = render(<MobileAutofillSettings api={api} />);
+  const { unmount } = render(
+    <MobileAutofillSettings api={api} platform="android" />,
+  );
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Autofill status is unavailable.",
   );
@@ -158,7 +200,7 @@ test("Autofill settings failures stay generic", async () => {
   const failingEnable = createMobileApi({
     enableAutofill: vi.fn().mockRejectedValue(new Error("keystore")),
   });
-  render(<MobileAutofillSettings api={failingEnable} />);
+  render(<MobileAutofillSettings api={failingEnable} platform="android" />);
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Enable Autofill for this vault",

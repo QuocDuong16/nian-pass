@@ -9,6 +9,7 @@ import {
   changedFiles,
   changedLineNumbers,
   evaluateChangedLines,
+  isExcluded,
   parseArgs,
   parseChangedLines,
   parseLcov,
@@ -51,6 +52,11 @@ test("arguments require a bounded threshold and source extensions", () => {
     () => parseArgs(["--file", "x", "--threshold", "101", "--path", "apps", "--extension", "rs"]),
     /between 0 and 100/,
   );
+});
+
+test("Rust path modules dedicated to tests are excluded from production coverage", () => {
+  assert.equal(isExcluded("crates/ffi/src/ffi_tests.rs"), true);
+  assert.equal(isExcluded("crates/ffi/src/ffi.rs"), false);
 });
 
 test("LCOV records and changed-line percentages are parsed exactly", (t) => {
@@ -105,6 +111,8 @@ test("Rust host coverage excludes whole target-only files and declaration module
   const root = temporary(t, {
     "crates/core/src/android.rs":
       "#![cfg(target_os = \"android\")]\npub fn native_only() {}\n",
+    "crates/core/src/mobile_state.rs":
+      "#![cfg(any(target_os = \"android\", target_os = \"ios\"))]\npub fn mobile_only() {}\n",
     "crates/core/src/mobile.rs": "mod android;\npub use android::Bridge;\n",
   });
   assert.deepEqual(
@@ -113,6 +121,14 @@ test("Rust host coverage excludes whole target-only files and declaration module
   );
   assert.deepEqual(
     [...rustProductionLines("crates/core/src/android.rs", new Set([1, 2]), root, "android")],
+    [1, 2],
+  );
+  assert.deepEqual(
+    [...rustProductionLines("crates/core/src/mobile_state.rs", new Set([1, 2]), root, "linux")],
+    [],
+  );
+  assert.deepEqual(
+    [...rustProductionLines("crates/core/src/mobile_state.rs", new Set([1, 2]), root, "ios")],
     [1, 2],
   );
   assert.deepEqual(

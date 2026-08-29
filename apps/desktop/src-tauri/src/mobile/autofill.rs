@@ -1,14 +1,12 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
+use credential_provider_core::{CredentialTarget, ProviderError};
 use serde::{Deserialize, Serialize};
-use url::{Host, Url};
-use vault_core::{EntryId, EntrySummary, Group, SecretString};
+use vault_core::SecretString;
 
 use crate::dto::SummaryTextDto;
 
 use super::{MobileError, session::MobileVaultSession};
-
-const ANDROID_APP_FIELD: &str = "AndroidApp";
 
 /// Android target data validated by the native request boundary. Signing
 /// identities deliberately have no WebView-facing serialization path.
@@ -51,6 +49,14 @@ impl AndroidCredentialTarget {
             Self::App { package_name, .. } => package_name.clone(),
             Self::Web { web_domain, .. } => web_domain.clone(),
         }
+    }
+
+    fn provider_target(&self) -> Result<CredentialTarget, MobileError> {
+        match self {
+            Self::App { package_name, .. } => CredentialTarget::android_app(package_name.clone()),
+            Self::Web { web_domain, .. } => CredentialTarget::web_domain(web_domain),
+        }
+        .map_err(map_provider_error)
     }
 }
 
@@ -149,11 +155,14 @@ impl NativeAutofillRequest {
             },
             NativeTargetKind::Web => AndroidCredentialTarget::Web {
                 package_name: self.package_name,
-                web_domain: canonical_domain(
+                web_domain: CredentialTarget::web_domain(
                     self.web_domain
                         .as_deref()
                         .ok_or(MobileError::InvalidRequest)?,
-                )?,
+                )
+                .map_err(|_| MobileError::InvalidRequest)?
+                .display()
+                .to_owned(),
                 browser_signing_identity: self.signing_identity,
             },
             NativeTargetKind::App => return Err(MobileError::InvalidRequest),
@@ -188,24 +197,17 @@ impl MobileVaultSession {
         &self,
         target: &AndroidCredentialTarget,
     ) -> Result<Vec<AutofillCandidateDto>, MobileError> {
-        let projection = self
-            .document
-            .projection()
-            .map_err(|_| MobileError::Internal)?;
-        let mut candidates = Vec::new();
-        let mut entries = Vec::new();
-        collect_entries(projection.root(), &mut entries);
-        for entry in entries {
-            let id = entry.id();
-            if self.entry_matches_target(id, target)? {
-                candidates.push(AutofillCandidateDto {
-                    entry_id: id.as_str().to_owned(),
-                    title: entry.title().into(),
-                    username: entry.username().into(),
-                });
-            }
-        }
-        Ok(candidates)
+        credential_provider_core::candidates(&self.document, &target.provider_target()?)
+            .map_err(map_provider_error)?
+            .into_iter()
+            .map(|candidate| {
+                Ok(AutofillCandidateDto {
+                    entry_id: candidate.entry_id().to_owned(),
+                    title: candidate.title().into(),
+                    username: candidate.username().into(),
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn prepare_autofill_secret(
@@ -215,30 +217,13 @@ impl MobileVaultSession {
         entry_id: &str,
         target: &AndroidCredentialTarget,
     ) -> Result<PreparedAutofillFulfillment, MobileError> {
-        super::mutations::require_id(entry_id)?;
-        let id = EntryId::new(entry_id);
-        if self
-            .document
-            .projection()
-            .map_err(|_| MobileError::CredentialUnavailable)?
-            .find_entry(&id)
-            .is_none()
-        {
-            return Err(MobileError::CredentialUnavailable);
-        }
-        if !self.entry_matches_target(&id, target)? {
-            return Err(MobileError::CredentialUnavailable);
-        }
-        let username = self
-            .document
-            .entry_username(&id)
-            .map_err(|_| MobileError::CredentialUnavailable)?
-            .ok_or(MobileError::CredentialUnavailable)?;
-        let password = self
-            .document
-            .entry_password(&id)
-            .map_err(|_| MobileError::CredentialUnavailable)?
-            .ok_or(MobileError::CredentialUnavailable)?;
+        let credential = credential_provider_core::credential(
+            &self.document,
+            entry_id,
+            &target.provider_target()?,
+        )
+        .map_err(map_provider_error)?;
+        let (username, password) = credential.into_secrets();
         Ok(PreparedAutofillFulfillment {
             operation,
             request_token,
@@ -247,61 +232,21 @@ impl MobileVaultSession {
             password,
         })
     }
-
-    fn entry_matches_target(
-        &self,
-        id: &EntryId,
-        target: &AndroidCredentialTarget,
-    ) -> Result<bool, MobileError> {
-        match target {
-            AndroidCredentialTarget::App { package_name, .. } => self
-                .document
-                .entry_custom_field(id, ANDROID_APP_FIELD)
-                .map_err(|_| MobileError::Internal)
-                .map(|value| value.is_some_and(|value| value.expose_secret() == package_name)),
-            AndroidCredentialTarget::Web { web_domain, .. } => self
-                .document
-                .entry_url(id)
-                .map_err(|_| MobileError::Internal)
-                .map(|value| {
-                    value.is_some_and(|value| {
-                        canonical_url_host(value.expose_secret()).as_deref() == Some(web_domain)
-                    })
-                }),
-        }
-    }
 }
 
-fn collect_entries<'a>(group: &'a Group, entries: &mut Vec<&'a EntrySummary>) {
-    entries.extend(group.entries());
-    for child in group.groups() {
-        collect_entries(child, entries);
+fn map_provider_error(error: ProviderError) -> MobileError {
+    match error {
+        ProviderError::InvalidTarget => MobileError::InvalidRequest,
+        ProviderError::CredentialUnavailable => MobileError::CredentialUnavailable,
+        ProviderError::Internal => MobileError::Internal,
     }
-}
-
-fn canonical_url_host(value: &str) -> Option<String> {
-    let parsed = Url::parse(value).ok()?;
-    match parsed.host()? {
-        Host::Domain(domain) => Some(domain.trim_end_matches('.').to_ascii_lowercase()),
-        Host::Ipv4(address) => Some(address.to_string()),
-        Host::Ipv6(address) => Some(address.to_string()),
-    }
-}
-
-fn canonical_domain(value: &str) -> Result<String, MobileError> {
-    if value.contains('/') || value.contains('@') || value.contains(':') {
-        return Err(MobileError::InvalidRequest);
-    }
-    let parsed =
-        Url::parse(&format!("https://{value}")).map_err(|_| MobileError::InvalidRequest)?;
-    canonical_url_host(parsed.as_str()).ok_or(MobileError::InvalidRequest)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         AndroidCredentialTarget, AutofillRequestKindDto, NativeAutofillRequest, NativeRequestKind,
-        NativeTargetKind, canonical_domain, canonical_url_host,
+        NativeTargetKind,
     };
     use crate::mobile::MobileError;
 
@@ -403,44 +348,5 @@ mod tests {
             .into_parts(),
             Err(MobileError::InvalidRequest)
         ));
-    }
-
-    #[test]
-    fn canonical_host_matching_never_uses_substring_equivalence() {
-        assert_eq!(
-            canonical_domain("EXAMPLE.com."),
-            Ok("example.com".to_owned())
-        );
-        assert_eq!(
-            canonical_url_host("https://example.com/login").as_deref(),
-            Some("example.com")
-        );
-        assert_eq!(
-            canonical_url_host("https://evil-example.com/").as_deref(),
-            Some("evil-example.com")
-        );
-        assert_ne!(
-            canonical_url_host("https://evil-example.com/"),
-            canonical_url_host("https://example.com/")
-        );
-    }
-
-    #[test]
-    fn exact_host_policy_is_deterministic_for_subdomains_and_malformed_urls() {
-        assert_ne!(
-            canonical_url_host("https://login.example.com/"),
-            canonical_url_host("https://example.com/")
-        );
-        assert_eq!(canonical_url_host("not a url"), None);
-        assert!(canonical_domain("user@example.com").is_err());
-        assert!(canonical_domain("example.com/path").is_err());
-        assert_eq!(
-            canonical_url_host("https://127.0.0.1/login").as_deref(),
-            Some("127.0.0.1")
-        );
-        assert_eq!(
-            canonical_url_host("https://[::1]/login").as_deref(),
-            Some("::1")
-        );
     }
 }

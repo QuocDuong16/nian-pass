@@ -102,7 +102,8 @@ export function runChecks(root, budget) {
     if (
       name !== "apps/desktop/src-tauri/src/commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/commands.rs" &&
-      name !== "apps/desktop/src-tauri/src/mobile/autofill_commands.rs"
+      name !== "apps/desktop/src-tauri/src/mobile/autofill_commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/mobile/ios_commands.rs"
     ) {
       checkPattern(
         violations,
@@ -129,7 +130,12 @@ export function runChecks(root, budget) {
     ["apps/cli/Cargo.toml", new Set(["kdbx", "vault-core"])],
     [
       "apps/desktop/src-tauri/Cargo.toml",
-      new Set(["kdbx", "vault-core", "vault-session"]),
+      new Set(["credential-provider-core", "kdbx", "vault-core", "vault-session"]),
+    ],
+    ["crates/credential-provider-core/Cargo.toml", new Set(["kdbx", "vault-core"])],
+    [
+      "crates/ios-credential-ffi/Cargo.toml",
+      new Set(["credential-provider-core", "kdbx", "vault-core"]),
     ],
     ["crates/kdbx/Cargo.toml", new Set(["vault-core"])],
     ["crates/vault-core/Cargo.toml", new Set()],
@@ -138,12 +144,42 @@ export function runChecks(root, budget) {
   ];
   const workspaceCrates = new Set([
     "kdbx",
+    "credential-provider-core",
+    "ios-credential-ffi",
     "vault-core",
     "vault-session",
     "vault-sync",
     "nian-pass-desktop",
     "nian-pass-cli",
   ]);
+
+  const rootManifest = readFileSync(resolve(root, "Cargo.toml"), "utf8");
+  const ffiManifest = readFileSync(
+    resolve(root, "crates/ios-credential-ffi/Cargo.toml"),
+    "utf8",
+  );
+  if (!/unsafe_code\s*=\s*"forbid"/.test(rootManifest)) {
+    violations.push("Cargo.toml: workspace unsafe_code must remain forbid");
+  }
+  if (
+    !/unsafe_code\s*=\s*"allow"/.test(ffiManifest) ||
+    !/unsafe_op_in_unsafe_fn\s*=\s*"deny"/.test(ffiManifest)
+  ) {
+    violations.push("ios-credential-ffi must isolate and deny implicit unsafe operations");
+  }
+  for (const path of rustFiles) {
+    const source = readRustProduction(path);
+    const name = projectPath(root, path);
+    if (name === "crates/ios-credential-ffi/src/ffi.rs") continue;
+    checkPattern(
+      violations,
+      root,
+      path,
+      source,
+      /\bunsafe\s*(?:\{|fn\b|extern\b)/g,
+      "unsafe Rust is confined to crates/ios-credential-ffi/src/ffi.rs",
+    );
+  }
   const tauriForbidden = /^(?:tauri|tauri-plugin-)/;
   const syncNetworkDependencies = new Set([
     "reqwest",

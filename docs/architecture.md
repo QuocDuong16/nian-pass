@@ -783,6 +783,95 @@ throttled, and endpoint malware can inspect an unlocked process. M4.5 adds no
 native screenshot FFI, plugin, capability, filesystem access, credential cache,
 browser storage, autosave, force-lock, or dirty-discard shortcut.
 
+## M5.4 iOS host, mirror, and extension boundary
+
+M5.4 treats the iOS host and AutoFill Credential Provider as separate
+processes and sandboxes. It does not attempt to serialize or share the host's
+decrypted Rust session:
+
+```text
+External KDBX
+  -> UIDocumentPickerViewController in the host
+  -> startAccessingSecurityScopedResource
+  -> NSFileCoordinator coordinated encrypted read
+  -> app-private encrypted staging
+  -> shared MobileVaultService / MobileVaultSession
+  -> read-only secret-free React browse
+
+Explicit Enable Password AutoFill
+  -> host-only security-scoped bookmark
+  -> candidate encrypted App Group mirror
+  -> full size + SHA-256 verification
+  -> atomic mirror replacement
+  -> shared Keychain generation/config
+  -> ASCredentialIdentityStore metadata
+
+AuthenticationServices request in a separate extension process
+  -> ASCredentialProviderViewController native UIKit unlock UI
+  -> verified encrypted App Group mirror
+  -> narrow ios-credential-ffi C ABI
+  -> credential-provider-core + KdbxDocument
+  -> stable entry and exact service revalidation
+  -> ASPasswordCredential
+```
+
+Swift is an OS adapter only. It owns the document picker, balanced security
+scope, `NSFileCoordinator`, App Group candidate/atomic file operations,
+Keychain, `ASCredentialIdentityStore`, settings navigation, and
+AuthenticationServices completion. It does not parse Argon2, AES, KDBX XML, or
+vault entries. React calls semantic Rust commands and receives only the display
+filename; it never receives a URL, bookmark, absolute/App Group path, or native
+framework object. The iOS command whitelist contains runtime info, select,
+unlock, snapshot, secret-free entry detail, Lock, AutoFill status,
+enable/disable/refresh, and settings. Save, reload, reveals, mutations, and
+discard-lock are not registered on iOS; Android's M5.2/M5.3 surface is unchanged.
+
+`credential-provider-core` is the one platform-neutral matching and final-read
+policy. Android delegates its existing exact protected `AndroidApp` association
+and exact canonical web-host behavior to this crate. The iOS FFI delegates URL
+and domain service matching, secret-free candidates, password identities, stale
+entry rejection, and final username/password read to the same crate.
+
+The App Group contains only the rebuildable, read-only KDBX ciphertext mirror.
+It contains no decrypted XML/JSON, plaintext identity index, credential cache,
+session dump, external URL, or bookmark. The original document remains the
+source of truth. The extension validates the expected encrypted size and
+SHA-256 before parser invocation and never writes the mirror. A corrupt or
+mismatched mirror is unavailable and may be deleted/rebuilt by the host; it
+does not need the M5.2 external-source rollback journal.
+
+Keychain separation is strict:
+
+```text
+Host-only access group -> versioned security-scoped external bookmark
+Shared host+extension access group -> version, enabled state, fixed mirror name,
+                                      generation size/SHA-256, optional display data
+Keychain NEVER -> master password, KDBX composite/derived key, entry password
+```
+
+Shared configuration uses `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and
+`kSecAttrSynchronizable=false`. The extension has no entitlement to the
+host-only bookmark group and never resolves the external document. The system
+identity store intentionally contains limited privacy-sensitive username,
+domain, and stable record-identifier metadata, but no password. Suggestions are
+hints only; final fulfillment opens the verified current mirror and revalidates
+record identity and service in Rust.
+
+The C ABI exports `np_ios_open_vault`, `np_ios_copy_candidates_json`,
+`np_ios_copy_identities_json`, `np_ios_copy_credential`, `np_ios_close_vault`,
+`np_ios_free_buffer`, and `np_ios_free_secret_result`. Raw pointers and foreign
+allocation reconstruction are isolated in `crates/ios-credential-ffi/src/ffi.rs`.
+Every export contains panics as a generic status; pointer/length/null checks are
+bounded, no business logic lives in unsafe blocks, and credential buffers are
+explicitly zeroized and freed. An opaque random handle owns one extension-local
+`KdbxDocument` plus mirror generation and becomes invalid immediately on close.
+
+The Apple generated project and Swift implementation are not present in the
+current Linux checkout. This section defines and documents the implemented Rust
+and frontend contracts, not proof that iOS built or system AutoFill ran. M5.4
+remains blocked until macOS/Xcode builds the real host and embedded extension,
+inspects entitlements, and completes the synthetic system smoke.
+
 ## Architecture Invariants
 
 1. **KDBX is the source of truth.**

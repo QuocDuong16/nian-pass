@@ -1,4 +1,4 @@
-#![cfg(target_os = "android")]
+#![cfg(any(target_os = "android", target_os = "ios"))]
 
 use std::sync::{Arc, Mutex};
 

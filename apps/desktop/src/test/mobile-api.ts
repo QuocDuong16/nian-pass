@@ -97,6 +97,11 @@ export function createMobileApi(overrides: Partial<MobileApi> = {}): MobileApi {
       sourceEnabled: false,
       providerSelected: false,
     }),
+    refreshAutofill: vi.fn().mockResolvedValue({
+      supported: true,
+      sourceEnabled: true,
+      providerSelected: false,
+    }),
     getAutofillRequest: vi.fn().mockResolvedValue(null),
     getAutofillCandidates: vi.fn().mockResolvedValue([]),
     publishAutofillCandidates: vi.fn().mockResolvedValue(undefined),

@@ -19,7 +19,22 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M5.3 — Android Credential Provider + Autofill + Keystore
+M5.4 — iOS Password AutoFill + Keychain — BLOCKED
+
+Linux-runnable M5.4 foundations are implemented: `credential-provider-core`
+owns the exact Android application/web and iOS service matching policy, Android
+M5.3 now consumes that same crate, and `ios-credential-ffi` provides a narrow
+panic-contained C ABI over the existing Rust `KdbxDocument`. The shared iOS UI
+contract is read-only and exposes select, unlock, secret-free browse/detail,
+Lock, and semantic Password AutoFill controls without registering Save or CRUD.
+
+M5.4 is not complete. The official Tauri Apple project does not exist in this
+Linux checkout and must be generated with `tauri ios init` on macOS. Therefore
+the real Swift `UIDocumentPickerViewController` adapter, coordinated
+security-scoped reads, App Group/Keychain implementation, Xcode Credential
+Provider target, entitlements, embedded extension, and system AutoFill smoke
+have not been built or validated. No iOS functionality is claimed from the
+Linux-only evidence.
 
 The Desktop MVP remains complete through M4.5 and the M5.2 Android CRUD/Save
 protocol remains unchanged. Android now adds password retrieval through a
@@ -53,9 +68,9 @@ drops the decrypted session. Cold Autofill rehydration is always read-only.
 
 Android still does not support biometric quick unlock, master-password or KDBX
 derived-key persistence, passkeys, TOTP autofill, external credential
-save/create, sync, or full M5.5 lifecycle hardening. iOS document access,
-persistence, and Password AutoFill remain unimplemented and are not claimed as
-tested from Linux.
+save/create, sync, or full M5.5 lifecycle hardening. M5.4 likewise does not add
+iOS CRUD/Save, biometric quick unlock, stored unlock material, passkeys, OTP,
+credential save/create, sync, or M5.5 lifecycle hardening.
 
 `apps/desktop` remains the historical path for the shared Tauri application
 host. Renaming it is deferred to a dedicated mechanical refactor. Desktop and
@@ -336,7 +351,34 @@ and run the equivalent authenticated-dataset flow. For security smoke, install
 the same package name with another signing certificate and confirm it is not
 silently trusted; an unverified web target must also show explicit confirmation.
 
-M5.4 — iOS Password AutoFill + Keychain is the next milestone and is not started.
+### M5.4 iOS Password AutoFill validation boundary
+
+The intended host boundary is:
+
+```text
+UIDocumentPickerViewController
+  -> balanced security-scoped access + NSFileCoordinator
+  -> app-private encrypted staging
+  -> Rust MobileVaultSession read-only unlock/browse
+  -> encrypted App Group mirror (size + SHA-256, candidate-before-swap)
+```
+
+The Credential Provider Extension is a separate process. It must read only the
+Nian Pass-owned encrypted mirror, request the real master password in native
+UIKit, and call the `ios-credential-ffi` static library. It never receives the
+host security-scoped bookmark or host decrypted session. The FFI verifies the
+configured mirror generation before KDBX parsing and revalidates the stable
+entry plus exact service before returning one username/password result.
+
+The future Swift implementation has two Keychain boundaries: a host-only item
+for the external security-scoped bookmark, and a host+extension shared item for
+only `version`, enabled state, fixed mirror relative name, generation size and
+SHA-256, plus optional display metadata. Both require
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and no synchronization. Keychain
+must contain NO master password, NO derived KDBX key, and NO entry password.
+`ASCredentialIdentityStore` intentionally receives limited username/domain and
+stable record-identifier metadata, never a password; all suggestions remain
+untrusted until final Rust revalidation.
 
 Explicit Save verifies the full encrypted baseline, password, private encrypted
 candidate, exact private backup, crash journal, final pre-write baseline,
@@ -345,9 +387,11 @@ narrowed but not claimed eliminated; any missing proof after destructive write
 is `save_uncertain`, and an unknown interrupted generation is
 `recovery_required` rather than guessed or overwritten.
 
-A future `make mobile-ios-check` will be a macOS-only gate after the official
-Tauri iOS project is generated with Xcode available. It must fail clearly on an
-unsupported host and is not part of Linux `quality-check`.
+`make mobile-ios-tools-check` and `make mobile-ios-check` are macOS-only gates.
+The latter requires the official generated Xcode graph, builds the actual host,
+requires one embedded Credential Provider extension, and inspects host/extension
+AutoFill, App Group, shared Keychain, and password-only capabilities. These
+gates fail clearly on Linux and are not part of Linux `quality-check`.
 
 ### Headless Linux desktop development
 

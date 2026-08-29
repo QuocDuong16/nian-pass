@@ -62,7 +62,7 @@ test("Android mounts the mobile vault app without desktop lifecycle", async () =
   expect(closePolicy).not.toHaveBeenCalled();
 });
 
-test("iOS remains passive and mounts neither Android picker nor desktop lifecycle", async () => {
+test("iOS mounts the read-only mobile vault flow without desktop lifecycle", async () => {
   const windowLifecycle = lifecycle();
   const mobile = createMobileApi();
   render(
@@ -74,9 +74,7 @@ test("iOS remains passive and mounts neither Android picker nor desktop lifecycl
   );
 
   expect(
-    await screen.findByText(
-      "iOS vault access is not implemented in this build.",
-    ),
+    await screen.findByRole("button", { name: "Open KDBX" }),
   ).toBeVisible();
   expect(windowLifecycle.onCloseRequested).not.toHaveBeenCalled();
   expect(mobile.selectVault).not.toHaveBeenCalled();

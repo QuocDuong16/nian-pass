@@ -21,6 +21,7 @@ import {
 
 const mobileErrorCodes = new Set<MobileErrorCode>([
   "picker_failed",
+  "source_unavailable",
   "no_vault_selected",
   "unlock_failed",
   "unsupported_vault",
@@ -41,6 +42,8 @@ const mobileErrorCodes = new Set<MobileErrorCode>([
   "reload_failed",
   "reload_authentication_failed",
   "autofill_unavailable",
+  "autofill_not_configured",
+  "autofill_refresh_failed",
   "credential_unavailable",
   "internal",
 ]);
@@ -175,6 +178,8 @@ export const mobileApi: MobileApi = {
     call("mobile_enable_autofill_for_vault", parseAutofillStatus),
   disableAutofill: () =>
     call("mobile_disable_autofill_for_vault", parseAutofillStatus),
+  refreshAutofill: () =>
+    call("mobile_refresh_ios_autofill_mirror", parseAutofillStatus),
   getAutofillRequest: () =>
     call("mobile_autofill_request", (value) =>
       value === null ? null : parseAutofillLaunch(value),

@@ -15,7 +15,6 @@ import {
 import type { RuntimeInfoDto } from "../types/runtime";
 import type { MobileApi } from "../types/mobile";
 import { mobileApi } from "../lib/mobile";
-import { MobileFoundationView } from "./MobileFoundationView";
 
 interface ApplicationRootProps {
   api?: DesktopApi;
@@ -64,7 +63,7 @@ export function ApplicationRoot({
     return <App api={api} windowLifecycle={windowLifecycle} />;
   }
   if (runtimeInfo.platform === "android") {
-    return <MobileVaultApp api={mobile} />;
+    return <MobileVaultApp api={mobile} platform="android" />;
   }
-  return <MobileFoundationView />;
+  return <MobileVaultApp api={mobile} platform="ios" />;
 }

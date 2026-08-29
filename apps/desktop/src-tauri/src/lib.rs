@@ -166,9 +166,32 @@ fn run_mobile() {
 #[cfg(target_os = "ios")]
 fn run_mobile() {
     use mobile::commands::runtime_info;
+    use mobile::ios_commands::{
+        mobile_autofill_status, mobile_disable_autofill_for_vault,
+        mobile_enable_autofill_for_vault, mobile_entry_detail, mobile_lock_vault,
+        mobile_open_autofill_settings, mobile_refresh_ios_autofill_mirror, mobile_select_vault,
+        mobile_unlock_vault, mobile_vault_snapshot,
+    };
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![runtime_info])
+        .plugin(mobile::source_ios::init())
+        .setup(|app| {
+            mobile::install_state(app);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            runtime_info,
+            mobile_select_vault,
+            mobile_unlock_vault,
+            mobile_vault_snapshot,
+            mobile_entry_detail,
+            mobile_lock_vault,
+            mobile_autofill_status,
+            mobile_enable_autofill_for_vault,
+            mobile_disable_autofill_for_vault,
+            mobile_refresh_ios_autofill_mirror,
+            mobile_open_autofill_settings
+        ])
         .run(tauri::generate_context!())
         .expect("Nian Pass iOS runtime failed");
 }

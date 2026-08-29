@@ -25,7 +25,7 @@ async function unlockDirty(overrides = {}) {
     unlockVault: vi.fn().mockResolvedValue(dirtySnapshot),
     ...overrides,
   });
-  render(<MobileVaultApp api={api} />);
+  render(<MobileVaultApp api={api} platform="android" />);
   fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
   await screen.findByText("fixture.kdbx");
   fireEvent.change(screen.getByLabelText("Master password"), {
@@ -38,7 +38,7 @@ async function unlockDirty(overrides = {}) {
 
 async function unlockClean(overrides = {}) {
   const api = createMobileApi(overrides);
-  render(<MobileVaultApp api={api} />);
+  render(<MobileVaultApp api={api} platform="android" />);
   fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
   await screen.findByText("fixture.kdbx");
   fireEvent.change(screen.getByLabelText("Master password"), {
@@ -207,7 +207,7 @@ test("read-only provider keeps browse but disables editing and Save", async () =
       .fn()
       .mockResolvedValue({ fileName: "readonly.kdbx", writable: false }),
   });
-  render(<MobileVaultApp api={api} />);
+  render(<MobileVaultApp api={api} platform="android" />);
   fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
   await screen.findByText("readonly.kdbx");
   fireEvent.change(screen.getByLabelText("Master password"), {

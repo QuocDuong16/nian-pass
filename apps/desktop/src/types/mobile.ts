@@ -18,6 +18,7 @@ export interface MobileSelectedVaultDto {
 
 export type MobileErrorCode =
   | "picker_failed"
+  | "source_unavailable"
   | "no_vault_selected"
   | "unlock_failed"
   | "unsupported_vault"
@@ -38,6 +39,8 @@ export type MobileErrorCode =
   | "reload_failed"
   | "reload_authentication_failed"
   | "autofill_unavailable"
+  | "autofill_not_configured"
+  | "autofill_refresh_failed"
   | "credential_unavailable"
   | "internal";
 
@@ -107,6 +110,7 @@ export interface MobileApi {
   getAutofillStatus: () => Promise<MobileAutofillStatusDto>;
   enableAutofill: () => Promise<MobileAutofillStatusDto>;
   disableAutofill: () => Promise<MobileAutofillStatusDto>;
+  refreshAutofill: () => Promise<MobileAutofillStatusDto>;
   getAutofillRequest: () => Promise<MobileAutofillLaunchDto | null>;
   getAutofillCandidates: (
     requestToken: string,

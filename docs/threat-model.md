@@ -757,6 +757,66 @@ properties and no native Windows/DACL runtime evidence in current Forgejo
 infrastructure, the control remains fail-closed Windows save rather than a
 metadata repair after publication or an unsafe fallback.
 
+## M5.4 iOS Password AutoFill threats and controls
+
+The Credential Provider Extension is a separate short-lived process and trust
+boundary. Host process death never preserves a decrypted session for the
+extension; extension success, cancel, disappearance, timeout, or process death
+must close its opaque Rust handle. The next request verifies the mirror and asks
+for the master password again. `provideCredentialWithoutUserInteraction` must
+return `userInteractionRequired`; M5.4 stores no unlock material.
+
+An attacker or crash may replace, truncate, or replay the App Group mirror. The
+shared Keychain config binds the accepted encrypted generation by complete size
+and SHA-256; the Rust FFI checks it before KDBX parser invocation. Candidate
+copy and atomic swap preserve the previous verified mirror on pre-commit
+failure. A mirror is only the last successfully refreshed encrypted snapshot,
+not a claim that the external source is current. Stale bookmark, revoked access,
+or source disappearance is presented as needing re-selection and never becomes
+silent sync.
+
+The host security-scoped bookmark grants authority over an external source and
+therefore stays in a host-only Keychain access group. Sharing it through the App
+Group or extension Keychain group would let the extension escape the owned
+mirror boundary and is forbidden. The shared Keychain item contains only
+minimal mirror configuration with WhenUnlockedThisDeviceOnly accessibility and
+no iCloud synchronization. Neither Keychain group may contain a master password,
+KDBX derived/composite key, or credential password.
+
+`ASCredentialIdentityStore` intentionally discloses limited username, domain,
+and record-identifier metadata to the operating system when AutoFill is enabled.
+These values are privacy-sensitive; Nian Pass does not claim that no metadata
+leaves its process. Protected usernames are omitted rather than bulk-revealed,
+malformed/no-service entries are omitted, and passwords are never published.
+An old identity pointing to a deleted entry or different service cannot release
+a stale secret because final fulfillment reopens the verified mirror and
+revalidates both stable entry and exact canonical service in Rust.
+
+Native master-password input minimizes lifetime with a secure field, immediate
+field clearing, short-lived mutable UTF-8 bytes, background KDF work, and prompt
+buffer cleanup. Swift `String` erasure is not claimed absolute. The password is
+never written to React, UserDefaults, Keychain, App Group, clipboard, or logs.
+KDF time/memory pressure in the extension fails closed and never lowers vault
+parameters.
+
+Raw C pointers introduce lifetime, null, length, allocation, double-free, and
+panic-across-ABI risks. The only manually unsafe boundary is the reviewed FFI
+module; it validates nulls and bounded lengths, performs no pointer arithmetic,
+uses explicit close/free ownership, zeroizes returned credential allocations,
+and catches Rust panics as a generic status. Native callers must return exact
+allocation triples only once; arbitrary dangling non-null pointers remain
+outside what Rust can validate and require Swift ownership discipline plus
+Xcode integration tests.
+
+App Group, Keychain access-group, Data Protection, extension capability, or
+embedding mistakes can invalidate the intended sandbox. Source ratchets and the
+macOS artifact gate inspect both host and extension entitlements, shared group
+agreement, password-only capabilities, and the embedded `.appex`. Linux cannot
+validate Xcode signing, entitlements, extension memory behavior, or system
+Password AutoFill. Claiming otherwise is itself a release-integrity threat;
+current status is explicitly BLOCKED until macOS with Xcode and a simulator or
+device smoke are recorded.
+
 Locking or dropping the session releases the decrypted database representation,
 but ordinary `keepass-rs` strings are not comprehensively zeroized. M3 does not
 claim immediate physical erasure from allocator pages, swap, runtime copies, or

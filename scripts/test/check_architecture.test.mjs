@@ -10,6 +10,8 @@ import { loadWorkspacePackages } from "../lib/cargo_dependencies.mjs";
 const workspaceMembers = [
   "apps/cli",
   "apps/desktop/src-tauri",
+  "crates/credential-provider-core",
+  "crates/ios-credential-ffi",
   "crates/kdbx",
   "crates/vault-core",
   "crates/vault-session",
@@ -23,7 +25,7 @@ function write(root, name, content) {
 }
 
 function workspaceManifest(extra = "") {
-  return `[workspace]\nmembers = ${JSON.stringify(workspaceMembers)}\nexclude = ["support/tauri", "support/keepass", "support/serde_json"]\nresolver = "3"\n${extra}`;
+  return `[workspace]\nmembers = ${JSON.stringify(workspaceMembers)}\nexclude = ["support/tauri", "support/keepass", "support/serde_json"]\nresolver = "3"\n\n[workspace.lints.rust]\nunsafe_code = "forbid"\n${extra}`;
 }
 
 function packageManifest(name, dependencies = "") {
@@ -46,6 +48,9 @@ function fixture(t) {
     "apps/desktop/src-tauri/src/commands.rs": "#[tauri::command]\nfn command() {}\n",
     "apps/desktop/src-tauri/src/lib.rs": "pub fn run() {}\n",
     "crates/kdbx/src/lib.rs": "pub struct KdbxDocument;\n",
+    "crates/credential-provider-core/src/lib.rs": "pub fn candidates() {}\n",
+    "crates/ios-credential-ffi/src/lib.rs": "pub fn boundary() {}\n",
+    "crates/ios-credential-ffi/src/ffi.rs": "pub unsafe fn boundary() {}\n",
     "crates/vault-core/src/lib.rs": "pub struct SecretString;\n",
     "crates/vault-session/src/lib.rs": "pub struct VaultSession;\n",
     "crates/vault-sync/src/lib.rs": "pub fn merge() {}\n",
@@ -61,6 +66,16 @@ function fixture(t) {
       "kdbx",
       "[dependencies]\nvault-core = { path = \"../vault-core\" }\n",
     ),
+    "crates/credential-provider-core/Cargo.toml": packageManifest(
+      "credential-provider-core",
+      "[dependencies]\nkdbx = { path = \"../kdbx\" }\nvault-core = { path = \"../vault-core\" }\n",
+    ),
+    "crates/ios-credential-ffi/Cargo.toml":
+      packageManifest(
+        "ios-credential-ffi",
+        "[dependencies]\ncredential-provider-core = { path = \"../credential-provider-core\" }\nkdbx = { path = \"../kdbx\" }\nvault-core = { path = \"../vault-core\" }\n",
+      ) +
+      '\n[lints.rust]\nunsafe_code = "allow"\nunsafe_op_in_unsafe_fn = "deny"\n',
     "crates/vault-core/Cargo.toml": packageManifest("vault-core"),
     "crates/vault-session/Cargo.toml": packageManifest(
       "vault-session",

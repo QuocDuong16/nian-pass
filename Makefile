@@ -16,7 +16,8 @@ RUST_LCOV := target/coverage/rust-lcov.info
 DESKTOP_LCOV := apps/desktop/coverage/lcov.info
 DIFF_BASE_ARGS = $(if $(strip $(COVERAGE_DIFF_BASE)),--base "$(COVERAGE_DIFF_BASE)" --require-base,)
 
-CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync
+CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync \
+	-p credential-provider-core -p ios-credential-ffi
 
 .PHONY: tools-install tools-check fixture-check \
 	rust-format rust-lint rust-test rust-doc rust-deps-check rust-security-check \
@@ -27,7 +28,7 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	desktop-contract-rust-check desktop-contract-frontend-check desktop-contract-check \
 	desktop-native-check desktop-check windows-cross-check \
 	architecture-check security-check docs-check scripts-install scripts-check mobile-source-check \
-	mobile-tools-check mobile-android-check \
+	mobile-tools-check mobile-android-check mobile-ios-tools-check mobile-ios-source-check mobile-ios-check \
 	compat-check compat-check-required policy-check quick-check quality-check
 
 tools-install:
@@ -219,6 +220,22 @@ mobile-android-check: mobile-source-check mobile-tools-check
 		test -n "$$artifact" || { echo "Android build completed without an APK artifact." >&2; exit 1; }; \
 		scripts/verify_android_release.sh "$$artifact" && \
 		echo "Android APK verified: $$artifact"
+
+mobile-ios-tools-check:
+	@echo "Check macOS/Xcode iOS build prerequisites..."
+	scripts/check_mobile_ios_tools.sh
+
+mobile-ios-source-check:
+	@echo "Check deterministic iOS host and Credential Provider sources..."
+	node scripts/check_ios_foundation.mjs
+
+mobile-ios-check: mobile-ios-tools-check mobile-ios-source-check
+	@echo "Build the actual Tauri iOS host and embedded Credential Provider Extension..."
+	pnpm --filter @nian-pass/desktop tauri ios build --ci
+	@artifact="$$(find apps/desktop/src-tauri/gen/apple -type d -name '*.app' -not -path '*/Index.noindex/*' -print -quit 2>/dev/null)"; \
+		test -n "$$artifact" || { echo "iOS build completed without an .app artifact." >&2; exit 1; }; \
+		scripts/verify_ios_build.sh "$$artifact" && \
+		echo "iOS host and Credential Provider verified: $$artifact"
 
 architecture-check:
 	@echo "Check architecture boundaries and line budgets..."

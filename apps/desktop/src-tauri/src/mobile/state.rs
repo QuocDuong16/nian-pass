@@ -50,7 +50,7 @@ pub(crate) struct MobileSelectionOperation {
     pub(crate) previous: Option<PreviousMobileSource>,
 }
 
-/// Android orchestration state. Provider I/O remains outside this synchronous
+/// Mobile orchestration state. Platform provider I/O remains outside this synchronous
 /// service, while `active_operation` serializes Save, Reload, selection, Lock,
 /// and all mutations across native awaits.
 pub(crate) struct MobileVaultService {

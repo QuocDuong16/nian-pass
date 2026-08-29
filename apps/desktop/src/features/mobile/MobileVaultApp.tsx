@@ -4,16 +4,21 @@ import { MobileCommandError } from "../../lib/mobile";
 import type { VaultSnapshotDto } from "../../types/desktop";
 import type { MobileApi, MobileSelectedVaultDto } from "../../types/mobile";
 import type { MobileAutofillRequestDto } from "../../types/mobile";
+import type { RuntimePlatform } from "../../types/runtime";
 import { MobileAutofillPanel } from "./MobileAutofillPanel";
 import { MobileLockedView } from "./MobileLockedView";
 import { MobileUnlockedView } from "./MobileUnlockedView";
 
 interface MobileVaultAppProps {
   api: MobileApi;
+  platform?: Extract<RuntimePlatform, "android" | "ios">;
 }
 type Phase = "no_selection" | "selected_locked" | "unlocking" | "unlocked";
 
-export function MobileVaultApp({ api }: MobileVaultAppProps) {
+export function MobileVaultApp({
+  api,
+  platform = "android",
+}: MobileVaultAppProps) {
   const [phase, setPhase] = useState<Phase>("no_selection");
   const [selected, setSelected] = useState<MobileSelectedVaultDto | null>(null);
   const [password, setPassword] = useState("");
@@ -25,6 +30,7 @@ export function MobileVaultApp({ api }: MobileVaultAppProps) {
     useState<MobileAutofillRequestDto | null>(null);
 
   useEffect(() => {
+    if (platform !== "android") return undefined;
     let active = true;
     void api
       .getAutofillRequest()
@@ -53,7 +59,7 @@ export function MobileVaultApp({ api }: MobileVaultAppProps) {
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, platform]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -80,7 +86,9 @@ export function MobileVaultApp({ api }: MobileVaultAppProps) {
         setPhase("selected_locked");
       }
     } catch {
-      setError("Could not open the Android document picker.");
+      setError(
+        `Could not open the ${platform === "ios" ? "iOS" : "Android"} document picker.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -129,6 +137,7 @@ export function MobileVaultApp({ api }: MobileVaultAppProps) {
         selected={selected}
         initialSnapshot={snapshot}
         hidden={hidden}
+        platform={platform}
         onLocked={resetLocked}
       />
     );

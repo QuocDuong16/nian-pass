@@ -16,6 +16,7 @@ interface MobileEntryDetailProps {
   detail: EntryDetailDto;
   groups: GroupDto[];
   disabled: boolean;
+  readOnly?: boolean;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
   onMoved: (snapshot: VaultSnapshotDto, destination: string) => void;
@@ -98,34 +99,52 @@ export function MobileEntryDetail(props: MobileEntryDetailProps) {
         </p>
         <p>{props.detail.notesPresent ? "Notes stored" : "No notes"}</p>
       </div>
-      <button
-        type="button"
-        disabled={props.disabled}
-        onClick={() => {
-          setEditing(true);
-        }}
-      >
-        Edit entry
-      </button>
-      <CustomFieldsEditor
-        api={props.api}
-        entryId={props.detail.id}
-        fields={props.detail.customFields}
-        disabled={props.disabled}
-        onApplied={props.onSnapshot}
-        onDraftChange={setFieldDraft}
-        onBusyChange={setFieldBusy}
-      />
-      <EntryActions
-        api={props.api}
-        detail={props.detail}
-        groups={props.groups}
-        disabled={props.disabled}
-        onDeleted={props.onDeleted}
-        onMoved={props.onMoved}
-        onDraftChange={setActionDraft}
-        onBusyChange={setActionBusy}
-      />
+      {props.readOnly === true ? null : (
+        <button
+          type="button"
+          disabled={props.disabled}
+          onClick={() => {
+            setEditing(true);
+          }}
+        >
+          Edit entry
+        </button>
+      )}
+      {props.readOnly === true ? null : (
+        <CustomFieldsEditor
+          api={props.api}
+          entryId={props.detail.id}
+          fields={props.detail.customFields}
+          disabled={props.disabled}
+          onApplied={props.onSnapshot}
+          onDraftChange={setFieldDraft}
+          onBusyChange={setFieldBusy}
+        />
+      )}
+      {props.readOnly === true && props.detail.customFields.length > 0 ? (
+        <div className="detail-field">
+          <h3>Custom fields</h3>
+          <ul>
+            {props.detail.customFields.map((field) => (
+              <li key={field.name}>
+                {field.name} · {field.protection}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {props.readOnly === true ? null : (
+        <EntryActions
+          api={props.api}
+          detail={props.detail}
+          groups={props.groups}
+          disabled={props.disabled}
+          onDeleted={props.onDeleted}
+          onMoved={props.onMoved}
+          onDraftChange={setActionDraft}
+          onBusyChange={setActionBusy}
+        />
+      )}
     </section>
   );
 }

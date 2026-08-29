@@ -67,6 +67,14 @@ impl MobileVaultSession {
         snapshot_for(&self.document, self.saved_revision)
     }
 
+    #[cfg(any(target_os = "ios", test))]
+    pub(super) fn password_identities(
+        &self,
+    ) -> Result<Vec<credential_provider_core::PasswordIdentity>, MobileError> {
+        credential_provider_core::password_identities(&self.document)
+            .map_err(|_| MobileError::Internal)
+    }
+
     pub(super) fn is_dirty(&self) -> bool {
         self.document.has_changes_since(self.saved_revision)
     }

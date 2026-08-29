@@ -80,11 +80,13 @@ test("autofill source and provider setup adapters remain semantic", async () => 
       sourceEnabled: true,
     })
     .mockResolvedValueOnce(contract.autofillStatus)
+    .mockResolvedValueOnce(contract.autofillStatus)
     .mockResolvedValueOnce(null)
     .mockResolvedValueOnce(null);
 
   await mobileApi.enableAutofill();
   await mobileApi.disableAutofill();
+  await mobileApi.refreshAutofill();
   await mobileApi.publishAutofillCandidates("opaque-request-token");
   await mobileApi.openAutofillSettings();
 
@@ -100,11 +102,16 @@ test("autofill source and provider setup adapters remain semantic", async () => 
   );
   expect(invoke).toHaveBeenNthCalledWith(
     3,
+    "mobile_refresh_ios_autofill_mirror",
+    undefined,
+  );
+  expect(invoke).toHaveBeenNthCalledWith(
+    4,
     "mobile_autofill_publish_candidates",
     { requestToken: "opaque-request-token" },
   );
   expect(invoke).toHaveBeenNthCalledWith(
-    4,
+    5,
     "mobile_open_autofill_settings",
     undefined,
   );

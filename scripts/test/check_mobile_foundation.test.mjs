@@ -183,7 +183,7 @@ retainAutofillReadGrant
   write(
     root,
     "apps/desktop/src-tauri/src/mobile/autofill.rs",
-    "AndroidApp entry_password\n",
+    "AndroidApp entry_password credential_provider_core::candidates credential_provider_core::credential CredentialTarget::android_app CredentialTarget::web_domain\n",
   );
   write(root, "apps/desktop/src-tauri/src/mobile/autofill_commands.rs");
   write(
@@ -243,7 +243,37 @@ mobile_open_autofill_settings
 ]
 expect("Nian Pass Android runtime failed");
 }
+#[cfg(target_os = "ios")]
+fn run_mobile() {
+generate_handler![runtime_info, mobile_select_vault, mobile_unlock_vault, mobile_vault_snapshot, mobile_entry_detail, mobile_lock_vault, mobile_autofill_status, mobile_enable_autofill_for_vault, mobile_disable_autofill_for_vault, mobile_refresh_ios_autofill_mirror, mobile_open_autofill_settings]
+.run(tauri::generate_context!());
+}
 `,
+  );
+  write(
+    root,
+    "crates/credential-provider-core/src/lib.rs",
+    "password_identities CredentialTarget::ios_url entry_matches_target entry_password\n",
+  );
+  write(
+    root,
+    "crates/ios-credential-ffi/src/ffi.rs",
+    "np_ios_open_vault np_ios_copy_candidates_json np_ios_copy_identities_json np_ios_copy_credential np_ios_close_vault np_ios_free_buffer np_ios_free_secret_result catch_unwind\n",
+  );
+  write(
+    root,
+    "crates/ios-credential-ffi/src/session.rs",
+    "verified_mirror(&path) actual != expected KdbxDocument::open_reader(&mut mirror\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/source_ios.rs",
+    "ios_plugin_binding! selectVault releaseSource enableAutofill refreshAutofill disableAutofill openCredentialProviderSettings\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/ios_commands.rs",
+    "IdentityProjection password_identities\n",
   );
   write(root, "apps/desktop/src/lib/mobile.ts");
   write(root, "apps/desktop/src/lib/mobile-autofill.ts");

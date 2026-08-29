@@ -162,6 +162,31 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/src/lib.rs",
     violations,
   );
+  const sharedCredentialCore = requireFile(
+    root,
+    "crates/credential-provider-core/src/lib.rs",
+    violations,
+  );
+  const iosFfi = requireFile(
+    root,
+    "crates/ios-credential-ffi/src/ffi.rs",
+    violations,
+  );
+  const iosSession = requireFile(
+    root,
+    "crates/ios-credential-ffi/src/session.rs",
+    violations,
+  );
+  const iosCommands = requireFile(
+    root,
+    "apps/desktop/src-tauri/src/mobile/ios_commands.rs",
+    violations,
+  );
+  const iosSource = requireFile(
+    root,
+    "apps/desktop/src-tauri/src/mobile/source_ios.rs",
+    violations,
+  );
   const mobileFrontend = [
     "apps/desktop/src/lib/mobile.ts",
     "apps/desktop/src/lib/mobile-autofill.ts",
@@ -509,7 +534,7 @@ export function runChecks(root) {
   ) {
     violations.push("M5.3 framework request objects must never enter durable Autofill metadata");
   }
-  if (!mobileRust.includes("AndroidApp") || !mobileRust.includes("entry_password")) {
+  if (!mobileRust.includes("AndroidApp") || !sharedCredentialCore.includes("entry_password")) {
     violations.push("M5.3 candidate matching and narrow final secret reads must remain Rust-owned");
   }
   const candidateContract = mobileFrontend.match(
@@ -536,6 +561,88 @@ export function runChecks(root) {
   }
   if (/force_save|overwrite_anyway|ignore_baseline|skip_external_check/i.test(rustHost + mobileFrontend)) {
     violations.push("M5.2 must not expose a force-save or baseline bypass");
+  }
+
+  for (const required of [
+    "credential_provider_core::candidates",
+    "credential_provider_core::credential",
+    "CredentialTarget::android_app",
+    "CredentialTarget::web_domain",
+  ]) {
+    if (!mobileRust.includes(required)) {
+      violations.push(`M5.4 Android must reuse shared credential core through ${required}`);
+    }
+  }
+  for (const required of [
+    "password_identities",
+    "CredentialTarget::ios_url",
+    "entry_matches_target",
+    "entry_password",
+  ]) {
+    if (!sharedCredentialCore.includes(required)) {
+      violations.push(`M5.4 shared credential core is missing ${required}`);
+    }
+  }
+  for (const required of [
+    "np_ios_open_vault",
+    "np_ios_copy_candidates_json",
+    "np_ios_copy_identities_json",
+    "np_ios_copy_credential",
+    "np_ios_close_vault",
+    "np_ios_free_buffer",
+    "np_ios_free_secret_result",
+    "catch_unwind",
+  ]) {
+    if (!iosFfi.includes(required)) violations.push(`M5.4 iOS FFI is missing ${required}`);
+  }
+  if (
+    !iosSession.includes("verified_mirror(&path)") ||
+    !iosSession.includes("actual != expected") ||
+    !iosSession.includes("KdbxDocument::open_reader(&mut mirror")
+  ) {
+    violations.push(
+      "M5.4 extension FFI must verify and parse the same encrypted mirror handle",
+    );
+  }
+  if (/password[^\n]{0,80}serde_json|serde_json[^\n]{0,80}password/i.test(iosSession)) {
+    violations.push("M5.4 final password must not use the JSON DTO path");
+  }
+  for (const required of [
+    "ios_plugin_binding!",
+    "selectVault",
+    "releaseSource",
+    "enableAutofill",
+    "refreshAutofill",
+    "disableAutofill",
+    "openCredentialProviderSettings",
+  ]) {
+    if (!(iosSource + iosCommands).includes(required)) violations.push(`M5.4 iOS semantic source adapter is missing ${required}`);
+  }
+  const iosRegisteredBlock = rustHost.match(/#\[cfg\(target_os = "ios"\)\][\s\S]*?fn run_mobile\(\)[\s\S]*?\.run\(/)?.[0] ?? "";
+  for (const forbidden of [
+    "mobile_save_vault",
+    "mobile_reload_vault",
+    "mobile_update_entry",
+    "mobile_create_entry",
+    "mobile_delete_entry",
+    "mobile_move_entry",
+    "mobile_create_group",
+    "mobile_rename_group",
+    "mobile_move_group",
+    "mobile_delete_group",
+    "mobile_set_entry_custom_field",
+    "mobile_delete_entry_custom_field",
+    "mobile_discard_changes_and_lock",
+  ]) {
+    if (iosRegisteredBlock.includes(forbidden)) {
+      violations.push(`M5.4 iOS read-only command surface must not register ${forbidden}`);
+    }
+  }
+  if (/plugin:ios-vault-source|plugin:.*ios/i.test(mobileFrontend)) {
+    violations.push("M5.4 React must not call the native iOS plugin namespace directly");
+  }
+  if (!iosCommands.includes("IdentityProjection") || !iosCommands.includes("password_identities")) {
+    violations.push("M5.4 identity publication must originate from a Rust secret-free projection");
   }
 
   return violations;

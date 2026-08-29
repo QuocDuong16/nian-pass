@@ -1,4 +1,4 @@
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 mod app_state;
 mod autofill;
 #[cfg(target_os = "android")]
@@ -13,14 +13,21 @@ mod service_mutations;
 mod session;
 mod state;
 mod state_autofill;
+#[cfg(any(target_os = "ios", test))]
+mod state_ios;
 mod transaction;
 
 #[cfg(target_os = "android")]
 pub(crate) mod source;
 #[cfg(target_os = "android")]
 mod source_autofill;
+#[cfg(target_os = "ios")]
+pub(crate) mod source_ios;
 
-#[cfg(target_os = "android")]
+#[cfg(target_os = "ios")]
+pub(crate) mod ios_commands;
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub(crate) use app_state::{MobileAppState, install_state};
 pub(crate) use errors::MobileError;
 
