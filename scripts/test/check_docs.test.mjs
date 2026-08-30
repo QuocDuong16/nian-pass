@@ -18,7 +18,7 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M5.4 — iOS Password AutoFill + Keychain — BLOCKED\nRead-only providers have editing and Save disabled. " +
+    "M5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle NEXT\nM6 Browser Extension Foundation\nRead-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +

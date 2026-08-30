@@ -222,15 +222,15 @@ mobile-android-check: mobile-source-check mobile-tools-check
 		echo "Android APK verified: $$artifact"
 
 mobile-ios-tools-check:
-	@echo "Check macOS/Xcode iOS build prerequisites..."
+	@echo "Check Apple resumption macOS/Xcode iOS build prerequisites..."
 	scripts/check_mobile_ios_tools.sh
 
 mobile-ios-source-check:
-	@echo "Check deterministic iOS host and Credential Provider sources..."
+	@echo "Check retained Apple resumption host and Credential Provider sources..."
 	node scripts/check_ios_foundation.mjs
 
 mobile-ios-check: mobile-ios-tools-check mobile-ios-source-check
-	@echo "Build the actual Tauri iOS host and embedded Credential Provider Extension..."
+	@echo "Build the Apple resumption Tauri iOS host and embedded Credential Provider Extension..."
 	pnpm --filter @nian-pass/desktop tauri ios build --ci
 	@artifact="$$(find apps/desktop/src-tauri/gen/apple -type d -name '*.app' -not -path '*/Index.noindex/*' -print -quit 2>/dev/null)"; \
 		test -n "$$artifact" || { echo "iOS build completed without an .app artifact." >&2; exit 1; }; \

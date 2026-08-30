@@ -19,22 +19,58 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M5.4 — iOS Password AutoFill + Keychain — BLOCKED
+M5.4 — iOS Password AutoFill + Keychain — DEFERRED
 
-Linux-runnable M5.4 foundations are implemented: `credential-provider-core`
+Apple platform support is intentionally postponed because completing the native
+integration requires macOS/Xcode and Apple-specific development infrastructure
+outside the current product priorities. This is a roadmap decision, not a
+technical failure or a claim that iOS support is complete.
+
+The reusable M5.4 foundations are preserved: `credential-provider-core`
 owns the exact Android application/web and iOS service matching policy, Android
 M5.3 now consumes that same crate, and `ios-credential-ffi` provides a narrow
 panic-contained C ABI over the existing Rust `KdbxDocument`. The shared iOS UI
 contract is read-only and exposes select, unlock, secret-free browse/detail,
 Lock, and semantic Password AutoFill controls without registering Save or CRUD.
 
-M5.4 is not complete. The official Tauri Apple project does not exist in this
-Linux checkout and must be generated with `tauri ios init` on macOS. Therefore
-the real Swift `UIDocumentPickerViewController` adapter, coordinated
-security-scoped reads, App Group/Keychain implementation, Xcode Credential
-Provider target, entitlements, embedded extension, and system AutoFill smoke
-have not been built or validated. No iOS functionality is claimed from the
-Linux-only evidence.
+Native Apple completion is deferred. There is no official Tauri Apple project,
+Swift `UIDocumentPickerViewController` adapter, coordinated security-scoped
+read implementation, App Group/Keychain integration, Xcode Credential Provider
+target, signed entitlement evidence, embedded extension, or system AutoFill
+smoke. The retained Rust, source-policy, command, and frontend foundations do
+not constitute current iOS or macOS support.
+
+Current product direction is a KDBX-native, offline-first, zero-knowledge
+password manager with no proprietary vault lock-in: Windows and Linux desktop,
+Android mobile, browser integration next, bring-your-own-cloud sync, and a
+self-hostable sync gateway later. Apple-specific runtime validation and native
+integration are future work; Tauri's theoretical macOS target support is not a
+claim that the macOS application has been validated or released.
+
+## Roadmap
+
+```text
+M5.0 Mobile Foundation                           DONE
+M5.1 Mobile Unlock + Browse                     DONE
+M5.2 Android CRUD + Safe Persistence            DONE
+M5.3 Android Credential Provider + Autofill     DONE
+
+M5.4 iOS Password AutoFill + Keychain           DEFERRED
+
+M5.5 Android Mobile Security / Lifecycle        NEXT
+M6   Browser Extension Foundation
+M6.5 Browser Native Messaging / Desktop Integration
+M7   BYO-cloud Sync Providers
+M7.5 Self-hosted Sync Gateway
+M8   Security Hardening / Release Engineering
+M9+  Apple Platform Resume
+```
+
+After Android lifecycle hardening, the next major product priority is a browser
+extension backed by Native Messaging and the Nian Pass desktop/shared Rust
+authority, preferring KeePassXC Browser protocol interoperability where
+practical. M5.5 and the browser milestones are not implemented by this status
+change.
 
 The Desktop MVP remains complete through M4.5 and the M5.2 Android CRUD/Save
 protocol remains unchanged. Android now adds password retrieval through a
@@ -68,9 +104,9 @@ drops the decrypted session. Cold Autofill rehydration is always read-only.
 
 Android still does not support biometric quick unlock, master-password or KDBX
 derived-key persistence, passkeys, TOTP autofill, external credential
-save/create, sync, or full M5.5 lifecycle hardening. M5.4 likewise does not add
-iOS CRUD/Save, biometric quick unlock, stored unlock material, passkeys, OTP,
-credential save/create, sync, or M5.5 lifecycle hardening.
+save/create, sync, or M5.5 lifecycle hardening. Deferred Apple work provides no
+current iOS CRUD/Save, Password AutoFill, biometric quick unlock, stored unlock
+material, passkeys, OTP, credential save/create, or sync support.
 
 `apps/desktop` remains the historical path for the shared Tauri application
 host. Renaming it is deferred to a dedicated mechanical refactor. Desktop and
@@ -81,9 +117,10 @@ Kotlin KDBX parser or cryptography and delegates all KDBX serialization and
 semantic verification to the existing Rust writer.
 
 The current Linux environment can build Android through command-line tooling
-without Android Studio, an emulator, or a connected device. iOS initialization
-and builds are not performed on Linux: they require macOS with Xcode and will
-use the official Tauri iOS initialization path in that environment.
+without Android Studio, an emulator, or a connected device. Apple initialization
+and builds are intentionally outside normal development while Apple work is
+deferred. If that work resumes, it requires macOS with Xcode and the official
+Tauri iOS initialization path; Linux quality never fabricates or requires it.
 
 M4.5 — Desktop Security UX remains complete.
 
@@ -351,9 +388,9 @@ and run the equivalent authenticated-dataset flow. For security smoke, install
 the same package name with another signing certificate and confirm it is not
 silently trusted; an unverified web target must also show explicit confirmation.
 
-### M5.4 iOS Password AutoFill validation boundary
+### Deferred Apple platform architecture (future M9+)
 
-The intended host boundary is:
+The retained M5.4 design requires this future host boundary:
 
 ```text
 UIDocumentPickerViewController
@@ -363,14 +400,14 @@ UIDocumentPickerViewController
   -> encrypted App Group mirror (size + SHA-256, candidate-before-swap)
 ```
 
-The Credential Provider Extension is a separate process. It must read only the
+The future Credential Provider Extension must be a separate process. It must read only the
 Nian Pass-owned encrypted mirror, request the real master password in native
 UIKit, and call the `ios-credential-ffi` static library. It never receives the
 host security-scoped bookmark or host decrypted session. The FFI verifies the
 configured mirror generation before KDBX parsing and revalidates the stable
 entry plus exact service before returning one username/password result.
 
-The future Swift implementation has two Keychain boundaries: a host-only item
+The deferred Swift implementation requires two Keychain boundaries: a host-only item
 for the external security-scoped bookmark, and a host+extension shared item for
 only `version`, enabled state, fixed mirror relative name, generation size and
 SHA-256, plus optional display metadata. Both require
@@ -391,7 +428,19 @@ is `save_uncertain`, and an unknown interrupted generation is
 The latter requires the official generated Xcode graph, builds the actual host,
 requires one embedded Credential Provider extension, and inspects host/extension
 AutoFill, App Group, shared Keychain, and password-only capabilities. These
-gates fail clearly on Linux and are not part of Linux `quality-check`.
+Apple resumption gates remain fail-closed, fail clearly on Linux, and are not
+part of Linux `quick-check`, `quality-check`, or ordinary CI.
+
+Resume Apple platform work only when a macOS/Xcode environment and the required
+Apple development infrastructure are available:
+
+1. Run `make mobile-ios-tools-check`.
+2. Run the official pinned-Tauri `tauri ios init` flow.
+3. Implement the real Swift Tauri plugin and Credential Provider Extension.
+4. Configure the App Group and host-only/shared Keychain separation.
+5. Build the confined encrypted KDBX mirror and link the retained Rust FFI.
+6. Validate the real Xcode build, embedded `.appex`, and signed entitlements.
+7. Complete an actual system Password AutoFill smoke with a synthetic vault.
 
 ### Headless Linux desktop development
 
@@ -418,8 +467,8 @@ installer and does not launch a window. `pnpm --filter @nian-pass/desktop dev`
 serves only the frontend and is useful for browser-oriented UI work, but real
 desktop commands require Tauri.
 
-On a graphical Linux, Windows, or macOS development machine, a manual runtime
-smoke test can use:
+On a graphical Linux or Windows development machine, a manual runtime smoke test
+can use:
 
 ```bash
 pnpm --filter @nian-pass/desktop tauri dev
@@ -428,7 +477,8 @@ pnpm --filter @nian-pass/desktop tauri dev
 The expected flow is select a synthetic fixture, enter its public fixture
 password, browse groups/entries, inspect safe detail, explicitly reveal/copy a
 synthetic value, and Lock back to the unlock screen. `tauri dev` is intentionally
-not a headless or Forgejo quality gate.
+not a headless or Forgejo quality gate. macOS desktop runtime validation is part
+of the deferred Apple platform work and is not implied by this procedure.
 
 The dedicated Forgejo compatibility job installs the pinned Debian Bookworm
 KeePassXC package and runs `scripts/test-keepassxc-compat.sh --require`, where a

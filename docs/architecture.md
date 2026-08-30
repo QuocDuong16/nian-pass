@@ -123,7 +123,7 @@ M5.2 keeps one application host and one Rust vault implementation. The
 host and is not renamed in this milestone.
 
 ```text
-Desktop       Android       iOS (future)
+Desktop       Android       Apple (deferred)
     \            |            /
        shared Tauri application
                   |
@@ -212,9 +212,11 @@ many races but cannot prove no writer briefly committed and was overwritten.
 Android uses API 26 as its minimum for the M5.3 AutofillService fallback; API
 34+ additionally registers the password-only Credential Manager provider. The normal generated
 Rust targets are aarch64, armv7, i686, and x86_64, while the headless foundation
-gate builds aarch64 and x86_64 APK inputs. iOS remains architecture-ready but
-not initialized or built on Linux. Official Tauri iOS initialization and a
-future `make mobile-ios-check` require macOS with Xcode.
+gate builds aarch64 and x86_64 APK inputs. The retained iOS contracts and Rust
+FFI remain architecture-ready, but native Apple integration is deliberately
+deferred and is not initialized or built on Linux. Official Tauri iOS
+initialization and `make mobile-ios-check` require macOS with Xcode when Apple
+platform work resumes.
 
 ## M4.Q quality architecture
 
@@ -783,11 +785,19 @@ throttled, and endpoint malware can inspect an unlocked process. M4.5 adds no
 native screenshot FFI, plugin, capability, filesystem access, credential cache,
 browser storage, autosave, force-lock, or dirty-discard shortcut.
 
-## M5.4 iOS host, mirror, and extension boundary
+## Deferred Apple platform architecture (future M9+)
 
-M5.4 treats the iOS host and AutoFill Credential Provider as separate
-processes and sandboxes. It does not attempt to serialize or share the host's
-decrypted Rust session:
+M5.4 is intentionally deferred because the macOS/Xcode and Apple-specific
+development infrastructure required for native completion is outside current
+product priorities. The implemented foundation consists of the shared
+`credential-provider-core`, the narrow `ios-credential-ffi` ABI, read-only iOS
+Rust semantic commands/frontend contracts, and fail-closed Apple source/build
+policy. No Apple project, Swift host plugin, Credential Provider Extension, App
+Group, or Keychain integration currently exists.
+
+When Apple work resumes, the iOS host and AutoFill Credential Provider must be
+separate processes and sandboxes. The design must not serialize or share the
+host's decrypted Rust session:
 
 ```text
 External KDBX
@@ -815,7 +825,7 @@ AuthenticationServices request in a separate extension process
   -> ASPasswordCredential
 ```
 
-Swift is an OS adapter only. It owns the document picker, balanced security
+Future Swift code is an OS adapter only. It will own the document picker, balanced security
 scope, `NSFileCoordinator`, App Group candidate/atomic file operations,
 Keychain, `ASCredentialIdentityStore`, settings navigation, and
 AuthenticationServices completion. It does not parse Argon2, AES, KDBX XML, or
@@ -832,7 +842,7 @@ and exact canonical web-host behavior to this crate. The iOS FFI delegates URL
 and domain service matching, secret-free candidates, password identities, stale
 entry rejection, and final username/password read to the same crate.
 
-The App Group contains only the rebuildable, read-only KDBX ciphertext mirror.
+The future App Group may contain only the rebuildable, read-only KDBX ciphertext mirror.
 It contains no decrypted XML/JSON, plaintext identity index, credential cache,
 session dump, external URL, or bookmark. The original document remains the
 source of truth. The extension validates the expected encrypted size and
@@ -840,7 +850,7 @@ SHA-256 before parser invocation and never writes the mirror. A corrupt or
 mismatched mirror is unavailable and may be deleted/rebuilt by the host; it
 does not need the M5.2 external-source rollback journal.
 
-Keychain separation is strict:
+The deferred native implementation must enforce strict Keychain separation:
 
 ```text
 Host-only access group -> versioned security-scoped external bookmark
@@ -849,7 +859,7 @@ Shared host+extension access group -> version, enabled state, fixed mirror name,
 Keychain NEVER -> master password, KDBX composite/derived key, entry password
 ```
 
-Shared configuration uses `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and
+Future shared configuration must use `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and
 `kSecAttrSynchronizable=false`. The extension has no entitlement to the
 host-only bookmark group and never resolves the external document. The system
 identity store intentionally contains limited privacy-sensitive username,
@@ -868,7 +878,7 @@ explicitly zeroized and freed. An opaque random handle owns one extension-local
 These seven symbols are the reviewed M5.4 ABI contract; renaming one requires the
 checker, tests, and documentation to change together.
 
-An Xcode project is not valid merely because it defines an AutoFill extension
+On resumption, an Xcode project is not valid merely because it defines an AutoFill extension
 target and entitlements. Production Swift must subclass
 `ASCredentialProviderViewController`, route open, candidate, identity, final
 credential, free, and close operations through `ios-credential-ffi`, and leave
@@ -879,11 +889,12 @@ Rust FFI evidence is target-scoped, not repository-scoped: the checker resolves
 the extension target's `PBXSourcesBuildPhase` and accepts subclass/API/ABI usage
 only from the production Swift files reached through that phase.
 
-The Apple generated project and Swift implementation are not present in the
-current Linux checkout. This section defines and documents the implemented Rust
-and frontend contracts, not proof that iOS built or system AutoFill ran. M5.4
-remains blocked until macOS/Xcode builds the real host and embedded extension,
-inspects entitlements, and completes the synthetic system smoke.
+The Apple generated project and Swift implementation are not present. This
+section preserves the implemented Rust/frontend foundation and the reviewed
+future architecture; it is not proof that iOS or macOS built or that system
+AutoFill ran. M5.4 is DEFERRED by product decision. Native completion may resume
+in M9+ only with macOS/Xcode, real signed artifacts, and a synthetic system
+AutoFill smoke.
 
 ## Architecture Invariants
 

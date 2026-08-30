@@ -88,12 +88,14 @@ their binding permissions, password-only provider metadata, and the private
 credential Activity, then dumps APK permissions to prove release still has no
 `INTERNET` or broad storage/package permission.
 
-iOS validation is explicitly separate. The dedicated `mobile-ios-tools-check`,
-`mobile-ios-source-check`, and `mobile-ios-check` targets now exist, but the full
-gate is intentionally macOS/Xcode-only. It fails closed until official Tauri iOS
-initialization has produced the Apple project and the real host plus embedded
-Credential Provider Extension can be built and verified. Linux does not
-fabricate an Xcode project or report an iOS pass.
+Apple validation is explicitly separate and deferred. The dedicated
+`mobile-ios-tools-check`, `mobile-ios-source-check`, and `mobile-ios-check`
+targets are retained as dormant resumption gates. The full gate remains
+macOS/Xcode-only and fails closed until official Tauri iOS initialization has
+produced the Apple project and the real host plus embedded Credential Provider
+Extension can be built and verified. These Apple-specific gates are excluded
+from ordinary Linux development, `quick-check`, `quality-check`, and default CI;
+Linux neither fabricates an Xcode project nor reports an iOS pass.
 
 Rust policy keeps `unsafe_code = forbid` unchanged and denies warnings,
 unused must-use values, `dbg!`, `todo!`, `unimplemented!`, production unwraps,
@@ -275,7 +277,7 @@ stale entry rejection, and Autofill/Lock serialization after the shared-core
 extraction. Frontend tests prove iOS mounts the mobile unlock/browse flow without
 Android request probing and renders no Save/CRUD actions.
 
-`mobile-ios-tools-check` is intentionally macOS-only. It requires Xcode,
+For future Apple resumption, `mobile-ios-tools-check` is intentionally macOS-only. It requires Xcode,
 selected iPhone device/simulator SDKs, pinned Tauri CLI, the iOS device and
 Apple-silicon simulator Rust targets, and CocoaPods only when the official
 generated graph uses a Podfile. The paired `mobile-ios-check` performs the real
@@ -291,7 +293,7 @@ Keychain policy. Entitlements, the extension plist, and `project.pbxproj` are
 validated only for their own responsibilities; PBX comments and marker strings
 are not implementation or source-membership evidence.
 
-`mobile-ios-check` composes that source ratchet with the actual pinned-Tauri
+When Apple work resumes, `mobile-ios-check` composes that source ratchet with the actual pinned-Tauri
 Xcode build, requires one embedded `.appex`, and inspects signed host/extension
 entitlements for the AutoFill provider capability, the same App Group, shared
 Keychain access, and password-only extension capabilities. The artifact verifier
@@ -300,8 +302,9 @@ stripping/LTO may remove internal static-link symbol names; the required Swift C
 calls plus a successful link are the deterministic build evidence. Neither
 source markers nor artifact structure prove runtime Password AutoFill. A real
 simulator/device system smoke remains separate. The gate is excluded from Linux
-`quality-check`; a Linux failure to run it is a required BLOCKED verdict, not a
-substitute PASS.
+`quick-check`, `quality-check`, and default CI. Its expected macOS prerequisite
+failure on Linux is not an ordinary quality failure and never substitutes for
+an Apple PASS; M5.4 is DEFERRED by roadmap decision until Apple work resumes.
 
 The workspace keeps `unsafe_code = forbid` globally. Only
 `crates/ios-credential-ffi` opts into unsafe code, with

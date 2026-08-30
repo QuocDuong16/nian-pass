@@ -335,8 +335,9 @@ generation and still requires the normal master-password unlock.
 Credential creation/import, Autofill SaveRequest mutation, passkeys, TOTP
 autofill, biometric/device-credential quick unlock, derived unlock material,
 auto-lock/full background lifecycle, global screenshot/app-switcher policy,
-sync, and iOS remain outside M5.3. Those lifecycle and quick-unlock policies are
-deferred to M5.5; M5.4 is the separate future iOS milestone.
+sync, and Apple platforms remain outside M5.3. Android lifecycle and
+quick-unlock hardening move next to M5.5. Native Apple work is intentionally
+deferred to M9+ while the existing M5.4 Rust/shared foundation is retained.
 
 ## M4.3 mutation controls
 
@@ -757,33 +758,40 @@ properties and no native Windows/DACL runtime evidence in current Forgejo
 infrastructure, the control remains fail-closed Windows save rather than a
 metadata repair after publication or an unsafe fallback.
 
-## M5.4 iOS Password AutoFill threats and controls
+## Deferred Apple platform design threats (future M9+)
 
-The Credential Provider Extension is a separate short-lived process and trust
-boundary. Host process death never preserves a decrypted session for the
-extension; extension success, cancel, disappearance, timeout, or process death
-must close its opaque Rust handle. The next request verifies the mirror and asks
-for the master password again. `provideCredentialWithoutUserInteraction` must
-return `userInteractionRequired`; M5.4 stores no unlock material.
+Implemented today are the shared Rust matching/final-read policy, the narrow iOS
+FFI generation and ownership controls, read-only semantic command contracts,
+and fail-closed source/build ratchets. The native Swift host, App Group,
+Keychain integration, signed Credential Provider Extension, and system AutoFill
+behavior described below do not exist yet. They are mandatory future controls,
+not claims about current production behavior.
 
-An attacker or crash may replace, truncate, or replay the App Group mirror. The
-shared Keychain config binds the accepted encrypted generation by complete size
-and SHA-256; the Rust FFI checks it before KDBX parser invocation. Candidate
-copy and atomic swap preserve the previous verified mirror on pre-commit
-failure. A mirror is only the last successfully refreshed encrypted snapshot,
-not a claim that the external source is current. Stale bookmark, revoked access,
-or source disappearance is presented as needing re-selection and never becomes
-silent sync.
+The future Credential Provider Extension must be a separate short-lived process
+and trust boundary. Host process death must never preserve a decrypted session
+for the extension; extension success, cancel, disappearance, timeout, or process
+death must close its opaque Rust handle. Each new request must verify the mirror
+and ask for the master password again. `provideCredentialWithoutUserInteraction`
+must return `userInteractionRequired`; M5.4 stores no unlock material.
 
-The host security-scoped bookmark grants authority over an external source and
-therefore stays in a host-only Keychain access group. Sharing it through the App
-Group or extension Keychain group would let the extension escape the owned
-mirror boundary and is forbidden. The shared Keychain item contains only
-minimal mirror configuration with WhenUnlockedThisDeviceOnly accessibility and
-no iCloud synchronization. Neither Keychain group may contain a master password,
-KDBX derived/composite key, or credential password.
+An attacker or crash may replace, truncate, or replay the future App Group
+mirror. The deferred shared Keychain config must bind the accepted encrypted
+generation by complete size and SHA-256; the implemented Rust FFI already checks
+those expected values before KDBX parser invocation. Future candidate copy and
+atomic swap must preserve the previous verified mirror on pre-commit failure. A
+mirror will be only the last successfully refreshed encrypted snapshot, not a
+claim that the external source is current. Stale bookmark, revoked access, or
+source disappearance must require re-selection and never become silent sync.
 
-`ASCredentialIdentityStore` intentionally discloses limited username, domain,
+The future host security-scoped bookmark grants authority over an external
+source and therefore must stay in a host-only Keychain access group. Sharing it
+through the App Group or extension Keychain group would let the extension escape
+the owned mirror boundary and is forbidden. The future shared Keychain item may
+contain only minimal mirror configuration with WhenUnlockedThisDeviceOnly
+accessibility and no iCloud synchronization. Neither future Keychain group may
+contain a master password, KDBX derived/composite key, or credential password.
+
+Future `ASCredentialIdentityStore` publication will intentionally disclose limited username, domain,
 and record-identifier metadata to the operating system when AutoFill is enabled.
 These values are privacy-sensitive; Nian Pass does not claim that no metadata
 leaves its process. Protected usernames are omitted rather than bulk-revealed,
@@ -792,7 +800,7 @@ An old identity pointing to a deleted entry or different service cannot release
 a stale secret because final fulfillment reopens the verified mirror and
 revalidates both stable entry and exact canonical service in Rust.
 
-Native master-password input minimizes lifetime with a secure field, immediate
+Future native master-password input must minimize lifetime with a secure field, immediate
 field clearing, short-lived mutable UTF-8 bytes, background KDF work, and prompt
 buffer cleanup. Swift `String` erasure is not claimed absolute. The password is
 never written to React, UserDefaults, Keychain, App Group, clipboard, or logs.
@@ -808,7 +816,7 @@ allocation triples only once; arbitrary dangling non-null pointers remain
 outside what Rust can validate and require Swift ownership discipline plus
 Xcode integration tests.
 
-A Credential Provider target could compile while bypassing the reviewed Rust
+A future Credential Provider target could compile while bypassing the reviewed Rust
 FFI and reimplementing credential or KDBX semantics in Swift. The source policy
 therefore requires executable-looking calls to every reviewed open, candidate,
 identity, final-credential, free, and close ABI symbol, rejects comment-only
@@ -816,14 +824,15 @@ markers and conservative duplicate-KDBX patterns, and requires the actual Swift
 Credential Provider subclass. The macOS gate must still build and inspect the
 embedded extension; neither layer substitutes for system AutoFill smoke.
 
-App Group, Keychain access-group, Data Protection, extension capability, or
+Future App Group, Keychain access-group, Data Protection, extension capability, or
 embedding mistakes can invalidate the intended sandbox. Source ratchets and the
 macOS artifact gate inspect both host and extension entitlements, shared group
 agreement, password-only capabilities, and the embedded `.appex`. Linux cannot
 validate Xcode signing, entitlements, extension memory behavior, or system
-Password AutoFill. Claiming otherwise is itself a release-integrity threat;
-current status is explicitly BLOCKED until macOS with Xcode and a simulator or
-device smoke are recorded.
+Password AutoFill. Claiming otherwise is itself a release-integrity threat.
+M5.4 is explicitly DEFERRED because Apple development infrastructure is outside
+current product priorities; resumption still requires macOS/Xcode, signed
+artifact inspection, and a simulator or device smoke before any support claim.
 
 Locking or dropping the session releases the decrypted database representation,
 but ordinary `keepass-rs` strings are not comprehensively zeroized. M3 does not

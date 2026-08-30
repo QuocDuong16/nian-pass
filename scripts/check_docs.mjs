@@ -32,7 +32,8 @@ export function runChecks(root) {
   const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
   const makefile = readRequired(root, "Makefile", violations);
 
-  requirePattern(violations, "README.md", readme, /M5\.4\s*[—-]\s*iOS Password AutoFill \+ Keychain\s*[—-]\s*BLOCKED/, "current milestone must report M5.4 blocked");
+  requirePattern(violations, "README.md", readme, /M5\.4\s*[—-]\s*iOS Password AutoFill \+ Keychain\s*[—-]\s*DEFERRED/, "current milestone must report M5.4 deferred");
+  requirePattern(violations, "README.md", readme, /M5\.5\s+Android Mobile Security \/ Lifecycle\s+NEXT[\s\S]{0,240}M6\s+Browser Extension Foundation/i, "Android-first M5.5 and browser-next roadmap is missing");
   requirePattern(violations, "README.md", readme, /read-only providers[\s\S]{0,160}(?:editing|Save) disabled/i, "M5.2 read-only provider boundary is missing");
   requirePattern(violations, "README.md", readme, /AtomicFile[\s\S]{0,300}save_uncertain[\s\S]{0,160}recovery_required/i, "M5.2 recovery and uncertainty boundary is missing");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
