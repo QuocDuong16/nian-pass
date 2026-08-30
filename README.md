@@ -19,7 +19,25 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M5.4 — iOS Password AutoFill + Keychain — DEFERRED
+M5.5 — Android Mobile Security / Lifecycle
+
+M5.5 protects every sensitive Android Activity with native `FLAG_SECURE`, adds
+API 33+ Recents screenshot suppression, and places an opaque native privacy
+curtain over the WebView before foreground is lost. A process-local monotonic
+lifecycle generation and explicit resume acknowledgement keep that curtain in
+place until React has reconciled the real Rust vault state. The curtain is a
+visual/accessibility boundary; it is not backend Lock.
+
+Clean background, screen-lock, and foreground-idle expiry invoke the existing
+two-phase Rust Lock transaction. Dirty Rust mutations and frontend edit drafts
+instead stay hidden behind an explicit Save-and-lock, discard-and-lock, or
+continue decision; lifecycle handling never autosaves or silently discards.
+Foreground inactivity defaults to five minutes with 1, 5, 15, 30 minute and
+Never choices. The choice is application-memory only and resets to five minutes
+after process restart. Never disables foreground inactivity expiry only; native
+background protection remains mandatory.
+
+M5.4 — iOS Password AutoFill + Keychain remains DEFERRED.
 
 Apple platform support is intentionally postponed because completing the native
 integration requires macOS/Xcode and Apple-specific development infrastructure
@@ -57,8 +75,8 @@ M5.3 Android Credential Provider + Autofill     DONE
 
 M5.4 iOS Password AutoFill + Keychain           DEFERRED
 
-M5.5 Android Mobile Security / Lifecycle        NEXT
-M6   Browser Extension Foundation
+M5.5 Android Mobile Security / Lifecycle        CURRENT
+M6   Browser Extension Foundation               NEXT
 M6.5 Browser Native Messaging / Desktop Integration
 M7   BYO-cloud Sync Providers
 M7.5 Self-hosted Sync Gateway
@@ -66,11 +84,10 @@ M8   Security Hardening / Release Engineering
 M9+  Apple Platform Resume
 ```
 
-After Android lifecycle hardening, the next major product priority is a browser
+After M5.5, the next major product priority is a browser
 extension backed by Native Messaging and the Nian Pass desktop/shared Rust
 authority, preferring KeePassXC Browser protocol interoperability where
-practical. M5.5 and the browser milestones are not implemented by this status
-change.
+practical. Browser work is not implemented by M5.5.
 
 The Desktop MVP remains complete through M4.5 and the M5.2 Android CRUD/Save
 protocol remains unchanged. Android now adds password retrieval through a
@@ -104,7 +121,10 @@ drops the decrypted session. Cold Autofill rehydration is always read-only.
 
 Android still does not support biometric quick unlock, master-password or KDBX
 derived-key persistence, passkeys, TOTP autofill, external credential
-save/create, sync, or M5.5 lifecycle hardening. Deferred Apple work provides no
+save/create, or sync. Biometric quick unlock remains deferred because the
+reviewed KDBX credential boundary does not expose reusable non-password unlock
+material suitable for Android Keystore auth-per-use wrapping; the separate
+M5.3 metadata key is never reused for that purpose. Deferred Apple work provides no
 current iOS CRUD/Save, Password AutoFill, biometric quick unlock, stored unlock
 material, passkeys, OTP, credential save/create, or sync support.
 

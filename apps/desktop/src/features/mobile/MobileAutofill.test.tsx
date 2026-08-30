@@ -58,6 +58,53 @@ async function unlockCredentialRequest(api = credentialApi()) {
   return api;
 }
 
+function credentialLifecycleApi(
+  lockVault: MobileApi["lockVault"] = vi.fn().mockResolvedValue(undefined),
+) {
+  let hidden = false;
+  let generation = 1;
+  let vaultState: "locked" | "clean" = "clean";
+  let operationPending = false;
+  vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+  const api = credentialApi({
+    getAutofillRequest: vi.fn().mockResolvedValue({
+      request,
+      selectedVault: null,
+    }),
+    lockVault,
+    securityResume: vi.fn(() =>
+      Promise.resolve({
+        foreground: !hidden,
+        elapsedRealtimeMs: 1_000,
+        generation,
+        screenState: "active" as const,
+        curtainVisible: true,
+        vaultState,
+        operationPending,
+      }),
+    ),
+  });
+  return {
+    api,
+    background: () => {
+      hidden = true;
+      generation += 1;
+      fireEvent(document, new Event("visibilitychange"));
+    },
+    resume: () => {
+      hidden = false;
+      generation += 1;
+      fireEvent(document, new Event("visibilitychange"));
+    },
+    setLocked: () => {
+      vaultState = "locked";
+    },
+    setPending: (pending: boolean) => {
+      operationPending = pending;
+    },
+  };
+}
+
 test("locked credential route rehydrates, unlocks, and never renders a password", async () => {
   await unlockCredentialRequest();
   expect(screen.getByText("example.test")).toBeVisible();
@@ -122,6 +169,47 @@ test("an already-unlocked Rust session serves the credential route without anoth
   expect(await screen.findByText("Fill credentials for:")).toBeVisible();
   expect(api.getVaultSnapshot).toHaveBeenCalledOnce();
   expect(api.unlockVault).not.toHaveBeenCalled();
+});
+
+test("backgrounding an unlocked credential route locks before it can reappear", async () => {
+  const controller = credentialLifecycleApi();
+  render(<MobileVaultApp api={controller.api} platform="android" />);
+  expect(await screen.findByText("Fill credentials for:")).toBeVisible();
+
+  controller.background();
+  expect(await screen.findByText("Nian Pass locked")).toBeVisible();
+  expect(controller.api.lockVault).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Fill credentials for:")).not.toBeInTheDocument();
+});
+
+test("credential lifecycle waits for pending authority and keeps lock failure shielded", async () => {
+  const lockVault = vi.fn().mockRejectedValue(new Error("native detail"));
+  const controller = credentialLifecycleApi(lockVault);
+  render(<MobileVaultApp api={controller.api} platform="android" />);
+  expect(await screen.findByText("Fill credentials for:")).toBeVisible();
+
+  controller.setPending(true);
+  controller.background();
+  expect(await screen.findByText("Securing Nian Pass")).toBeVisible();
+  expect(lockVault).not.toHaveBeenCalled();
+
+  controller.setPending(false);
+  controller.resume();
+  await waitFor(() => {
+    expect(lockVault).toHaveBeenCalledOnce();
+  });
+  expect(screen.getByText("Securing Nian Pass")).toBeVisible();
+  expect(screen.queryByText("native detail")).not.toBeInTheDocument();
+});
+
+test("credential lifecycle reconciles an already locked Rust session", async () => {
+  const controller = credentialLifecycleApi();
+  controller.setLocked();
+  render(<MobileVaultApp api={controller.api} platform="android" />);
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Open KDBX" })).toBeVisible();
+  });
+  expect(controller.api.lockVault).not.toHaveBeenCalled();
 });
 
 test("Autofill source settings explicitly enable, disable, and open Android setup", async () => {

@@ -143,7 +143,22 @@ fingerprint(save.readBack)
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialActivity.kt",
-    "FLAG_SECURE onNewIntent setIntent(intent)\n",
+    "FLAG_SECURE onNewIntent setIntent(intent) retireForBackground CredentialCompletionGate completeCurrentRequest\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityRuntime.kt",
+    'FLAG_SECURE setRecentsScreenshotEnabled(false) Build.VERSION.SDK_INT PrivacyCurtainController ProcessLifecycleOwner SystemClock::elapsedRealtime contentDescription = "Nian Pass locked" acknowledgeSafeUi\n',
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityPolicy.kt",
+    "onForeground onBackground onScreenStateChanged expectedGeneration CurtainAttachmentModel\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/MobileSecurityPolicyTest.kt",
+    "lifecycleGenerationIsMonotonicAndDuplicateTransitionsAreIdempotent staleAcknowledgementAndScreenOffStayFailClosed curtainAndApiPoliciesAreIdempotent\n",
   );
   write(
     root,
@@ -200,6 +215,9 @@ retainAutofillReadGrant
   );
   write(root, "apps/desktop/src-tauri/src/mobile/state.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/state_autofill.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/security_commands.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/source_security.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/state_security.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/source.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/source_autofill.rs");
   write(
@@ -240,6 +258,8 @@ mobile_autofill_publish_candidates
 mobile_autofill_approve
 mobile_autofill_cancel
 mobile_open_autofill_settings
+mobile_security_resume
+mobile_security_acknowledge_safe_ui
 ]
 expect("Nian Pass Android runtime failed");
 }
@@ -276,6 +296,7 @@ generate_handler![runtime_info, mobile_select_vault, mobile_unlock_vault, mobile
     "IdentityProjection password_identities\n",
   );
   write(root, "apps/desktop/src/lib/mobile.ts");
+  write(root, "apps/desktop/src/lib/mobile-security-validation.ts");
   write(root, "apps/desktop/src/lib/mobile-autofill.ts");
   write(
     root,
@@ -287,6 +308,14 @@ generate_handler![runtime_info, mobile_select_vault, mobile_unlock_vault, mobile
     "apps/desktop/src/features/mobile/MobileLockedView.tsx",
     "apps/desktop/src/features/mobile/MobileAutofillPanel.tsx",
     "apps/desktop/src/features/mobile/MobileAutofillSettings.tsx",
+    "apps/desktop/src/features/mobile/MobileSecurityShield.tsx",
+    "apps/desktop/src/features/mobile/MobileTransitionShield.tsx",
+    "apps/desktop/src/features/mobile/MobileUnlockedView.tsx",
+    "apps/desktop/src/features/mobile/MobileUnlockedHeader.tsx",
+    "apps/desktop/src/features/mobile/useMobileAutofillLaunch.ts",
+    "apps/desktop/src/features/mobile/useMobileIdleSecurity.ts",
+    "apps/desktop/src/features/mobile/useMobileSecurityLifecycle.ts",
+    "apps/desktop/src/features/mobile/useMobileUnlockedSecurity.ts",
   ]) {
     write(root, path);
   }
@@ -509,4 +538,29 @@ test("mobile TypeScript transport identifiers are rejected", (t) => {
     "interface Selection { contentUri: string; stagedPath?: string }\n",
   );
   assert.match(runChecks(root).join("\n"), /must not expose URI or path/);
+});
+
+test("M5.5 secure lifecycle, monotonic time, and memory-only policy cannot drift", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityRuntime.kt",
+    "System.currentTimeMillis()\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/CredentialActivity.kt",
+    "FLAG_SECURE onNewIntent setIntent(intent)\n",
+  );
+  write(
+    root,
+    "apps/desktop/src/features/mobile/useMobileIdleSecurity.ts",
+    "Date.now(); localStorage.setItem('timeout', 'never'); new BiometricPrompt();\n",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /native security lifecycle must retain/);
+  assert.match(violations, /never wall clock time/);
+  assert.match(violations, /application-memory only/);
+  assert.match(violations, /biometric quick unlock must remain deferred/);
+  assert.match(violations, /CredentialActivity lifecycle must retain/);
 });

@@ -6,6 +6,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CredentialRequestReconstructionTest {
+  @Test
+  fun lifecycleCompletionIsExactlyOnceAndCannotRetireANewerRequest() {
+    val gate = CredentialCompletionGate()
+    gate.activate("request-a")
+    assertFalse(gate.complete("request-b"))
+    assertTrue(gate.complete("request-a"))
+    assertFalse(gate.complete("request-a"))
+
+    gate.activate("request-b")
+    assertEquals("request-b", gate.retire())
+    assertEquals(null, gate.retire())
+  }
+
   private val target = CredentialTarget(TargetKind.APP, "dev.example", "cert")
 
   @Test

@@ -103,6 +103,7 @@ export function runChecks(root, budget) {
       name !== "apps/desktop/src-tauri/src/commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/autofill_commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/mobile/security_commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/ios_commands.rs"
     ) {
       checkPattern(

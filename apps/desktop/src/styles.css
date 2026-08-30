@@ -91,6 +91,16 @@ textarea:focus-visible {
   min-height: 100vh;
   background: #f7f8f6;
 }
+
+.mobile-timeout-control {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.mobile-timeout-control select {
+  min-width: 7.5rem;
+}
 .mobile-top-bar {
   height: auto;
   min-height: 76px;

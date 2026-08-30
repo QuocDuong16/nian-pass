@@ -21,6 +21,7 @@ interface Options {
   onLocked: () => void;
   onLockPendingChange: (pending: boolean) => void;
   onLockFailure: () => void;
+  onSaveCompleted?: () => void;
 }
 
 export function useMobileSaveFlow(options: Options) {
@@ -70,6 +71,7 @@ export function useMobileSaveFlow(options: Options) {
         return;
       }
       setSaved(true);
+      options.onSaveCompleted?.();
       setFlow({ kind: "closed" });
       if (intent === "lock") {
         options.onLockPendingChange(true);
@@ -166,6 +168,9 @@ export function useMobileSaveFlow(options: Options) {
     },
     dismissUncertain: () => {
       setFlow({ kind: "closed" });
+    },
+    clearCredential: () => {
+      setPassword("");
     },
   };
 }

@@ -31,6 +31,9 @@ for required in \
   grep -Fq "${required}" "${merged_manifest}" || fail "merged manifest is missing ${required}"
 done
 grep -A8 -F 'dev.nian.pass.CredentialActivity' "${merged_manifest}" | grep -Fq 'android:exported="false"' || fail "credential Activity is not private"
+if grep -Eq 'android:foregroundServiceType=|android\.permission\.BIND_ACCESSIBILITY_SERVICE|android\.accessibilityservice\.AccessibilityService|android:supportsPictureInPicture="true"' "${merged_manifest}"; then
+  fail "merged manifest enables an unexpected foreground/accessibility/PiP component"
+fi
 
 permissions="$(${aapt2} dump permissions "${apk}")"
 for forbidden in \
@@ -39,6 +42,7 @@ for forbidden in \
   android.permission.WRITE_EXTERNAL_STORAGE \
   android.permission.MANAGE_EXTERNAL_STORAGE \
   android.permission.QUERY_ALL_PACKAGES \
+  android.permission.FOREGROUND_SERVICE \
   android.permission.SYSTEM_ALERT_WINDOW; do
   if grep -Fq "${forbidden}" <<<"${permissions}"; then
     fail "release APK requests forbidden permission ${forbidden}"
@@ -56,4 +60,4 @@ if grep -Eiq 'PUBLIC_KEY|PASSKEY' <<<"${provider_xml}"; then
   fail "APK declares a passkey capability"
 fi
 
-printf 'Android release verified: both services registered, password-only provider, private credential Activity, no forbidden permissions.\n'
+printf 'Android release verified: both services registered, password-only provider, private credential Activity, no foreground service, no forbidden permissions.\n'

@@ -185,9 +185,9 @@ test("detail and Lock failures remain generic without discarding the browse view
   expect(screen.getByText("fixture.kdbx")).toBeVisible();
 });
 
-test("document hiding shields browse metadata and clears selected detail", async () => {
+test("document hiding shields metadata and cleanly locks the Rust session", async () => {
   const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
-  await selectVault();
+  const api = await selectVault();
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: "demopass" },
   });
@@ -199,13 +199,18 @@ test("document hiding shields browse metadata and clears selected detail", async
 
   hidden.mockReturnValue(true);
   fireEvent(document, new Event("visibilitychange"));
-  expect(await screen.findByText("Vault hidden")).toBeVisible();
+  await waitFor(() => {
+    expect(api.lockVault).toHaveBeenCalledOnce();
+  });
+  expect(screen.getByText("Nian Pass locked")).toBeVisible();
   expect(screen.queryByText("fixture.kdbx")).not.toBeInTheDocument();
+  expect(screen.queryByText("Account type")).not.toBeInTheDocument();
 
   hidden.mockReturnValue(false);
   fireEvent(document, new Event("visibilitychange"));
-  expect(await screen.findByText("fixture.kdbx")).toBeVisible();
-  expect(screen.queryByText("Account type")).not.toBeInTheDocument();
+  expect(
+    await screen.findByRole("button", { name: "Open KDBX" }),
+  ).toBeVisible();
 });
 
 test("Lock clears browse detail and returns to no-selection state", async () => {

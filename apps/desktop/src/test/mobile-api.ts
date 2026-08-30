@@ -50,6 +50,8 @@ export const mobileDetail: EntryDetailDto = {
 };
 
 export function createMobileApi(overrides: Partial<MobileApi> = {}): MobileApi {
+  let securityGeneration = 1;
+  let securityForeground = !document.hidden;
   return {
     selectVault: vi
       .fn()
@@ -82,6 +84,23 @@ export function createMobileApi(overrides: Partial<MobileApi> = {}): MobileApi {
     reloadVault: vi.fn().mockResolvedValue(mobileSnapshot),
     lockVault: vi.fn().mockResolvedValue(undefined),
     discardChangesAndLock: vi.fn().mockResolvedValue(undefined),
+    securityResume: vi.fn().mockImplementation(() => {
+      const foreground = !document.hidden;
+      if (foreground !== securityForeground) {
+        securityForeground = foreground;
+        securityGeneration += 1;
+      }
+      return Promise.resolve({
+        foreground,
+        elapsedRealtimeMs: performance.now(),
+        generation: securityGeneration,
+        screenState: "active",
+        curtainVisible: true,
+        vaultState: "clean",
+        operationPending: false,
+      });
+    }),
+    acknowledgeSafeUi: vi.fn().mockResolvedValue({ acknowledged: true }),
     getAutofillStatus: vi.fn().mockResolvedValue({
       supported: true,
       sourceEnabled: false,

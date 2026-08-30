@@ -76,6 +76,17 @@ refresh, READ-only bookmark normalization, verified WRITE release before Lock,
 and read-only cold rehydration. Durable metadata is rejected if it references a
 Credential Manager request, AssistStructure, AutofillId, Bundle, or Parcel.
 
+For M5.5 the source ratchet additionally requires `FLAG_SECURE`, the guarded
+API 33 `setRecentsScreenshotEnabled(false)` call, one native privacy-curtain
+controller, `ProcessLifecycleOwner`, `SystemClock.elapsedRealtime`, generation
+acknowledgement, and CredentialActivity authority retirement with exactly-once
+completion. It rejects lifecycle `System.currentTimeMillis()`/`Date.now()`,
+mobile `localStorage`, `sessionStorage`, IndexedDB, Cache API, or cookies,
+BiometricPrompt quick-unlock code, password/password-equivalent persistence,
+PiP, accessibility services, and foreground-service declarations. The release
+APK verifier also rejects `FOREGROUND_SERVICE`, overlay, network, storage, and
+broad package permissions; it does not infer UI behavior by scanning APK strings.
+
 `mobile-tools-check` validates Java, SDK 36, Build Tools 36.0.0, NDK, the two
 priority Rust targets, and the repository-pinned Tauri CLI without installing
 anything. `mobile-android-check` invokes `tauri android build --apk` for
@@ -86,7 +97,20 @@ Linux/desktop CI never silently skips or unexpectedly requires an Android SDK.
 The binary gate also inspects the merged manifest for both credential services,
 their binding permissions, password-only provider metadata, and the private
 credential Activity, then dumps APK permissions to prove release still has no
-`INTERNET` or broad storage/package permission.
+`INTERNET`, foreground-service, overlay, or broad storage/package permission.
+
+M5.5 frontend lifecycle tests use Vitest fake timers and synthetic monotonic
+timestamps; they cover immediate background shielding, clean authoritative
+Lock, dirty/draft non-discard, screen-off attention, resume expiry, failed Lock,
+stale unlock/Save/mutation completion, pending operation reconciliation,
+Continue deadline reset, the five-minute default, remount reset, and Never
+semantics without real sleeps. Strict DTO tests reject extra secret-like keys.
+Pure JVM tests cover lifecycle generation, duplicate transitions, stale
+acknowledgement, screen classification, idempotent curtain policy, API-level
+Recents policy, and CredentialActivity exactly-once completion. Android
+instrumentation sources assert secure flags and curtain attach/remove behavior,
+but the headless gate only compiles them. Compilation is not a claim that those
+tests ran on a device or that a real OEM Recents/screenshot path was observed.
 
 Apple validation is explicitly separate and deferred. The dedicated
 `mobile-ios-tools-check`, `mobile-ios-source-check`, and `mobile-ios-check`

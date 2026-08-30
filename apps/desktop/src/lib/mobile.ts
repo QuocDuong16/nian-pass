@@ -10,6 +10,10 @@ import {
   parseAutofillLaunch,
   parseAutofillStatus,
 } from "./mobile-autofill";
+import {
+  parseMobileSecurityAcknowledgement,
+  parseMobileSecurityResume,
+} from "./mobile-security-validation";
 import { parseEntryDetail, parseSecretString } from "./entry-validation";
 import {
   nonEmptyString,
@@ -173,6 +177,14 @@ export const mobileApi: MobileApi = {
   lockVault: () => call("mobile_lock_vault", parseVoid),
   discardChangesAndLock: () =>
     call("mobile_discard_changes_and_lock", parseVoid),
+  securityResume: () =>
+    call("mobile_security_resume", parseMobileSecurityResume),
+  acknowledgeSafeUi: (generation) =>
+    call(
+      "mobile_security_acknowledge_safe_ui",
+      parseMobileSecurityAcknowledgement,
+      { generation },
+    ),
   getAutofillStatus: () => call("mobile_autofill_status", parseAutofillStatus),
   enableAutofill: () =>
     call("mobile_enable_autofill_for_vault", parseAutofillStatus),

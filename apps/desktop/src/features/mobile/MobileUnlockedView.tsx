@@ -1,19 +1,34 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { VaultSnapshotDto } from "../../types/desktop";
-import type { MobileApi, MobileSelectedVaultDto } from "../../types/mobile";
+import type {
+  MobileApi,
+  MobileSecurityResumeDto,
+  MobileSelectedVaultDto,
+} from "../../types/mobile";
 import type { RuntimePlatform } from "../../types/runtime";
 import { DirtyExitDialog } from "../vault/DirtyExitDialog";
-import { MobileSaveDialogs } from "./MobileSaveDialogs";
 import { MobileAutofillSettings } from "./MobileAutofillSettings";
+import { MobileSaveDialogs } from "./MobileSaveDialogs";
+import {
+  MobileSecurityShield,
+  type MobileSecurityAttention,
+} from "./MobileSecurityShield";
 import { MobileVaultBrowser } from "./MobileVaultBrowser";
+import { MobileUnlockedHeader } from "./MobileUnlockedHeader";
+import { DEFAULT_MOBILE_AUTO_LOCK_MS } from "./useMobileIdleSecurity";
 import { useMobileSaveFlow } from "./useMobileSaveFlow";
+import { useMobileUnlockedSecurity } from "./useMobileUnlockedSecurity";
 
 interface Props {
   api: MobileApi;
   selected: MobileSelectedVaultDto;
   initialSnapshot: VaultSnapshotDto;
   hidden: boolean;
+  securityStatus: MobileSecurityResumeDto | null;
+  securityRefreshing: boolean;
+  onAcknowledgeSafeUi: (generation: number) => Promise<boolean>;
+  onRefreshSecurity: () => Promise<MobileSecurityResumeDto | null>;
   platform: Extract<RuntimePlatform, "android" | "ios">;
   onLocked: () => void;
 }
@@ -22,166 +37,169 @@ export function MobileUnlockedView(props: Props) {
   const readOnly = props.platform === "ios";
   const [snapshot, setSnapshot] = useState(props.initialSnapshot);
   const [hasDraft, setHasDraft] = useState(false);
+  const [draftVersion, setDraftVersion] = useState(0);
   const [mutationPending, setMutationPending] = useState(false);
   const [lockPending, setLockPending] = useState(false);
   const [dirtyExit, setDirtyExit] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
+  const [attention, setAttention] = useState<MobileSecurityAttention | null>(
+    null,
+  );
+  const [timeoutMs, setTimeoutMs] = useState<number | null>(
+    DEFAULT_MOBILE_AUTO_LOCK_MS,
+  );
+  const recordActivityRef = useRef<() => void>(() => undefined);
+
   const flow = useMobileSaveFlow({
     api: props.api,
     dirty: snapshot.dirty,
     onSnapshot: setSnapshot,
     onLocked: props.onLocked,
-    onLockPendingChange: setLockPending,
+    onLockPendingChange: (pending) => {
+      setLockPending(pending);
+      if (pending) {
+        setAttention((current) => (current === null ? null : "locking"));
+      }
+    },
     onLockFailure: () => {
       setLockError(
         "The vault is saved, but Nian Pass could not safely release the active Android source.",
       );
+      setAttention((current) => (current === null ? null : "lock_error"));
+    },
+    onSaveCompleted: () => {
+      recordActivityRef.current();
     },
   });
 
-  if (props.hidden) {
-    return (
-      <main className="security-shield">
-        <section className="security-card">
-          <h1>Vault hidden</h1>
-          <p>Return to Nian Pass to continue.</p>
-        </section>
-      </main>
-    );
-  }
+  const security = useMobileUnlockedSecurity({
+    api: props.api,
+    readOnly,
+    hidden: props.hidden,
+    securityStatus: props.securityStatus,
+    securityRefreshing: props.securityRefreshing,
+    snapshot,
+    hasDraft,
+    mutationPending,
+    flowBusy: flow.busy,
+    clearSaveCredential: flow.clearCredential,
+    lockPending,
+    setLockPending,
+    attention,
+    setAttention,
+    setLockError,
+    setDirtyExit,
+    timeoutMs,
+    onDiscardDraft: () => {
+      setDraftVersion((value) => value + 1);
+      setHasDraft(false);
+    },
+    onLocked: props.onLocked,
+    onAcknowledgeSafeUi: props.onAcknowledgeSafeUi,
+    onRefreshSecurity: props.onRefreshSecurity,
+  });
+  useEffect(() => {
+    recordActivityRef.current = security.recordActivity;
+  }, [security.recordActivity]);
 
-  const busy = (!readOnly && flow.busy) || mutationPending || lockPending;
-  const editsDisabled = busy || !props.selected.writable || flow.blocked;
+  const busy = security.busy;
+
+  const contentHidden = props.hidden || attention !== null;
+  const backgrounded =
+    props.securityStatus !== null
+      ? !props.securityStatus.foreground ||
+        props.securityStatus.screenState !== "active"
+      : props.hidden;
+  const editsDisabled =
+    busy || !props.selected.writable || flow.blocked || contentHidden;
   const saveDisabled =
     busy ||
     hasDraft ||
     !snapshot.dirty ||
     !props.selected.writable ||
     flow.flow.kind !== "closed" ||
-    flow.blocked;
-
-  const lock = async () => {
-    if (busy) return;
-    setLockError(null);
-    if (snapshot.dirty) {
-      setDirtyExit(true);
-      return;
-    }
-    setLockPending(true);
-    try {
-      await props.api.lockVault();
-      props.onLocked();
-    } catch {
-      setLockError(
-        "Nian Pass could not safely release the active document source.",
-      );
-    } finally {
-      setLockPending(false);
-    }
-  };
-
-  const discard = async () => {
-    if (busy) return;
-    setLockPending(true);
-    try {
-      await props.api.discardChangesAndLock();
-      props.onLocked();
-    } catch {
-      setDirtyExit(false);
-      setLockError(
-        "The dirty session remains open because discard-and-lock did not complete.",
-      );
-    } finally {
-      setLockPending(false);
-    }
-  };
+    flow.blocked ||
+    contentHidden;
 
   return (
-    <main className="mobile-vault-shell">
-      <header className="top-bar mobile-top-bar">
-        <div className="product-lockup">
-          <span className="brand-mark small" aria-hidden="true">
-            N
-          </span>
-          <div>
-            <p className="eyebrow">
-              {props.platform === "ios" ? "iOS" : "Android"} ·{" "}
-              {readOnly || !props.selected.writable
-                ? "Read only"
-                : "Explicit Save"}
+    <>
+      <div hidden={contentHidden} aria-hidden={contentHidden}>
+        <main className="mobile-vault-shell">
+          <MobileUnlockedHeader
+            platform={props.platform}
+            selected={props.selected}
+            dirty={snapshot.dirty}
+            hasDraft={hasDraft}
+            readOnly={readOnly}
+            busy={busy}
+            blocked={flow.blocked}
+            saved={flow.saved}
+            saveDisabled={saveDisabled}
+            timeoutMs={timeoutMs}
+            onTimeout={(next) => {
+              setTimeoutMs(next);
+              security.recordActivity();
+            }}
+            onSave={() => {
+              flow.start("save");
+            }}
+            onLock={() => void security.requestManualLock()}
+          />
+          {!props.selected.writable && !readOnly ? (
+            <p className="shell-error" role="status">
+              This provider did not grant persistent writable access. Browsing
+              remains available; editing and Save are disabled.
             </p>
-            <h1>Nian Pass</h1>
-            <p className="mobile-file-name">{props.selected.fileName}</p>
-            {snapshot.dirty ? (
-              <p className="dirty-indicator" role="status">
-                Unsaved changes
-              </p>
-            ) : null}
-          </div>
-        </div>
-        <div className="top-bar-actions">
-          <span className="save-status" aria-live="polite" hidden={readOnly}>
-            {flow.saved && !snapshot.dirty ? "Saved" : ""}
-          </span>
-          {readOnly ? null : (
-            <button
-              type="button"
-              aria-label="Save vault"
-              disabled={saveDisabled}
-              title={
-                hasDraft
-                  ? "Apply or cancel the current draft before saving"
-                  : undefined
-              }
-              onClick={() => {
-                flow.start("save");
-              }}
-            >
-              Save
-            </button>
+          ) : null}
+          {lockError === null ? null : (
+            <p className="shell-error" role="alert">
+              {lockError}
+            </p>
           )}
-          <button
-            className="secondary-button lock-button"
-            type="button"
-            disabled={busy || flow.blocked}
-            onClick={() => void lock()}
-          >
-            Lock
-          </button>
-        </div>
-      </header>
-      {!props.selected.writable && !readOnly ? (
-        <p className="shell-error" role="status">
-          This provider did not grant persistent writable access. Browsing
-          remains available; editing and Save are disabled.
-        </p>
-      ) : null}
-      {lockError === null ? null : (
-        <p className="shell-error" role="alert">
-          {lockError}
-        </p>
-      )}
-      <MobileAutofillSettings api={props.api} platform={props.platform} />
-      <MobileVaultBrowser
-        api={props.api}
-        snapshot={snapshot}
-        disabled={editsDisabled}
-        readOnly={readOnly}
-        onSnapshot={setSnapshot}
-        onDraftChange={setHasDraft}
-        onBusyChange={setMutationPending}
-      />
-      {dirtyExit && !readOnly ? (
-        <DirtyExitDialog
-          intent="lock"
-          busy={busy}
-          onCancel={() => {
-            setDirtyExit(false);
-          }}
-          onDiscard={() => void discard()}
-          onSave={() => {
-            setDirtyExit(false);
+          <MobileAutofillSettings api={props.api} platform={props.platform} />
+          <MobileVaultBrowser
+            key={draftVersion}
+            api={props.api}
+            snapshot={snapshot}
+            disabled={editsDisabled}
+            readOnly={readOnly}
+            onSnapshot={setSnapshot}
+            onDraftChange={setHasDraft}
+            onBusyChange={setMutationPending}
+          />
+          {dirtyExit && !readOnly ? (
+            <DirtyExitDialog
+              intent="lock"
+              busy={busy}
+              onCancel={() => {
+                setDirtyExit(false);
+              }}
+              onDiscard={() => {
+                void security.discardAndLock(false);
+              }}
+              onSave={() => {
+                setDirtyExit(false);
+                flow.start("lock");
+              }}
+            />
+          ) : null}
+        </main>
+      </div>
+      {contentHidden ? (
+        <MobileSecurityShield
+          attention={attention ?? "locking"}
+          backgrounded={backgrounded}
+          refreshing={props.securityRefreshing}
+          onContinue={security.continueEditing}
+          onDiscardDraft={security.discardDraft}
+          onSaveAndLock={() => {
             flow.start("lock");
+          }}
+          onDiscardAndLock={() => {
+            void security.discardAndLock(true);
+          }}
+          onRetryLock={() => {
+            security.retryCleanLock();
           }}
         />
       ) : null}
@@ -198,6 +216,6 @@ export function MobileUnlockedView(props: Props) {
           onDismissUncertain={flow.dismissUncertain}
         />
       )}
-    </main>
+    </>
   );
 }

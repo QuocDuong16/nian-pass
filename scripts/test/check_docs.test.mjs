@@ -18,7 +18,7 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "M5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle NEXT\nM6 Browser Extension Foundation\nRead-only providers have editing and Save disabled. " +
+    "## Current milestone\nM5.5 — Android Mobile Security / Lifecycle\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle CURRENT\nM6 Browser Extension Foundation NEXT\nRead-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
@@ -41,6 +41,9 @@ function fixture(t) {
       "A populated origin failure is unavailable; isOriginPopulated() then getOrigin(privilegedAllowlist). " +
       "retrieveBeginGetCredentialRequest() and retrieveProviderGetCredentialRequest() rebuild authority after process restart. " +
       "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n" +
+      "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
+      "SystemClock.elapsedRealtime() feeds a monotonic generation and exact safe-UI acknowledgement. " +
+      "A dirty draft remains shielded and lifecycle never autosaves or discards it.\n" +
       "UIDocumentPickerViewController uses NSFileCoordinator before an encrypted App Group mirror. " +
       "Host-only access group stores the bookmark; Keychain NEVER stores a master password. " +
       "np_ios_open_vault uses explicit FFI ownership and panic containment.\n",
@@ -54,6 +57,8 @@ function fixture(t) {
       "A fake Android application, changed signing key, unverified web target, and replayed request token fail closed. " +
       "A browser confused deputy, process death, stale PendingIntent, and singleTop stale intent fail closed. " +
       "setUserAuthenticationRequired(false) protects metadata with no master password.\n" +
+      "FLAG_SECURE cannot defeat root or a compromised OS; monotonic policy rejects wall-clock rollback. " +
+      "Android process death can lose unsaved edits, but plaintext recovery persistence is forbidden.\n" +
       "The extension is a separate short-lived process. Mirror size and SHA-256 reject tampering before identity release.\n",
   );
   write(
@@ -69,6 +74,7 @@ function fixture(t) {
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
       "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
       "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
+      "M5.5 requires SystemClock.elapsedRealtime and lifecycle source ratchets; Android instrumentation only compiles headlessly.\n" +
       "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");

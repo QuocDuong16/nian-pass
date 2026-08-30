@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MobileCommandError } from "../../lib/mobile";
 import type { VaultSnapshotDto } from "../../types/desktop";
 import type { MobileApi, MobileSelectedVaultDto } from "../../types/mobile";
-import type { MobileAutofillRequestDto } from "../../types/mobile";
 import type { RuntimePlatform } from "../../types/runtime";
 import { MobileAutofillPanel } from "./MobileAutofillPanel";
 import { MobileLockedView } from "./MobileLockedView";
+import { MobileTransitionShield } from "./MobileTransitionShield";
 import { MobileUnlockedView } from "./MobileUnlockedView";
+import { useMobileAutofillLaunch } from "./useMobileAutofillLaunch";
+import { useMobileSecurityLifecycle } from "./useMobileSecurityLifecycle";
 
 interface MobileVaultAppProps {
   api: MobileApi;
@@ -26,40 +28,38 @@ export function MobileVaultApp({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hidden, setHidden] = useState(document.hidden);
-  const [autofillRequest, setAutofillRequest] =
-    useState<MobileAutofillRequestDto | null>(null);
-
-  useEffect(() => {
-    if (platform !== "android") return undefined;
-    let active = true;
-    void api
-      .getAutofillRequest()
-      .then((launch) => {
-        if (!active || launch === null) return;
-        setAutofillRequest(launch.request);
-        if (launch.selectedVault !== null) {
-          setSelected(launch.selectedVault);
-          setPhase("selected_locked");
-          return;
-        }
-        return api
-          .getVaultSnapshot()
-          .then((current) => {
-            if (!active) return;
-            setSnapshot(current);
-            setPhase("unlocked");
-          })
-          .catch(() => {
-            // A locked provider without a remembered source remains a valid state.
-          });
-      })
-      .catch(() => {
-        // Normal launcher starts have no Android credential request.
-      });
-    return () => {
-      active = false;
-    };
-  }, [api, platform]);
+  const clearFrontendCredentials = useCallback(() => {
+    setPassword("");
+  }, []);
+  const security = useMobileSecurityLifecycle({
+    api,
+    enabled: platform === "android",
+    onSecurityTransition: clearFrontendCredentials,
+  });
+  const onAutofillSelected = useCallback((next: MobileSelectedVaultDto) => {
+    setSelected(next);
+    setPhase("selected_locked");
+  }, []);
+  const onAutofillUnlocked = useCallback((current: VaultSnapshotDto) => {
+    setSnapshot(current);
+    setPhase("unlocked");
+  }, []);
+  const { request: autofillRequest, clearRequest: clearAutofillRequest } =
+    useMobileAutofillLaunch({
+      api,
+      enabled: platform === "android",
+      onSelected: onAutofillSelected,
+      onUnlocked: onAutofillUnlocked,
+    });
+  const autofillLockGeneration = useRef<number | null>(null);
+  const resetLocked = useCallback(() => {
+    setPassword("");
+    setSelected(null);
+    setSnapshot(null);
+    setError(null);
+    clearAutofillRequest();
+    setPhase("no_selection");
+  }, [clearAutofillRequest]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -72,6 +72,75 @@ export function MobileVaultApp({
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
+
+  useEffect(() => {
+    const status = security.status;
+    if (
+      platform !== "android" ||
+      status === null ||
+      security.refreshing ||
+      !status.foreground ||
+      status.screenState !== "active" ||
+      phase === "unlocking" ||
+      phase === "unlocked"
+    ) {
+      return;
+    }
+    void security.acknowledge(status.generation);
+  }, [
+    phase,
+    platform,
+    security.acknowledge,
+    security.refreshing,
+    security.status,
+    security,
+  ]);
+
+  useEffect(() => {
+    const status = security.status;
+    if (
+      platform !== "android" ||
+      phase !== "unlocked" ||
+      autofillRequest === null ||
+      !security.shielded ||
+      security.refreshing ||
+      status === null ||
+      autofillLockGeneration.current === status.generation
+    ) {
+      return;
+    }
+    if (status.vaultState === "locked") {
+      void Promise.resolve().then(resetLocked);
+      return;
+    }
+    if (!security.boundaryPending) {
+      void security.acknowledge(status.generation);
+      return;
+    }
+    if (status.operationPending) {
+      void security.refresh();
+      return;
+    }
+    autofillLockGeneration.current = status.generation;
+    void api
+      .lockVault()
+      .then(resetLocked)
+      .catch(() => {
+        setError("Nian Pass could not safely lock the credential session.");
+      });
+  }, [
+    api,
+    autofillRequest,
+    phase,
+    platform,
+    resetLocked,
+    security.refresh,
+    security.boundaryPending,
+    security.refreshing,
+    security.shielded,
+    security.status,
+    security,
+  ]);
 
   const choose = async () => {
     if (busy) return;
@@ -117,16 +186,17 @@ export function MobileVaultApp({
     }
   };
 
-  const resetLocked = () => {
-    setPassword("");
-    setSelected(null);
-    setSnapshot(null);
-    setError(null);
-    setAutofillRequest(null);
-    setPhase("no_selection");
-  };
-
   if (phase === "unlocked" && snapshot !== null && autofillRequest !== null) {
+    if (platform === "android" && security.shielded) {
+      return (
+        <MobileTransitionShield
+          title="Securing Nian Pass"
+          titleId="mobile-secure-title"
+        >
+          Credential content remains unavailable during this transition.
+        </MobileTransitionShield>
+      );
+    }
     return <MobileAutofillPanel api={api} request={autofillRequest} />;
   }
 
@@ -136,10 +206,25 @@ export function MobileVaultApp({
         api={api}
         selected={selected}
         initialSnapshot={snapshot}
-        hidden={hidden}
+        hidden={platform === "android" ? security.shielded : hidden}
+        securityStatus={platform === "android" ? security.status : null}
+        securityRefreshing={security.refreshing}
+        onAcknowledgeSafeUi={security.acknowledge}
+        onRefreshSecurity={security.refresh}
         platform={platform}
         onLocked={resetLocked}
       />
+    );
+  }
+
+  if (platform === "android" && security.shielded && security.boundaryPending) {
+    return (
+      <MobileTransitionShield
+        title="Nian Pass locked"
+        titleId="mobile-locked-title"
+      >
+        Sensitive input is unavailable during this transition.
+      </MobileTransitionShield>
     );
   }
 

@@ -507,7 +507,10 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       }
       val result = Intent()
       PendingIntentHandler.setBeginGetCredentialResponse(result, response.build())
-      credentialActivity.consumeCurrentRequest()
+      if (!credentialActivity.completeCurrentRequest(requestToken)) {
+        invoke.resolve(status("failed"))
+        return
+      }
       credentialActivity.setResult(Activity.RESULT_OK, result)
       credentialActivity.finish()
       invoke.resolve(status("ok"))
@@ -567,14 +570,16 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
           }
         }
       }
-      if (AutofillRuntime.registry.complete(requestToken, candidateToken) == null) {
+      if (
+        AutofillRuntime.registry.complete(requestToken, candidateToken) == null ||
+        !credentialActivity.completeCurrentRequest(requestToken)
+      ) {
         invoke.resolve(status("failed"))
         return
       }
       if (!trusted && approved && record.target.kind == TargetKind.APP) {
         autofillStore.saveAssociation(record.target.packageName, record.target.signingIdentity)
       }
-      credentialActivity.consumeCurrentRequest()
       credentialActivity.setResult(Activity.RESULT_OK, result)
       credentialActivity.finish()
       invoke.resolve(status("ok"))
@@ -588,9 +593,10 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     val requestToken = invoke.getArgs().getString("requestToken")
     AutofillRuntime.registry.cancel(requestToken)
     AutofillRuntime.activeCredentialActivity?.apply {
-      consumeCurrentRequest()
-      setResult(Activity.RESULT_CANCELED)
-      finish()
+      if (completeCurrentRequest(requestToken)) {
+        setResult(Activity.RESULT_CANCELED)
+        finish()
+      }
     }
     invoke.resolve(status("ok"))
   }
@@ -612,6 +618,23 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  @Command
+  fun securityStatus(invoke: Invoke) {
+    invoke.resolve(securitySnapshot(MobileSecurityRuntime.status(activity)))
+  }
+
+  @Command
+  fun acknowledgeSafeUi(invoke: Invoke) {
+    val generation = try {
+      invoke.getArgs().getLong("generation")
+    } catch (_: Exception) {
+      invoke.resolve(status("stale"))
+      return
+    }
+    val acknowledged = MobileSecurityRuntime.acknowledgeSafeUi(activity, generation)
+    invoke.resolve(status(if (acknowledged) "acknowledged" else "stale"))
+  }
+
   private fun validBookmark(): AutofillMetadata? {
     val bookmark = autofillStore.loadBookmark() ?: return null
     return try {
@@ -625,6 +648,19 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     } catch (_: Exception) {
       null
     }
+  }
+
+  private fun securitySnapshot(snapshot: MobileSecuritySnapshot): JSObject = JSObject().apply {
+    put("status", "ok")
+    put("foreground", snapshot.foreground)
+    put("elapsedRealtimeMs", snapshot.elapsedRealtimeMs)
+    put("generation", snapshot.generation)
+    put("screenState", when (snapshot.screenState) {
+      MobileScreenState.ACTIVE -> "active"
+      MobileScreenState.SCREEN_OFF -> "screen_off"
+      MobileScreenState.DEVICE_LOCKED -> "device_locked"
+    })
+    put("curtainVisible", snapshot.curtainVisible)
   }
 
   private fun retainAutofillReadGrant(uri: Uri): Boolean = AutofillGrantPolicy.retainReadOnly(

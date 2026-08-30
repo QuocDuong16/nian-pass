@@ -12,6 +12,109 @@ M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
 coverage ratchets, and Forgejo jobs that call the same targets used locally.
 
+## M5.5 Android security lifecycle
+
+M5.5 adds an Android-owned visibility boundary around the existing Rust-owned
+mobile vault session:
+
+```text
+Android Activity/process lifecycle
+→ native FLAG_SECURE + opaque privacy curtain
+→ semantic lifecycle snapshot with monotonic generation
+→ mobile security reconciliation in React
+→ existing Rust mobile_lock_vault transaction
+→ native source/grant release
+→ exact Rust operation completion and session drop
+→ safe-UI acknowledgement for the same generation
+→ native curtain removal
+```
+
+`MainActivity` and the private `CredentialActivity` both apply `FLAG_SECURE`.
+On API 33 and newer they also call `setRecentsScreenshotEnabled(false)`; API
+26–32 retain `FLAG_SECURE`. `MobileSecurityRuntime` attaches one opaque native
+view per Activity on pause or focus loss, gives it the generic accessibility
+label `Nian Pass locked`, and hides the WebView accessibility subtree. Repeated
+show/hide requests are idempotent, Activity references are weak, and every
+recreated Activity starts covered. No filename, vault title, username, entry
+metadata, URI, or error detail enters the curtain or Recents task metadata.
+
+`ProcessLifecycleOwner` supplies actual process foreground/background state.
+Public screen broadcasts plus `KeyguardManager.isDeviceLocked` classify
+screen-off and device-lock signals where Android exposes them. The process-local
+policy uses `SystemClock.elapsedRealtime()` and advances a generation only on a
+real foreground/background or screen-state transition. The narrow Rust command
+combines that secret-free native snapshot with only `locked`, `clean`, `dirty`,
+and operation-pending state. React validators require the exact keys. A safe-UI
+acknowledgement succeeds only for the current foreground, active-screen
+generation; a stale unlock, Save, mutation, Lock callback, duplicate resume, or
+configuration-recreation callback cannot uncover a newer curtain.
+
+The clean path performs the existing authoritative Lock:
+
+```text
+background / screen lock / foreground inactivity expiry
+→ curtain and React shield
+→ Rust begins exact Lock operation
+→ Android releases the normal source authority, or WRITE only for a remembered source
+→ Rust completes that exact operation
+→ decrypted MobileVaultSession is dropped
+```
+
+Native release failure cancels the exact operation, keeps the Rust session, and
+leaves a generic retry shield visible. Pending Save or mutation work is never
+cancelled at an unsafe point and lifecycle code never starts a second Save. It
+stays shielded until the serialized Rust operation settles and then reconciles
+its actual result. The SAF document picker is entered from the locked selection
+flow, so no unlocked-vault exemption is needed; returning from it, Android
+settings, or any external intent follows the ordinary resume handshake. There
+is no broad `busy` or `ignoreBackground` bypass.
+
+Dirty and draft state deliberately follows a different path:
+
+```text
+background / screen lock / inactivity expiry
+→ native curtain + unmounted/hidden sensitive content
+→ dirty Rust session and local draft remain in process memory
+→ resume to an explicit decision
+→ Save and lock / Discard changes and lock / Continue editing
+```
+
+A frontend draft is resolved first with Continue editing or Discard local
+draft; any remaining Rust dirty state is then resolved separately. Save still
+requires the real master password and retains the M5.2 generation, provider
+read-back, and two-phase Lock rules. No lifecycle path autosaves or discards.
+Secret draft fields remain process-memory only and inaccessible behind the
+curtain; password inputs owned by unlock, Save, or CredentialActivity are
+cleared on the security transition. Android process death drops the decrypted
+session and can lose unsaved in-memory work; Nian Pass does not create plaintext
+crash persistence to avoid that loss.
+
+Foreground inactivity defaults to five minutes, with 1, 5, 15, 30 minute and
+Never choices held only in application memory. Meaningful pointer/touch,
+keyboard, navigation/edit actions, successful unlock, explicit Continue, and
+Save completion reset the deadline. Internal polling and render work do not.
+`performance.now()` advances the foreground estimate, while every resume
+reanchors and reconciles against native `elapsedRealtime`; JavaScript timer
+suspension and wall-clock/timezone changes therefore cannot bypass expiry.
+Never disables foreground inactivity expiry, not the native background curtain
+or clean background Lock.
+
+`CredentialActivity` uses the same secure-window policy and retires its current
+interactive authority when it pauses before completion. Its master-password
+field and Intent extras are cleared, the request registry token is consumed,
+and an exactly-once completion gate prevents a later lifecycle callback from
+double-cancelling success/failure. `onNewIntent` first retires the older request
+and installs a fresh gate, so an old pause callback cannot retire newer
+authority. M5.3 matching, final stable-entry revalidation, cold master-password
+unlock, and remembered READ-only grant semantics are unchanged.
+
+Biometric quick unlock is not implemented. The current reviewed KDBX boundary
+accepts a master password but exposes no reusable, non-password unlock material
+that can open the same file and be safely wrapped by an Android Keystore
+auth-per-use key. M5.5 does not persist an encrypted password, derived key,
+password-equivalent string, decrypted database, or KDBX XML, and it does not
+reuse the unauthenticated M5.3 metadata-protection key for future unlock.
+
 ## M5.3 Android credential retrieval
 
 M5.3 adds two Android OS surfaces over one Rust credential core:

@@ -69,6 +69,20 @@ export interface AutofillCandidateDto {
   username: SummaryTextDto;
 }
 
+export interface MobileSecurityResumeDto {
+  foreground: boolean;
+  elapsedRealtimeMs: number;
+  generation: number;
+  screenState: "active" | "screen_off" | "device_locked";
+  curtainVisible: boolean;
+  vaultState: "locked" | "clean" | "dirty";
+  operationPending: boolean;
+}
+
+export interface MobileSecurityAcknowledgementDto {
+  acknowledged: boolean;
+}
+
 export interface MobileApi {
   selectVault: () => Promise<MobileSelectedVaultDto | null>;
   unlockVault: (password: string) => Promise<VaultSnapshotDto>;
@@ -107,6 +121,10 @@ export interface MobileApi {
   reloadVault: (password: string) => Promise<VaultSnapshotDto>;
   lockVault: () => Promise<void>;
   discardChangesAndLock: () => Promise<void>;
+  securityResume: () => Promise<MobileSecurityResumeDto>;
+  acknowledgeSafeUi: (
+    generation: number,
+  ) => Promise<MobileSecurityAcknowledgementDto>;
   getAutofillStatus: () => Promise<MobileAutofillStatusDto>;
   enableAutofill: () => Promise<MobileAutofillStatusDto>;
   disableAutofill: () => Promise<MobileAutofillStatusDto>;

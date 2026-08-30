@@ -315,3 +315,38 @@ test("selection and void validators reject malformed native transport", async ()
     new MobileCommandError("internal"),
   );
 });
+
+test("mobile security DTOs require exact secret-free keys", async () => {
+  const status = {
+    foreground: true,
+    elapsedRealtimeMs: 1234,
+    generation: 7,
+    screenState: "active",
+    curtainVisible: true,
+    vaultState: "dirty",
+    operationPending: false,
+  } as const;
+  invoke
+    .mockResolvedValueOnce(status)
+    .mockResolvedValueOnce({ acknowledged: true });
+
+  await expect(mobileApi.securityResume()).resolves.toEqual(status);
+  await expect(mobileApi.acknowledgeSafeUi(7)).resolves.toEqual({
+    acknowledged: true,
+  });
+  expect(invoke).toHaveBeenNthCalledWith(
+    2,
+    "mobile_security_acknowledge_safe_ui",
+    { generation: 7 },
+  );
+
+  invoke.mockResolvedValueOnce({ ...status, password: "forbidden" });
+  await expect(mobileApi.securityResume()).rejects.toEqual(
+    new MobileCommandError("internal"),
+  );
+
+  invoke.mockResolvedValueOnce({ acknowledged: true, sourceUri: "forbidden" });
+  await expect(mobileApi.acknowledgeSafeUi(7)).rejects.toEqual(
+    new MobileCommandError("internal"),
+  );
+});

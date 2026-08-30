@@ -3,8 +3,8 @@
 This is the threat model for the M3 local vault session/filesystem foundation,
 the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
 M4.3 mutation UI, the M4.4 save/conflict flow, the M4.Q quality/security gates,
-the M5.2 Android CRUD/provider-persistence flow, and the M5.3 Android credential
-retrieval flow. It records boundaries and assumptions; it is not a
+the M5.2 Android CRUD/provider-persistence flow, the M5.3 Android credential
+retrieval flow, and the M5.5 Android security lifecycle. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
 ## Secret material
@@ -157,6 +157,15 @@ information to an attacker even when their plaintext remains unavailable.
 - A remembered Autofill source retaining WRITE after normal Lock
 - Autofill fulfillment racing Lock and returning a secret after Lock authority ends
 - Accidental master-password or KDBX derived-key persistence in Android Keystore
+- A Recents snapshot or screen capture exposing the vault
+- A stale WebView frame appearing briefly before resume reconciliation
+- WebView suspension preventing a JavaScript timeout from firing
+- Wall-clock or timezone rollback extending a security deadline
+- Dirty decrypted state remaining in process memory while shielded
+- Android process death losing unsaved in-memory mutations or drafts
+- Backgrounding during unlock, Save, mutation, or two-phase Lock
+- A stale lifecycle generation uncovering a newer privacy curtain
+- CredentialActivity background/replay releasing a secret to stale authority
 
 ## M4.Q desktop and repository controls
 
@@ -334,10 +343,82 @@ generation and still requires the normal master-password unlock.
 
 Credential creation/import, Autofill SaveRequest mutation, passkeys, TOTP
 autofill, biometric/device-credential quick unlock, derived unlock material,
-auto-lock/full background lifecycle, global screenshot/app-switcher policy,
-sync, and Apple platforms remain outside M5.3. Android lifecycle and
-quick-unlock hardening move next to M5.5. Native Apple work is intentionally
+sync, and Apple platforms remain outside M5.3. M5.5 adds the Android lifecycle
+controls below without changing M5.3 matching or fulfillment. Native Apple work is intentionally
 deferred to M9+ while the existing M5.4 Rust/shared foundation is retained.
+
+## M5.5 Android lifecycle controls and limitations
+
+Every Nian Pass Android Activity that can render sensitive content applies
+`FLAG_SECURE`; API 33+ also disables Recents screenshots. These controls reduce
+ordinary screenshots, screen recording, and app-switcher snapshot exposure.
+They do not defeat root, malware with process access, a compromised OS, a
+physical camera, every OEM bug, or an attacker who already observed plaintext
+while the device and vault were legitimately unlocked.
+
+Activity pause/focus loss attaches an opaque native privacy curtain before the
+WebView is trusted to redraw. The curtain has only a generic accessible label
+and makes covered WebView descendants inaccessible. It is intentionally
+distinct from backend Lock: it prevents display and interaction while the
+native/React/Rust state is reconciled, whereas successful Lock drops the
+decrypted Rust session. Only an acknowledgement for the current process-local
+foreground generation removes the curtain. Rotation creates a newly covered
+Activity and does not reset the policy object; stale callbacks, Back, returning
+from a document picker or Settings, multi-window focus changes, and external
+intents cannot implicitly continue editing or reveal the vault. PiP,
+AccessibilityService detection, overlay permissions, notifications, and a
+foreground service are not used.
+
+Elapsed-time policy uses Android `SystemClock.elapsedRealtime`, Rust `Instant`
+where the backend serializes work, and frontend `performance.now`; it never uses
+wall clock. Resume reanchors against Android monotonic time, so a suspended
+WebView timer, timezone change, or wall-clock rollback does not extend the
+deadline. Foreground inactivity defaults to five minutes and is configurable
+only in application memory. Never disables only foreground inactivity; native
+background/screen protection and clean Lock still apply.
+
+For a clean vault, background, screen-off/device-lock classification, or idle
+expiry requests the existing two-phase Rust Lock. The privacy curtain remains
+until native source release and exact Rust operation completion have succeeded.
+If a mutation, Save, or Lock operation is already serialized, lifecycle does
+not interrupt a provider write, start a second Save, discard, or expose stale
+success. It waits shielded and reconciles the authoritative result. A native
+source-release failure cancels the exact Lock operation, retains the Rust
+session, and exposes only a generic retry state after safe resume.
+
+For a dirty Rust session or frontend draft, the same transitions immediately
+hide sensitive UI but never autosave or discard. Resume requires an explicit
+draft decision first and then, where needed, Save and lock, Discard changes and
+lock, or Continue editing. Save still requires the real master password. The
+residual tradeoff is honest: a dirty decrypted `KdbxDocument` and plaintext
+draft may remain in process memory until the user resolves it or Android kills
+the process. Process death destroys that in-memory state and can lose unsaved
+work. Persisting decrypted crash state would create a worse plaintext recovery
+asset, so M5.5 does not do it.
+
+Unlock and Save password inputs are cleared on a security transition. Secret
+draft fields are not visible or accessibility-reachable behind the curtain but stay only
+in component/process memory for the explicit decision. No lifecycle DTO or
+production lifecycle log carries a filename, source URI, entry ID, title,
+username, password, draft content, certificate, request data, or generation
+fingerprint.
+
+CredentialActivity applies the same secure-window and Recents policy. If it
+pauses before fulfillment, it clears custom Intent authority, retires the
+single-use registry request, clears the React-owned password through the normal
+lifecycle shield, cancels the result, and finishes. An exactly-once completion
+gate prevents pause/destroy from double-completing a successful, cancelled, or
+failed request, while `onNewIntent` installs new authority only after retiring
+the old request. M5.3 package/certificate, verified browser-origin, exact-host,
+and stable EntryId final checks remain unchanged.
+
+Biometric quick unlock remains unsupported. The KDBX boundary has no reviewed
+reusable non-password unlock-material abstraction that opens the same KDBX and
+can be invalidated and wrapped by Android Keystore authentication. M5.5 never
+persists the master password, an encrypted master password, password-equivalent
+string, KDBX derived key, decrypted XML, or decrypted database. The M5.3
+metadata key uses `setUserAuthenticationRequired(false)` for a distinct
+source-bookmark purpose and is never reused as an unlock key.
 
 ## M4.3 mutation controls
 

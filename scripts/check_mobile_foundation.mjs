@@ -68,6 +68,26 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
     violations,
   );
+  const mainActivity = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MainActivity.kt",
+    violations,
+  );
+  const mobileSecurityRuntime = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityRuntime.kt",
+    violations,
+  );
+  const mobileSecurityPolicy = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityPolicy.kt",
+    violations,
+  );
+  const mobileSecurityPolicyTest = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/MobileSecurityPolicyTest.kt",
+    violations,
+  );
   const nativePolicy = requireFile(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePolicy.kt",
@@ -154,6 +174,9 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/src/mobile/source.rs",
     "apps/desktop/src-tauri/src/mobile/source_autofill.rs",
     "apps/desktop/src-tauri/src/mobile/state_autofill.rs",
+    "apps/desktop/src-tauri/src/mobile/security_commands.rs",
+    "apps/desktop/src-tauri/src/mobile/source_security.rs",
+    "apps/desktop/src-tauri/src/mobile/state_security.rs",
   ]
     .map((path) => requireFile(root, path, violations))
     .join("\n");
@@ -189,12 +212,21 @@ export function runChecks(root) {
   );
   const mobileFrontend = [
     "apps/desktop/src/lib/mobile.ts",
+    "apps/desktop/src/lib/mobile-security-validation.ts",
     "apps/desktop/src/lib/mobile-autofill.ts",
     "apps/desktop/src/types/mobile.ts",
     "apps/desktop/src/features/mobile/MobileVaultApp.tsx",
     "apps/desktop/src/features/mobile/MobileLockedView.tsx",
     "apps/desktop/src/features/mobile/MobileAutofillPanel.tsx",
     "apps/desktop/src/features/mobile/MobileAutofillSettings.tsx",
+    "apps/desktop/src/features/mobile/MobileSecurityShield.tsx",
+    "apps/desktop/src/features/mobile/MobileTransitionShield.tsx",
+    "apps/desktop/src/features/mobile/MobileUnlockedView.tsx",
+    "apps/desktop/src/features/mobile/MobileUnlockedHeader.tsx",
+    "apps/desktop/src/features/mobile/useMobileAutofillLaunch.ts",
+    "apps/desktop/src/features/mobile/useMobileIdleSecurity.ts",
+    "apps/desktop/src/features/mobile/useMobileSecurityLifecycle.ts",
+    "apps/desktop/src/features/mobile/useMobileUnlockedSecurity.ts",
   ]
     .map((path) => requireFile(root, path, violations))
     .join("\n");
@@ -203,7 +235,6 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/gen/android/gradlew",
     "apps/desktop/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar",
     "apps/desktop/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties",
-    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MainActivity.kt",
   ]) {
     requireFile(root, path, violations);
   }
@@ -431,6 +462,8 @@ export function runChecks(root) {
     "mobile_autofill_approve",
     "mobile_autofill_cancel",
     "mobile_open_autofill_settings",
+    "mobile_security_resume",
+    "mobile_security_acknowledge_safe_ui",
   ]);
   if (androidHandler === undefined) {
     violations.push("M5.1 Android semantic command handler is missing");
@@ -445,6 +478,74 @@ export function runChecks(root) {
   if (/plugin:(?:vault-source|autofill|credential)|content:\/\//.test(mobileFrontend)) {
     violations.push("M5.2 frontend must not receive or invoke native document transport");
   }
+  for (const required of [
+    "FLAG_SECURE",
+    "setRecentsScreenshotEnabled(false)",
+    "Build.VERSION.SDK_INT",
+    "PrivacyCurtainController",
+    "ProcessLifecycleOwner",
+    "SystemClock::elapsedRealtime",
+    'contentDescription = "Nian Pass locked"',
+    "acknowledgeSafeUi",
+  ]) {
+    if (!(mainActivity + mobileSecurityRuntime + mobileSecurityPolicy).includes(required)) {
+      violations.push(`M5.5 native security lifecycle must retain ${required}`);
+    }
+  }
+  for (const required of [
+    "onForeground",
+    "onBackground",
+    "onScreenStateChanged",
+    "expectedGeneration",
+    "CurtainAttachmentModel",
+  ]) {
+    if (!mobileSecurityPolicy.includes(required)) {
+      violations.push(`M5.5 lifecycle policy must retain ${required}`);
+    }
+  }
+  for (const required of [
+    "lifecycleGenerationIsMonotonicAndDuplicateTransitionsAreIdempotent",
+    "staleAcknowledgementAndScreenOffStayFailClosed",
+    "curtainAndApiPoliciesAreIdempotent",
+  ]) {
+    if (!mobileSecurityPolicyTest.includes(required)) {
+      violations.push(`M5.5 lifecycle policy tests must retain ${required}`);
+    }
+  }
+  const mobileSecuritySources = [
+    mobileSecurityRuntime,
+    mobileSecurityPolicy,
+    mobileFrontend,
+  ].join("\n");
+  if (/System\.currentTimeMillis\s*\(|Date\.now\s*\(/.test(mobileSecuritySources)) {
+    violations.push("M5.5 lifecycle expiry must use monotonic time, never wall clock time");
+  }
+  if (/\b(?:localStorage|sessionStorage|indexedDB|caches)\b|document\.cookie/.test(mobileFrontend)) {
+    violations.push("M5.5 mobile security state must remain application-memory only");
+  }
+  const biometricBoundary = mobileSecuritySources + credentialActivity + autofillMetadata;
+  if (/BiometricPrompt/.test(biometricBoundary)) {
+    violations.push("M5.5 biometric quick unlock must remain deferred");
+  }
+  if (
+    /(?:persist|store|encrypt)[^\n]{0,120}(?:master.?password|password.?equivalent)|(?:master.?password|password.?equivalent)[^\n]{0,120}(?:persist|store|encrypt)/i.test(
+      biometricBoundary,
+    )
+  ) {
+    violations.push("M5.5 must never persist master-password or password-equivalent unlock material");
+  }
+  for (const required of [
+    "retireForBackground",
+    "CredentialCompletionGate",
+    "completeCurrentRequest",
+  ]) {
+    if (!credentialActivity.includes(required)) {
+      violations.push(`M5.5 CredentialActivity lifecycle must retain ${required}`);
+    }
+  }
+  if (/supportsPictureInPicture\s*=\s*["']true["']|AccessibilityService|foregroundServiceType/.test(manifest)) {
+    violations.push("M5.5 manifest must not enable PiP, accessibility, or a foreground service");
+  }
   const nativeCredential = [
     credentialProvider,
     autofillService,
@@ -456,6 +557,7 @@ export function runChecks(root) {
     credentialReconstructor,
     autofillGrantPolicy,
     nativeBridge,
+    mobileSecurityRuntime,
   ].join("\n");
   for (const required of [
     "CredentialProviderService",

@@ -15,14 +15,20 @@ mod state;
 mod state_autofill;
 #[cfg(any(target_os = "ios", test))]
 mod state_ios;
+#[cfg(target_os = "android")]
+mod state_security;
 mod transaction;
 
+#[cfg(target_os = "android")]
+pub(crate) mod security_commands;
 #[cfg(target_os = "android")]
 pub(crate) mod source;
 #[cfg(target_os = "android")]
 mod source_autofill;
 #[cfg(target_os = "ios")]
 pub(crate) mod source_ios;
+#[cfg(target_os = "android")]
+mod source_security;
 
 #[cfg(target_os = "ios")]
 pub(crate) mod ios_commands;

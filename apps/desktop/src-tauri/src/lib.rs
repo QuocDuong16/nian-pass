@@ -117,6 +117,7 @@ fn run_mobile() {
         mobile_rename_group, mobile_save_vault, mobile_select_vault, mobile_set_entry_custom_field,
         mobile_unlock_vault, mobile_update_entry, mobile_vault_snapshot, runtime_info,
     };
+    use mobile::security_commands::{mobile_security_acknowledge_safe_ui, mobile_security_resume};
 
     tauri::Builder::default()
         .plugin(mobile::source::init())
@@ -149,6 +150,8 @@ fn run_mobile() {
             mobile_reload_vault,
             mobile_lock_vault,
             mobile_discard_changes_and_lock,
+            mobile_security_resume,
+            mobile_security_acknowledge_safe_ui,
             mobile_autofill_status,
             mobile_enable_autofill_for_vault,
             mobile_disable_autofill_for_vault,

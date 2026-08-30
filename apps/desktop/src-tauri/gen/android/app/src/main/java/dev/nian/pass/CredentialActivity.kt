@@ -2,15 +2,13 @@ package dev.nian.pass
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.WindowManager
 
 /** Narrow Tauri host used only for Android credential authentication/results. */
 class CredentialActivity : MainActivity() {
   private val requestState = CredentialActivityRequestState()
-  private var currentRequestToken: String? = null
+  private val completion = CredentialCompletionGate()
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     super.onCreate(savedInstanceState)
     refreshRequest(intent)
     AutofillRuntime.activeCredentialActivity = this
@@ -29,50 +27,80 @@ class CredentialActivity : MainActivity() {
   }
 
   override fun onPause() {
-    window.decorView.alpha = 0f
+    retireForBackground()
     super.onPause()
   }
 
-  override fun onPostResume() {
-    super.onPostResume()
-    window.decorView.alpha = 1f
-  }
-
   override fun onDestroy() {
+    retireForBackground()
     if (AutofillRuntime.activeCredentialActivity === this) {
       AutofillRuntime.activeCredentialActivity = null
     }
     super.onDestroy()
   }
 
-  internal fun consumeCurrentRequest() {
+  internal fun completeCurrentRequest(requestToken: String): Boolean {
+    if (!completion.complete(requestToken)) return false
     requestState.consumeCurrent()
+    return true
   }
 
   private fun refreshRequest(newIntent: Intent) {
-    val priorToken = currentRequestToken
+    val priorToken = completion.currentToken
     if (!requestState.activate(newIntent.dataString)) {
-      priorToken?.let(AutofillRuntime.registry::cancel)
-      currentRequestToken = null
+      completion.retire()?.let(AutofillRuntime.registry::cancel)
       clearCustomAuthority(newIntent)
       return
     }
     val reconstructed = CredentialRequestReconstructor.reconstruct(this, newIntent)
     if (reconstructed == null) {
-      priorToken?.let(AutofillRuntime.registry::cancel)
-      currentRequestToken = null
+      completion.retire()?.let(AutofillRuntime.registry::cancel)
+      requestState.consumeCurrent()
       clearCustomAuthority(newIntent)
       return
     }
     if (priorToken != null && priorToken != reconstructed) {
       AutofillRuntime.registry.cancel(priorToken)
     }
-    currentRequestToken = reconstructed
+    completion.activate(reconstructed)
+  }
+
+  private fun retireForBackground() {
+    val requestToken = completion.retire() ?: return
+    AutofillRuntime.registry.cancel(requestToken)
+    requestState.consumeCurrent()
+    clearCustomAuthority(intent)
+    setResult(RESULT_CANCELED)
+    if (!isFinishing) finish()
   }
 
   private fun clearCustomAuthority(target: Intent) {
     target.removeExtra(AutofillIntents.EXTRA_REQUEST_TOKEN)
     target.removeExtra(AutofillIntents.EXTRA_CANDIDATE_TOKEN)
     target.removeExtra(AutofillIntents.EXTRA_SELECTED_ENTRY_ID)
+  }
+}
+
+internal class CredentialCompletionGate {
+  var currentToken: String? = null
+    private set
+  private var completed = true
+
+  fun activate(requestToken: String) {
+    currentToken = requestToken
+    completed = false
+  }
+
+  fun complete(requestToken: String): Boolean {
+    if (completed || currentToken != requestToken) return false
+    completed = true
+    currentToken = null
+    return true
+  }
+
+  fun retire(): String? {
+    val requestToken = currentToken ?: return null
+    if (!complete(requestToken)) return null
+    return requestToken
   }
 }
