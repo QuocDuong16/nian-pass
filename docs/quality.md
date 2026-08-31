@@ -78,7 +78,8 @@ Credential Manager request, AssistStructure, AutofillId, Bundle, or Parcel.
 
 For M5.5 the source ratchet additionally requires `FLAG_SECURE`, the guarded
 API 33 `setRecentsScreenshotEnabled(false)` call, one native privacy-curtain
-controller, `ProcessLifecycleOwner`, `SystemClock.elapsedRealtime`, generation
+controller, Activity resumed/focus authority, `ProcessLifecycleOwner`,
+`PowerManager.isInteractive`, `SystemClock.elapsedRealtime`, generation-scoped
 acknowledgement, and CredentialActivity authority retirement with exactly-once
 completion. It rejects lifecycle `System.currentTimeMillis()`/`Date.now()`,
 mobile `localStorage`, `sessionStorage`, IndexedDB, Cache API, or cookies,
@@ -102,11 +103,14 @@ credential Activity, then dumps APK permissions to prove release still has no
 M5.5 frontend lifecycle tests use Vitest fake timers and synthetic monotonic
 timestamps; they cover immediate background shielding, clean authoritative
 Lock, dirty/draft non-discard, screen-off attention, resume expiry, failed Lock,
-stale unlock/Save/mutation completion, pending operation reconciliation,
-Continue deadline reset, the five-minute default, remount reset, and Never
-semantics without real sleeps. Strict DTO tests reject extra secret-like keys.
-Pure JVM tests cover lifecycle generation, duplicate transitions, stale
-acknowledgement, screen classification, idempotent curtain policy, API-level
+stale unlock/Save/mutation/acknowledgement completion, pending operation
+reconciliation, Save-dialog precedence, Continue deadline reset, the five-minute
+default, same-process timeout retention across Lock/unlock, new-root reset, and
+Never semantics without real sleeps. Strict DTO tests reject extra secret-like
+keys. Pure JVM tests cover Activity pause/focus invalidation before delayed
+process stop, resume-before-focus, lifecycle generation, duplicate transitions,
+stale acknowledgement, interactive-first screen classification, idempotent
+curtain policy, API-level
 Recents policy, and CredentialActivity exactly-once completion. Android
 instrumentation sources assert secure flags and curtain attach/remove behavior,
 but the headless gate only compiles them. Compilation is not a claim that those

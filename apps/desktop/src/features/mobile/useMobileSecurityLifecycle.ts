@@ -19,9 +19,12 @@ export function useMobileSecurityLifecycle({
   const [boundaryPending, setBoundaryPending] = useState(false);
   const statusRef = useRef<MobileSecurityResumeDto | null>(null);
   const requestVersion = useRef(0);
+  const acknowledgementVersion = useRef(0);
+  const windowFocused = useRef(!document.hidden);
 
   const refresh = useCallback(async () => {
     if (!enabled) return null;
+    acknowledgementVersion.current += 1;
     const request = requestVersion.current + 1;
     requestVersion.current = request;
     setRefreshing(true);
@@ -48,6 +51,7 @@ export function useMobileSecurityLifecycle({
 
   const invalidate = useCallback(() => {
     if (!enabled) return;
+    acknowledgementVersion.current += 1;
     setShielded(true);
     setRefreshing(true);
     setBoundaryPending(true);
@@ -57,17 +61,28 @@ export function useMobileSecurityLifecycle({
 
   const acknowledge = useCallback(
     async (generation: number) => {
-      if (document.hidden) return false;
+      const frontendLifecycleReady = () =>
+        !document.hidden && windowFocused.current;
+      if (!frontendLifecycleReady()) return false;
       const current = statusRef.current;
       if (current?.generation !== generation) return false;
       if (!current.foreground || current.screenState !== "active") {
         return false;
       }
+      const acknowledgement = acknowledgementVersion.current + 1;
+      acknowledgementVersion.current = acknowledgement;
+      const refreshRequest = requestVersion.current;
       try {
         const result = await api.acknowledgeSafeUi(generation);
+        const latest = statusRef.current;
         if (
           result.acknowledged &&
-          statusRef.current?.generation === generation
+          acknowledgement === acknowledgementVersion.current &&
+          refreshRequest === requestVersion.current &&
+          frontendLifecycleReady() &&
+          latest?.generation === generation &&
+          latest.foreground &&
+          latest.screenState === "active"
         ) {
           setShielded(false);
           setBoundaryPending(false);
@@ -76,6 +91,7 @@ export function useMobileSecurityLifecycle({
       } catch {
         // The native curtain remains authoritative on acknowledgement failure.
       }
+      if (acknowledgement !== acknowledgementVersion.current) return false;
       setShielded(true);
       void refresh();
       return false;
@@ -94,20 +110,42 @@ export function useMobileSecurityLifecycle({
     const reconcile = () => {
       invalidate();
     };
-    document.addEventListener("visibilitychange", reconcile);
-    window.addEventListener("focus", reconcile);
+    const visibilityChanged = () => {
+      if (document.hidden) windowFocused.current = false;
+      invalidate();
+    };
+    const blurred = () => {
+      windowFocused.current = false;
+      invalidate();
+    };
+    const focused = () => {
+      windowFocused.current = true;
+      invalidate();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
+    window.addEventListener("blur", blurred);
+    window.addEventListener("focus", focused);
     window.addEventListener("pageshow", reconcile);
     return () => {
       active = false;
       requestVersion.current += 1;
-      document.removeEventListener("visibilitychange", reconcile);
-      window.removeEventListener("focus", reconcile);
+      acknowledgementVersion.current += 1;
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      window.removeEventListener("blur", blurred);
+      window.removeEventListener("focus", focused);
       window.removeEventListener("pageshow", reconcile);
     };
   }, [enabled, invalidate, onSecurityTransition, refresh]);
 
   useEffect(() => {
-    if (!enabled || !shielded || document.hidden || refreshing) return;
+    if (
+      !enabled ||
+      !shielded ||
+      document.hidden ||
+      !windowFocused.current ||
+      refreshing
+    )
+      return;
     const timer = window.setTimeout(() => {
       void refresh();
     }, 250);

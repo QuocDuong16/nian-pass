@@ -4,6 +4,8 @@ internal enum class MobileScreenState { ACTIVE, SCREEN_OFF, DEVICE_LOCKED }
 
 internal data class MobileSecuritySnapshot(
   val foreground: Boolean,
+  val activityResumed: Boolean,
+  val windowFocused: Boolean,
   val elapsedRealtimeMs: Long,
   val generation: Long,
   val screenState: MobileScreenState,
@@ -12,60 +14,81 @@ internal data class MobileSecuritySnapshot(
 
 /** Pure process-local lifecycle policy. Android UI ownership stays in MobileSecurityRuntime. */
 internal class MobileSecurityPolicy(private val clock: () -> Long) {
-  private var foreground = false
+  private var processForeground = false
+  private var activityResumed = false
+  private var windowFocused = false
   private var generation = 0L
   private var screenState = MobileScreenState.ACTIVE
-  private var curtainVisible = true
+  private var curtainRequired = true
 
   @Synchronized
-  fun onForeground(): MobileSecuritySnapshot {
-    if (!foreground) {
-      foreground = true
-      generation += 1
-    }
-    return snapshot()
+  fun onProcessForegroundChanged(foreground: Boolean): MobileSecuritySnapshot {
+    val changed = processForeground != foreground
+    processForeground = foreground
+    return finishAuthorityTransition(changed)
   }
 
   @Synchronized
-  fun onBackground(): MobileSecuritySnapshot {
-    if (foreground) {
-      foreground = false
-      generation += 1
-    }
-    curtainVisible = true
-    return snapshot()
+  fun onActivityResumed(resumed: Boolean): MobileSecuritySnapshot {
+    val changed = activityResumed != resumed || (!resumed && windowFocused)
+    activityResumed = resumed
+    if (!resumed) windowFocused = false
+    return finishAuthorityTransition(changed)
+  }
+
+  @Synchronized
+  fun onWindowFocused(focused: Boolean): MobileSecuritySnapshot {
+    val acceptedFocus = focused && activityResumed
+    val changed = windowFocused != acceptedFocus
+    windowFocused = acceptedFocus
+    return finishAuthorityTransition(changed)
   }
 
   @Synchronized
   fun onScreenStateChanged(next: MobileScreenState): MobileSecuritySnapshot {
-    if (screenState != next) {
-      screenState = next
-      generation += 1
-    }
-    if (next != MobileScreenState.ACTIVE) curtainVisible = true
-    return snapshot()
+    val changed = screenState != next
+    screenState = next
+    return finishAuthorityTransition(changed)
   }
 
   @Synchronized
   fun acknowledgeSafeUi(expectedGeneration: Long): Boolean {
-    if (
-      expectedGeneration != generation ||
-      !foreground ||
-      screenState != MobileScreenState.ACTIVE
-    ) return false
-    curtainVisible = false
+    if (expectedGeneration != generation || !acknowledgementEligible()) return false
+    curtainRequired = false
     return true
   }
 
   @Synchronized
   fun snapshot(): MobileSecuritySnapshot = MobileSecuritySnapshot(
-    foreground = foreground,
+    foreground = processForeground,
+    activityResumed = activityResumed,
+    windowFocused = windowFocused,
     elapsedRealtimeMs = clock(),
     generation = generation,
     screenState = screenState,
-    curtainVisible = curtainVisible,
+    curtainVisible = curtainRequired,
   )
 
+  private fun finishAuthorityTransition(changed: Boolean): MobileSecuritySnapshot {
+    if (changed) generation += 1
+    if (!acknowledgementEligible()) curtainRequired = true
+    return snapshot()
+  }
+
+  private fun acknowledgementEligible(): Boolean =
+    activityResumed &&
+      windowFocused &&
+      processForeground &&
+      screenState == MobileScreenState.ACTIVE
+}
+
+internal fun classifyMobileScreenState(
+  interactive: Boolean,
+  deviceLocked: Boolean,
+): MobileScreenState = when {
+  !interactive -> MobileScreenState.SCREEN_OFF
+  deviceLocked -> MobileScreenState.DEVICE_LOCKED
+  else -> MobileScreenState.ACTIVE
 }
 
 internal object RecentsProtectionPolicy {

@@ -356,26 +356,37 @@ They do not defeat root, malware with process access, a compromised OS, a
 physical camera, every OEM bug, or an attacker who already observed plaintext
 while the device and vault were legitimately unlocked.
 
-Activity pause/focus loss attaches an opaque native privacy curtain before the
-WebView is trusted to redraw. The curtain has only a generic accessible label
-and makes covered WebView descendants inaccessible. It is intentionally
-distinct from backend Lock: it prevents display and interaction while the
-native/React/Rust state is reconciled, whereas successful Lock drops the
-decrypted Rust session. Only an acknowledgement for the current process-local
-foreground generation removes the curtain. Rotation creates a newly covered
-Activity and does not reset the policy object; stale callbacks, Back, returning
+Activity pause/focus loss atomically invalidates the prior lifecycle generation
+and attaches an opaque native privacy curtain before the WebView is trusted to
+redraw. The curtain has only a generic accessible label and makes covered
+WebView descendants inaccessible. It is intentionally distinct from backend
+Lock: it prevents display and interaction while the native/React/Rust state is
+reconciled, whereas successful Lock drops the decrypted Rust session. Only an
+acknowledgement for the current generation while the Activity is resumed and
+focused, the process is foreground, and the device is interactive and unlocked
+removes the curtain. `ProcessLifecycleOwner` remains a secondary process-state
+signal; its delayed stop callback is never relied upon to invalidate Activity
+confidentiality. Rotation creates a newly covered Activity and does not reset
+the policy object; stale callbacks, Back, returning
 from a document picker or Settings, multi-window focus changes, and external
 intents cannot implicitly continue editing or reveal the vault. PiP,
 AccessibilityService detection, overlay permissions, notifications, and a
 foreground service are not used.
+
+Screen classification first checks `PowerManager.isInteractive`: every
+non-interactive state is `SCREEN_OFF` regardless of Keyguard. Only an
+interactive device uses `KeyguardManager.isDeviceLocked` to distinguish
+`DEVICE_LOCKED` from `ACTIVE`. All screen broadcasts converge on this classifier.
 
 Elapsed-time policy uses Android `SystemClock.elapsedRealtime`, Rust `Instant`
 where the backend serializes work, and frontend `performance.now`; it never uses
 wall clock. Resume reanchors against Android monotonic time, so a suspended
 WebView timer, timezone change, or wall-clock rollback does not extend the
 deadline. Foreground inactivity defaults to five minutes and is configurable
-only in application memory. Never disables only foreground inactivity; native
-background/screen protection and clean Lock still apply.
+only in process-level React memory. It survives Lock/unlock and source selection
+inside the same running process and resets to five minutes only when a new app
+process/application root starts. Never disables only foreground inactivity;
+native background/screen protection and clean Lock still apply.
 
 For a clean vault, background, screen-off/device-lock classification, or idle
 expiry requests the existing two-phase Rust Lock. The privacy curtain remains
@@ -385,6 +396,14 @@ not interrupt a provider write, start a second Save, discard, or expose stale
 success. It waits shielded and reconciles the authoritative result. A native
 source-release failure cancels the exact Lock operation, retains the Rust
 session, and exposes only a generic retry state after safe resume.
+
+Security attention supersedes normal Save/reload/conflict dialogs structurally,
+so a pre-background form cannot remain keyboard- or accessibility-reachable.
+Its password is cleared and non-running dialog state is closed. In-flight
+provider Save/reload operations are not cancelled: their UI remains suppressed,
+their single operation finishes, and the actual Rust/native result is reconciled
+behind the shield. Save and lock chosen from dirty security attention starts a
+fresh empty credential prompt without uncovering vault content.
 
 For a dirty Rust session or frontend draft, the same transitions immediately
 hide sensitive UI but never autosave or discard. Resume requires an explicit

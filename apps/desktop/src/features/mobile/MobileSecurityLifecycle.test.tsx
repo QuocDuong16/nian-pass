@@ -23,6 +23,7 @@ interface SecurityController {
   api: MobileApi;
   hidden: ReturnType<typeof vi.spyOn>;
   background: (screenState?: MobileSecurityResumeDto["screenState"]) => void;
+  loseFocus: () => void;
   resume: () => void;
   setOperationPending: (pending: boolean) => void;
   setVaultState: (state: MobileSecurityResumeDto["vaultState"]) => void;
@@ -47,8 +48,12 @@ function securityController(
     vaultState = "locked";
     return Promise.resolve();
   });
+  const unlockVault = vi.fn(() => {
+    vaultState = snapshot.dirty ? "dirty" : "clean";
+    return Promise.resolve(snapshot);
+  });
   const api = createMobileApi({
-    unlockVault: vi.fn().mockResolvedValue(snapshot),
+    unlockVault,
     lockVault,
     securityResume: vi.fn(() =>
       Promise.resolve({
@@ -74,12 +79,17 @@ function securityController(
       generation += 1;
       fireEvent(document, new Event("visibilitychange"));
     },
+    loseFocus: () => {
+      generation += 1;
+      fireEvent(window, new Event("blur"));
+    },
     resume: () => {
       hiddenValue = false;
       foreground = true;
       screenState = "active";
       generation += 1;
       fireEvent(document, new Event("visibilitychange"));
+      fireEvent(window, new Event("focus"));
     },
     setOperationPending: (pending) => {
       operationPending = pending;
@@ -120,6 +130,84 @@ test("background immediately hides sensitive UI and clears unlock password", asy
 
   expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
   expect(screen.queryByText("fixture.kdbx")).not.toBeInTheDocument();
+});
+
+test("pending acknowledgement cannot unshield after background", async () => {
+  let resolveAcknowledgement:
+    ((result: { acknowledged: boolean }) => void) | undefined;
+  const acknowledgeSafeUi = vi.fn(
+    () =>
+      new Promise<{ acknowledged: boolean }>((resolve) => {
+        resolveAcknowledgement = resolve;
+      }),
+  );
+  const controller = securityController(mobileSnapshot, {
+    acknowledgeSafeUi,
+  });
+  render(<MobileVaultApp api={controller.api} platform="android" />);
+  await waitFor(() => {
+    expect(acknowledgeSafeUi).toHaveBeenCalledOnce();
+  });
+
+  controller.background();
+  await act(() => {
+    resolveAcknowledgement?.({ acknowledged: true });
+    return Promise.resolve();
+  });
+
+  expect(screen.getByText("Nian Pass locked")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Open KDBX" }),
+  ).not.toBeInTheDocument();
+});
+
+test("focus invalidation ignores a stale pending acknowledgement", async () => {
+  let resolveFirst: ((result: { acknowledged: boolean }) => void) | undefined;
+  const acknowledgeSafeUi = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<{ acknowledged: boolean }>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    )
+    .mockResolvedValue({ acknowledged: false });
+  const controller = securityController(mobileSnapshot, {
+    acknowledgeSafeUi,
+  });
+  render(<MobileVaultApp api={controller.api} platform="android" />);
+  await waitFor(() => {
+    expect(acknowledgeSafeUi).toHaveBeenCalledOnce();
+  });
+
+  controller.loseFocus();
+  await act(() => {
+    resolveFirst?.({ acknowledged: true });
+    return Promise.resolve();
+  });
+
+  expect(screen.getByText("Nian Pass locked")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Open KDBX" }),
+  ).not.toBeInTheDocument();
+});
+
+test("typing a locked-screen password does not create acknowledgement storms", async () => {
+  const acknowledgeSafeUi = vi.fn().mockResolvedValue({ acknowledged: true });
+  const controller = securityController(mobileSnapshot, {
+    acknowledgeSafeUi,
+  });
+  render(<MobileVaultApp api={controller.api} platform="android" />);
+  await waitFor(() => {
+    expect(acknowledgeSafeUi).toHaveBeenCalledOnce();
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
+  const password = await screen.findByLabelText("Master password");
+  fireEvent.change(password, { target: { value: "a" } });
+  fireEvent.change(password, { target: { value: "ab" } });
+  fireEvent.change(password, { target: { value: "abc" } });
+
+  expect(acknowledgeSafeUi).toHaveBeenCalledOnce();
 });
 
 test("clean unlocked background invokes the authoritative Lock", async () => {
@@ -260,6 +348,7 @@ test("Save pending across background reconciles once without autosave or stale r
   controller.setOperationPending(true);
   controller.background();
   expect(screen.getByText("Securing your vault")).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   controller.setVaultState("clean");
   controller.setOperationPending(false);
   await act(() => {
@@ -272,6 +361,65 @@ test("Save pending across background reconciles once without autosave or stale r
   });
   expect(saveVault).toHaveBeenCalledOnce();
   expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+});
+
+test("a pre-operation Save credential dialog cannot bypass security attention", async () => {
+  const controller = securityController(dirtySnapshot);
+  await unlock(controller);
+  fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "stale-save-password" },
+  });
+  expect(screen.getByRole("dialog")).toBeVisible();
+
+  controller.background();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  controller.resume();
+
+  expect(
+    await screen.findByText("Unsaved changes are still open"),
+  ).toBeVisible();
+  expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
+  expect(controller.api.saveVault).not.toHaveBeenCalled();
+});
+
+test("idle security attention closes a stale Save credential dialog", async () => {
+  let monotonicNow = 1_000;
+  vi.spyOn(performance, "now").mockImplementation(() => monotonicNow);
+  const controller = securityController(dirtySnapshot);
+  await unlock(controller);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  fireEvent.change(screen.getByLabelText("Mobile auto-lock timeout"), {
+    target: { value: "60000" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "expires-with-dialog" },
+  });
+  monotonicNow += 60_000;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+
+  expect(screen.getByText("Unsaved changes are still open")).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
+  expect(controller.api.saveVault).not.toHaveBeenCalled();
+});
+
+test("security Save and lock opens a fresh credential prompt over hidden vault content", async () => {
+  const controller = securityController(dirtySnapshot);
+  await unlock(controller);
+  controller.background();
+  controller.resume();
+  fireEvent.click(await screen.findByRole("button", { name: "Save and lock" }));
+
+  expect(screen.getByRole("dialog")).toBeVisible();
+  expect(screen.getByLabelText("Master password")).toHaveValue("");
+  expect(screen.getByText("fixture.kdbx")).not.toBeVisible();
+  expect(
+    screen.queryByText("Unsaved changes are still open"),
+  ).not.toBeInTheDocument();
 });
 
 test("mutation result settling after background cannot dismiss newer dirty attention", async () => {
@@ -330,7 +478,7 @@ test("foreground inactivity locks clean vault with fake timers", async () => {
   expect(controller.api.lockVault).toHaveBeenCalledOnce();
 });
 
-test("dirty idle and draft idle require attention without automatic data loss", async () => {
+test("dirty idle requires attention without automatic data loss", async () => {
   let monotonicNow = 1_000;
   vi.spyOn(performance, "now").mockImplementation(() => monotonicNow);
   const controller = securityController(dirtySnapshot);
@@ -345,6 +493,27 @@ test("dirty idle and draft idle require attention without automatic data loss", 
   });
   expect(screen.getByText("Unsaved changes are still open")).toBeVisible();
   expect(controller.api.saveVault).not.toHaveBeenCalled();
+  expect(controller.api.discardChangesAndLock).not.toHaveBeenCalled();
+});
+
+test("frontend draft idle enters attention without discarding the draft", async () => {
+  let monotonicNow = 1_000;
+  vi.spyOn(performance, "now").mockImplementation(() => monotonicNow);
+  const controller = securityController();
+  await unlock(controller);
+  fireEvent.click(screen.getByRole("button", { name: /Synthetic account/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit entry" }));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  fireEvent.change(screen.getByLabelText("Mobile auto-lock timeout"), {
+    target: { value: "60000" },
+  });
+  monotonicNow += 60_000;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+
+  expect(screen.getByText("Unfinished edit")).toBeVisible();
+  expect(controller.api.lockVault).not.toHaveBeenCalled();
   expect(controller.api.discardChangesAndLock).not.toHaveBeenCalled();
 });
 
@@ -376,24 +545,54 @@ test("Continue editing resets foreground activity deadline", async () => {
   expect(screen.getByText("Unsaved changes are still open")).toBeVisible();
 });
 
-test("Never is memory-only: remount restores 5 minutes but background protection remains", async () => {
+test("15 minute timeout survives Lock, source selection, and re-unlock in one app process", async () => {
+  const controller = securityController();
+  await unlock(controller);
+  fireEvent.change(screen.getByLabelText("Mobile auto-lock timeout"), {
+    target: { value: "900000" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+  await screen.findByRole("button", { name: "Open KDBX" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
+  fireEvent.change(await screen.findByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+  expect(await screen.findByLabelText("Mobile auto-lock timeout")).toHaveValue(
+    "900000",
+  );
+});
+
+test("Never survives Lock and re-unlock, but a new app root restores 5 minutes", async () => {
   const first = securityController();
   await unlock(first);
-  vi.useFakeTimers();
   const timeout = screen.getByLabelText("Mobile auto-lock timeout");
   fireEvent.change(timeout, { target: { value: "never" } });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(60 * 60_000);
   });
   expect(first.api.lockVault).not.toHaveBeenCalled();
-  first.background();
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_000);
+  vi.useRealTimers();
+  fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+  await screen.findByRole("button", { name: "Open KDBX" });
+  fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
+  fireEvent.change(await screen.findByLabelText("Master password"), {
+    target: { value: "demopass" },
   });
-  expect(first.api.lockVault).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  expect(await screen.findByLabelText("Mobile auto-lock timeout")).toHaveValue(
+    "never",
+  );
+
+  first.background();
+  await waitFor(() => {
+    expect(first.api.lockVault).toHaveBeenCalledTimes(2);
+  });
 
   cleanup();
-  vi.useRealTimers();
   const second = securityController();
   await unlock(second);
   expect(screen.getByLabelText("Mobile auto-lock timeout")).toHaveValue(

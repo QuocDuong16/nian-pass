@@ -43,6 +43,9 @@ function fixture(t) {
       "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n" +
       "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
       "SystemClock.elapsedRealtime() feeds a monotonic generation and exact safe-UI acknowledgement. " +
+      "activityResumed, windowFocused, and processForeground precede ProcessLifecycleOwner, which is not the immediate confidentiality boundary. " +
+      "PowerManager.isInteractive precedes KeyguardManager.isDeviceLocked. " +
+      "Security attention suppresses Save and reload dialogs; in-flight work continues and is reconciled rather than cancelled. " +
       "A dirty draft remains shielded and lifecycle never autosaves or discards it.\n" +
       "UIDocumentPickerViewController uses NSFileCoordinator before an encrypted App Group mirror. " +
       "Host-only access group stores the bookmark; Keychain NEVER stores a master password. " +
@@ -74,7 +77,7 @@ function fixture(t) {
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
       "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
       "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
-      "M5.5 requires SystemClock.elapsedRealtime and lifecycle source ratchets; Android instrumentation only compiles headlessly.\n" +
+      "M5.5 requires PowerManager.isInteractive and SystemClock.elapsedRealtime lifecycle source ratchets; same-process Lock/unlock timeout retention and new-root reset are tested; Android instrumentation only compiles headlessly.\n" +
       "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");

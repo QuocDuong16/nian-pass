@@ -210,6 +210,11 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/src/mobile/source_ios.rs",
     violations,
   );
+  const mobileSecurityLifecycle = requireFile(
+    root,
+    "apps/desktop/src/features/mobile/useMobileSecurityLifecycle.ts",
+    violations,
+  );
   const mobileFrontend = [
     "apps/desktop/src/lib/mobile.ts",
     "apps/desktop/src/lib/mobile-security-validation.ts",
@@ -223,12 +228,14 @@ export function runChecks(root) {
     "apps/desktop/src/features/mobile/MobileTransitionShield.tsx",
     "apps/desktop/src/features/mobile/MobileUnlockedView.tsx",
     "apps/desktop/src/features/mobile/MobileUnlockedHeader.tsx",
+    "apps/desktop/src/features/mobile/useAcknowledgeLockedMobileUi.ts",
     "apps/desktop/src/features/mobile/useMobileAutofillLaunch.ts",
     "apps/desktop/src/features/mobile/useMobileIdleSecurity.ts",
-    "apps/desktop/src/features/mobile/useMobileSecurityLifecycle.ts",
+    "apps/desktop/src/features/mobile/useMobileSecurityReconciliation.ts",
     "apps/desktop/src/features/mobile/useMobileUnlockedSecurity.ts",
   ]
     .map((path) => requireFile(root, path, violations))
+    .concat(mobileSecurityLifecycle)
     .join("\n");
 
   for (const path of [
@@ -484,6 +491,8 @@ export function runChecks(root) {
     "Build.VERSION.SDK_INT",
     "PrivacyCurtainController",
     "ProcessLifecycleOwner",
+    "PowerManager",
+    "isInteractive",
     "SystemClock::elapsedRealtime",
     'contentDescription = "Nian Pass locked"',
     "acknowledgeSafeUi",
@@ -493,9 +502,15 @@ export function runChecks(root) {
     }
   }
   for (const required of [
-    "onForeground",
-    "onBackground",
+    "activityResumed",
+    "windowFocused",
+    "processForeground",
+    "onProcessForegroundChanged",
+    "onActivityResumed",
+    "onWindowFocused",
     "onScreenStateChanged",
+    "acknowledgementEligible",
+    "classifyMobileScreenState",
     "expectedGeneration",
     "CurtainAttachmentModel",
   ]) {
@@ -504,12 +519,26 @@ export function runChecks(root) {
     }
   }
   for (const required of [
-    "lifecycleGenerationIsMonotonicAndDuplicateTransitionsAreIdempotent",
-    "staleAcknowledgementAndScreenOffStayFailClosed",
+    "duplicateIdenticalTransitionsAreIdempotent",
+    "pauseInvalidatesOldGenerationBeforeDelayedProcessStop",
+    "focusLossInvalidatesOldGenerationImmediately",
+    "resumeWithoutFocusCannotAcknowledge",
+    "focusWithoutResumedCannotAcknowledge",
+    "screenClassifierPrioritizesInteractiveStateBeforeKeyguard",
     "curtainAndApiPoliciesAreIdempotent",
   ]) {
     if (!mobileSecurityPolicyTest.includes(required)) {
       violations.push(`M5.5 lifecycle policy tests must retain ${required}`);
+    }
+  }
+  for (const required of [
+    "acknowledgementVersion",
+    "windowFocused.current",
+    "refreshRequest === requestVersion.current",
+    "latest?.generation === generation",
+  ]) {
+    if (!mobileSecurityLifecycle.includes(required)) {
+      violations.push(`M5.5 frontend acknowledgement guard must retain ${required}`);
     }
   }
   const mobileSecuritySources = [

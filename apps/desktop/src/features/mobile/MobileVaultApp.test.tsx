@@ -208,6 +208,7 @@ test("document hiding shields metadata and cleanly locks the Rust session", asyn
 
   hidden.mockReturnValue(false);
   fireEvent(document, new Event("visibilitychange"));
+  fireEvent(window, new Event("focus"));
   expect(
     await screen.findByRole("button", { name: "Open KDBX" }),
   ).toBeVisible();

@@ -23,19 +23,23 @@ M5.5 — Android Mobile Security / Lifecycle
 
 M5.5 protects every sensitive Android Activity with native `FLAG_SECURE`, adds
 API 33+ Recents screenshot suppression, and places an opaque native privacy
-curtain over the WebView before foreground is lost. A process-local monotonic
-lifecycle generation and explicit resume acknowledgement keep that curtain in
-place until React has reconciled the real Rust vault state. The curtain is a
-visual/accessibility boundary; it is not backend Lock.
+curtain over the WebView before foreground is lost. Activity pause or focus
+loss immediately invalidates the process-local monotonic lifecycle generation;
+delayed process lifecycle callbacks are not the confidentiality boundary. An
+explicit resume acknowledgement requires the current resumed, focused,
+process-foreground, interactive, device-unlocked generation and keeps the
+curtain in place until React has reconciled the real Rust vault state. The
+curtain is a visual/accessibility boundary; it is not backend Lock.
 
 Clean background, screen-lock, and foreground-idle expiry invoke the existing
 two-phase Rust Lock transaction. Dirty Rust mutations and frontend edit drafts
 instead stay hidden behind an explicit Save-and-lock, discard-and-lock, or
 continue decision; lifecycle handling never autosaves or silently discards.
 Foreground inactivity defaults to five minutes with 1, 5, 15, 30 minute and
-Never choices. The choice is application-memory only and resets to five minutes
-after process restart. Never disables foreground inactivity expiry only; native
-background protection remains mandatory.
+Never choices. The choice is process-memory only, survives Lock, unlock, and
+source selection in the same running app process, and resets to five minutes
+when a new app process starts. Never disables foreground inactivity expiry
+only; native background protection remains mandatory.
 
 M5.4 — iOS Password AutoFill + Keychain remains DEFERRED.
 

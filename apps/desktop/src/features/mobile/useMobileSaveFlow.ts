@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { MobileCommandError } from "../../lib/mobile";
 import type { VaultSnapshotDto } from "../../types/desktop";
@@ -127,6 +127,26 @@ export function useMobileSaveFlow(options: Options) {
     setFlow({ kind: "reload_credential", error: null });
   };
 
+  const secureForBoundary = useCallback(() => {
+    setPassword("");
+    setSaved(false);
+    setFlow((current) => {
+      if (
+        current.kind === "credential" ||
+        current.kind === "reload_credential" ||
+        current.kind === "external_conflict" ||
+        current.kind === "uncertain"
+      ) {
+        return { kind: "closed" };
+      }
+      return current;
+    });
+  }, []);
+
+  const clearCredential = useCallback(() => {
+    setPassword("");
+  }, []);
+
   const submitReload = async () => {
     if (flow.kind !== "reload_credential" || password === "") return;
     const credential = password;
@@ -169,8 +189,7 @@ export function useMobileSaveFlow(options: Options) {
     dismissUncertain: () => {
       setFlow({ kind: "closed" });
     },
-    clearCredential: () => {
-      setPassword("");
-    },
+    clearCredential,
+    secureForBoundary,
   };
 }

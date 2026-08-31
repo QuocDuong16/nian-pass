@@ -27,8 +27,8 @@ class CredentialActivity : MainActivity() {
   }
 
   override fun onPause() {
-    retireForBackground()
     super.onPause()
+    retireForBackground()
   }
 
   override fun onDestroy() {

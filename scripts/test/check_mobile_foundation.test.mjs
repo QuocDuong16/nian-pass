@@ -148,17 +148,17 @@ fingerprint(save.readBack)
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityRuntime.kt",
-    'FLAG_SECURE setRecentsScreenshotEnabled(false) Build.VERSION.SDK_INT PrivacyCurtainController ProcessLifecycleOwner SystemClock::elapsedRealtime contentDescription = "Nian Pass locked" acknowledgeSafeUi\n',
+    'FLAG_SECURE setRecentsScreenshotEnabled(false) Build.VERSION.SDK_INT PrivacyCurtainController ProcessLifecycleOwner PowerManager isInteractive SystemClock::elapsedRealtime contentDescription = "Nian Pass locked" acknowledgeSafeUi\n',
   );
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityPolicy.kt",
-    "onForeground onBackground onScreenStateChanged expectedGeneration CurtainAttachmentModel\n",
+    "activityResumed windowFocused processForeground onProcessForegroundChanged onActivityResumed onWindowFocused onScreenStateChanged acknowledgementEligible classifyMobileScreenState expectedGeneration CurtainAttachmentModel\n",
   );
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/MobileSecurityPolicyTest.kt",
-    "lifecycleGenerationIsMonotonicAndDuplicateTransitionsAreIdempotent staleAcknowledgementAndScreenOffStayFailClosed curtainAndApiPoliciesAreIdempotent\n",
+    "duplicateIdenticalTransitionsAreIdempotent pauseInvalidatesOldGenerationBeforeDelayedProcessStop focusLossInvalidatesOldGenerationImmediately resumeWithoutFocusCannotAcknowledge focusWithoutResumedCannotAcknowledge screenClassifierPrioritizesInteractiveStateBeforeKeyguard curtainAndApiPoliciesAreIdempotent\n",
   );
   write(
     root,
@@ -312,13 +312,19 @@ generate_handler![runtime_info, mobile_select_vault, mobile_unlock_vault, mobile
     "apps/desktop/src/features/mobile/MobileTransitionShield.tsx",
     "apps/desktop/src/features/mobile/MobileUnlockedView.tsx",
     "apps/desktop/src/features/mobile/MobileUnlockedHeader.tsx",
+    "apps/desktop/src/features/mobile/useAcknowledgeLockedMobileUi.ts",
     "apps/desktop/src/features/mobile/useMobileAutofillLaunch.ts",
     "apps/desktop/src/features/mobile/useMobileIdleSecurity.ts",
-    "apps/desktop/src/features/mobile/useMobileSecurityLifecycle.ts",
+    "apps/desktop/src/features/mobile/useMobileSecurityReconciliation.ts",
     "apps/desktop/src/features/mobile/useMobileUnlockedSecurity.ts",
   ]) {
     write(root, path);
   }
+  write(
+    root,
+    "apps/desktop/src/features/mobile/useMobileSecurityLifecycle.ts",
+    "acknowledgementVersion windowFocused.current refreshRequest === requestVersion.current latest?.generation === generation\n",
+  );
   for (const path of [
     "apps/desktop/src-tauri/gen/android/gradlew",
     "apps/desktop/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar",

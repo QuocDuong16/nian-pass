@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Color
 import android.os.Build
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
@@ -107,17 +108,20 @@ internal object MobileSecurityRuntime {
   @Synchronized
   fun onResume(activity: Activity) {
     showAll()
+    policy.onActivityResumed(true)
     refreshDeviceState(activity)
   }
 
   @Synchronized
   fun onPause() {
+    policy.onActivityResumed(false)
     showAll()
   }
 
   @Synchronized
   fun onWindowFocusChanged(activity: Activity, hasFocus: Boolean) {
-    if (!hasFocus) showAll()
+    policy.onWindowFocused(hasFocus)
+    if (!hasFocus || policy.snapshot().curtainVisible) showAll()
     refreshDeviceState(activity)
   }
 
@@ -131,7 +135,10 @@ internal object MobileSecurityRuntime {
   @Synchronized
   fun acknowledgeSafeUi(activity: Activity, generation: Long): Boolean {
     refreshDeviceState(activity)
-    if (!policy.acknowledgeSafeUi(generation)) return false
+    if (!policy.acknowledgeSafeUi(generation)) {
+      showAll()
+      return false
+    }
     curtains[activity]?.hide()
     return true
   }
@@ -144,13 +151,11 @@ internal object MobileSecurityRuntime {
   }
 
   private fun refreshDeviceState(activity: Activity) {
+    val power = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
     val keyguard = activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-    val next = if (keyguard.isDeviceLocked) {
-      MobileScreenState.DEVICE_LOCKED
-    } else {
-      MobileScreenState.ACTIVE
-    }
-    policy.onScreenStateChanged(next)
+    val next = classifyMobileScreenState(power.isInteractive, keyguard.isDeviceLocked)
+    val snapshot = policy.onScreenStateChanged(next)
+    if (snapshot.curtainVisible) showAll()
   }
 
   private fun registerScreenReceiver(activity: Activity) {
@@ -161,13 +166,16 @@ internal object MobileSecurityRuntime {
           when (intent?.action) {
             Intent.ACTION_SCREEN_OFF -> {
               showAll()
-              policy.onScreenStateChanged(MobileScreenState.SCREEN_OFF)
+              refreshDeviceState(activity)
             }
             Intent.ACTION_SCREEN_ON -> {
               showAll()
               refreshDeviceState(activity)
             }
-            Intent.ACTION_USER_PRESENT -> refreshDeviceState(activity)
+            Intent.ACTION_USER_PRESENT -> {
+              showAll()
+              refreshDeviceState(activity)
+            }
           }
         }
       }
@@ -187,14 +195,15 @@ internal object MobileSecurityRuntime {
     ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
       override fun onStart(owner: LifecycleOwner) {
         synchronized(this@MobileSecurityRuntime) {
-          policy.onForeground()
+          val snapshot = policy.onProcessForegroundChanged(true)
+          if (snapshot.curtainVisible) showAll()
         }
       }
 
       override fun onStop(owner: LifecycleOwner) {
         synchronized(this@MobileSecurityRuntime) {
+          policy.onProcessForegroundChanged(false)
           showAll()
-          policy.onBackground()
         }
       }
     })

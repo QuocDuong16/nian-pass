@@ -16,7 +16,6 @@ import {
 } from "./MobileSecurityShield";
 import { MobileVaultBrowser } from "./MobileVaultBrowser";
 import { MobileUnlockedHeader } from "./MobileUnlockedHeader";
-import { DEFAULT_MOBILE_AUTO_LOCK_MS } from "./useMobileIdleSecurity";
 import { useMobileSaveFlow } from "./useMobileSaveFlow";
 import { useMobileUnlockedSecurity } from "./useMobileUnlockedSecurity";
 
@@ -29,6 +28,8 @@ interface Props {
   securityRefreshing: boolean;
   onAcknowledgeSafeUi: (generation: number) => Promise<boolean>;
   onRefreshSecurity: () => Promise<MobileSecurityResumeDto | null>;
+  timeoutMs: number | null;
+  onTimeout: (timeoutMs: number | null) => void;
   platform: Extract<RuntimePlatform, "android" | "ios">;
   onLocked: () => void;
 }
@@ -45,9 +46,7 @@ export function MobileUnlockedView(props: Props) {
   const [attention, setAttention] = useState<MobileSecurityAttention | null>(
     null,
   );
-  const [timeoutMs, setTimeoutMs] = useState<number | null>(
-    DEFAULT_MOBILE_AUTO_LOCK_MS,
-  );
+  const [securitySaveFlow, setSecuritySaveFlow] = useState(false);
   const recordActivityRef = useRef<() => void>(() => undefined);
 
   const flow = useMobileSaveFlow({
@@ -62,6 +61,7 @@ export function MobileUnlockedView(props: Props) {
       }
     },
     onLockFailure: () => {
+      setSecuritySaveFlow(false);
       setLockError(
         "The vault is saved, but Nian Pass could not safely release the active Android source.",
       );
@@ -82,14 +82,13 @@ export function MobileUnlockedView(props: Props) {
     hasDraft,
     mutationPending,
     flowBusy: flow.busy,
-    clearSaveCredential: flow.clearCredential,
     lockPending,
     setLockPending,
     attention,
     setAttention,
     setLockError,
     setDirtyExit,
-    timeoutMs,
+    timeoutMs: props.timeoutMs,
     onDiscardDraft: () => {
       setDraftVersion((value) => value + 1);
       setHasDraft(false);
@@ -101,6 +100,15 @@ export function MobileUnlockedView(props: Props) {
   useEffect(() => {
     recordActivityRef.current = security.recordActivity;
   }, [security.recordActivity]);
+  const secureForBoundary = flow.secureForBoundary;
+  useEffect(() => {
+    if (!props.hidden) return;
+    secureForBoundary();
+  }, [props.hidden, secureForBoundary]);
+  useEffect(() => {
+    if (attention === null || securitySaveFlow) return;
+    secureForBoundary();
+  }, [attention, secureForBoundary, securitySaveFlow]);
 
   const busy = security.busy;
 
@@ -120,6 +128,12 @@ export function MobileUnlockedView(props: Props) {
     flow.flow.kind !== "closed" ||
     flow.blocked ||
     contentHidden;
+  const securityCredentialVisible =
+    contentHidden &&
+    !backgrounded &&
+    securitySaveFlow &&
+    flow.flow.kind === "credential" &&
+    flow.flow.intent === "lock";
 
   return (
     <>
@@ -135,9 +149,9 @@ export function MobileUnlockedView(props: Props) {
             blocked={flow.blocked}
             saved={flow.saved}
             saveDisabled={saveDisabled}
-            timeoutMs={timeoutMs}
+            timeoutMs={props.timeoutMs}
             onTimeout={(next) => {
-              setTimeoutMs(next);
+              props.onTimeout(next);
               security.recordActivity();
             }}
             onSave={() => {
@@ -185,7 +199,7 @@ export function MobileUnlockedView(props: Props) {
           ) : null}
         </main>
       </div>
-      {contentHidden ? (
+      {contentHidden && !securityCredentialVisible ? (
         <MobileSecurityShield
           attention={attention ?? "locking"}
           backgrounded={backgrounded}
@@ -193,6 +207,7 @@ export function MobileUnlockedView(props: Props) {
           onContinue={security.continueEditing}
           onDiscardDraft={security.discardDraft}
           onSaveAndLock={() => {
+            setSecuritySaveFlow(true);
             flow.start("lock");
           }}
           onDiscardAndLock={() => {
@@ -203,12 +218,15 @@ export function MobileUnlockedView(props: Props) {
           }}
         />
       ) : null}
-      {readOnly ? null : (
+      {readOnly || (contentHidden && !securityCredentialVisible) ? null : (
         <MobileSaveDialogs
           flow={flow.flow}
           password={flow.password}
           onPassword={flow.setPassword}
-          onCancel={flow.cancel}
+          onCancel={() => {
+            flow.cancel();
+            setSecuritySaveFlow(false);
+          }}
           onSave={() => void flow.submitSave()}
           onReloadChoice={flow.beginReload}
           onReloadCancel={flow.cancelReload}

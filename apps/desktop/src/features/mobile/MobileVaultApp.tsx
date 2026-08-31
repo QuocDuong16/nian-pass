@@ -8,7 +8,9 @@ import { MobileAutofillPanel } from "./MobileAutofillPanel";
 import { MobileLockedView } from "./MobileLockedView";
 import { MobileTransitionShield } from "./MobileTransitionShield";
 import { MobileUnlockedView } from "./MobileUnlockedView";
+import { useAcknowledgeLockedMobileUi } from "./useAcknowledgeLockedMobileUi";
 import { useMobileAutofillLaunch } from "./useMobileAutofillLaunch";
+import { DEFAULT_MOBILE_AUTO_LOCK_MS } from "./useMobileIdleSecurity";
 import { useMobileSecurityLifecycle } from "./useMobileSecurityLifecycle";
 
 interface MobileVaultAppProps {
@@ -28,6 +30,9 @@ export function MobileVaultApp({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hidden, setHidden] = useState(document.hidden);
+  const [timeoutMs, setTimeoutMs] = useState<number | null>(
+    DEFAULT_MOBILE_AUTO_LOCK_MS,
+  );
   const clearFrontendCredentials = useCallback(() => {
     setPassword("");
   }, []);
@@ -36,6 +41,14 @@ export function MobileVaultApp({
     enabled: platform === "android",
     onSecurityTransition: clearFrontendCredentials,
   });
+  const {
+    acknowledge: acknowledgeSafeUi,
+    boundaryPending,
+    refresh: refreshSecurity,
+    refreshing: securityRefreshing,
+    shielded: securityShielded,
+    status: securityStatus,
+  } = security;
   const onAutofillSelected = useCallback((next: MobileSelectedVaultDto) => {
     setSelected(next);
     setPhase("selected_locked");
@@ -73,37 +86,23 @@ export function MobileVaultApp({
     };
   }, []);
 
-  useEffect(() => {
-    const status = security.status;
-    if (
-      platform !== "android" ||
-      status === null ||
-      security.refreshing ||
-      !status.foreground ||
-      status.screenState !== "active" ||
-      phase === "unlocking" ||
-      phase === "unlocked"
-    ) {
-      return;
-    }
-    void security.acknowledge(status.generation);
-  }, [
-    phase,
-    platform,
-    security.acknowledge,
-    security.refreshing,
-    security.status,
-    security,
-  ]);
+  useAcknowledgeLockedMobileUi({
+    enabled: platform === "android",
+    lockedUi: phase !== "unlocking" && phase !== "unlocked",
+    refreshing: securityRefreshing,
+    shielded: securityShielded,
+    status: securityStatus,
+    acknowledge: acknowledgeSafeUi,
+  });
 
   useEffect(() => {
-    const status = security.status;
+    const status = securityStatus;
     if (
       platform !== "android" ||
       phase !== "unlocked" ||
       autofillRequest === null ||
-      !security.shielded ||
-      security.refreshing ||
+      !securityShielded ||
+      securityRefreshing ||
       status === null ||
       autofillLockGeneration.current === status.generation
     ) {
@@ -113,12 +112,12 @@ export function MobileVaultApp({
       void Promise.resolve().then(resetLocked);
       return;
     }
-    if (!security.boundaryPending) {
-      void security.acknowledge(status.generation);
+    if (!boundaryPending) {
+      void acknowledgeSafeUi(status.generation);
       return;
     }
     if (status.operationPending) {
-      void security.refresh();
+      void refreshSecurity();
       return;
     }
     autofillLockGeneration.current = status.generation;
@@ -130,16 +129,16 @@ export function MobileVaultApp({
       });
   }, [
     api,
+    acknowledgeSafeUi,
     autofillRequest,
+    boundaryPending,
     phase,
     platform,
+    refreshSecurity,
     resetLocked,
-    security.refresh,
-    security.boundaryPending,
-    security.refreshing,
-    security.shielded,
-    security.status,
-    security,
+    securityRefreshing,
+    securityShielded,
+    securityStatus,
   ]);
 
   const choose = async () => {
@@ -187,7 +186,7 @@ export function MobileVaultApp({
   };
 
   if (phase === "unlocked" && snapshot !== null && autofillRequest !== null) {
-    if (platform === "android" && security.shielded) {
+    if (platform === "android" && securityShielded) {
       return (
         <MobileTransitionShield
           title="Securing Nian Pass"
@@ -206,18 +205,20 @@ export function MobileVaultApp({
         api={api}
         selected={selected}
         initialSnapshot={snapshot}
-        hidden={platform === "android" ? security.shielded : hidden}
-        securityStatus={platform === "android" ? security.status : null}
-        securityRefreshing={security.refreshing}
-        onAcknowledgeSafeUi={security.acknowledge}
-        onRefreshSecurity={security.refresh}
+        hidden={platform === "android" ? securityShielded : hidden}
+        securityStatus={platform === "android" ? securityStatus : null}
+        securityRefreshing={securityRefreshing}
+        onAcknowledgeSafeUi={acknowledgeSafeUi}
+        onRefreshSecurity={refreshSecurity}
+        timeoutMs={timeoutMs}
+        onTimeout={setTimeoutMs}
         platform={platform}
         onLocked={resetLocked}
       />
     );
   }
 
-  if (platform === "android" && security.shielded && security.boundaryPending) {
+  if (platform === "android" && securityShielded && boundaryPending) {
     return (
       <MobileTransitionShield
         title="Nian Pass locked"

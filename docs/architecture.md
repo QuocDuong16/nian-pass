@@ -38,16 +38,26 @@ show/hide requests are idempotent, Activity references are weak, and every
 recreated Activity starts covered. No filename, vault title, username, entry
 metadata, URI, or error detail enters the curtain or Recents task metadata.
 
-`ProcessLifecycleOwner` supplies actual process foreground/background state.
-Public screen broadcasts plus `KeyguardManager.isDeviceLocked` classify
-screen-off and device-lock signals where Android exposes them. The process-local
-policy uses `SystemClock.elapsedRealtime()` and advances a generation only on a
-real foreground/background or screen-state transition. The narrow Rust command
+The native policy tracks `activityResumed`, `windowFocused`,
+`processForeground`, screen state, and a process-local generation. Activity
+pause and focus loss invalidate the generation and require the curtain
+immediately, even while `ProcessLifecycleOwner` still reports foreground. The
+process observer remains useful for app-wide foreground/background state, but
+its delayed callbacks are not the immediate Activity confidentiality boundary.
+Resume alone is insufficient: a new focus transition and explicit handshake
+are required.
+
+`PowerManager.isInteractive` classifies a non-interactive device as screen-off
+before `KeyguardManager.isDeviceLocked` distinguishes device-locked from active
+while interactive. Public screen broadcasts converge on that same classifier.
+The policy uses `SystemClock.elapsedRealtime()` and advances its generation only
+when an authority-relevant state actually changes. The narrow Rust command
 combines that secret-free native snapshot with only `locked`, `clean`, `dirty`,
 and operation-pending state. React validators require the exact keys. A safe-UI
-acknowledgement succeeds only for the current foreground, active-screen
-generation; a stale unlock, Save, mutation, Lock callback, duplicate resume, or
-configuration-recreation callback cannot uncover a newer curtain.
+acknowledgement succeeds only when its generation is current, the Activity is
+resumed and focused, the process is foreground, and the screen is interactive
+and device-unlocked. A stale unlock, Save, mutation, Lock callback, duplicate
+resume, or configuration-recreation callback cannot uncover a newer curtain.
 
 The clean path performs the existing authoritative Lock:
 
@@ -64,7 +74,12 @@ Native release failure cancels the exact operation, keeps the Rust session, and
 leaves a generic retry shield visible. Pending Save or mutation work is never
 cancelled at an unsafe point and lifecycle code never starts a second Save. It
 stays shielded until the serialized Rust operation settles and then reconciles
-its actual result. The SAF document picker is entered from the locked selection
+its actual result. Security attention structurally supersedes pre-existing
+normal Save, reload, conflict, and uncertainty dialogs and clears their
+passwords; in-flight Save/reload work continues behind the shield and is
+reconciled rather than cancelled. A fresh Save-and-lock choice from dirty
+security attention opens a new empty credential prompt while vault content
+remains hidden. The SAF document picker is entered from the locked selection
 flow, so no unlocked-vault exemption is needed; returning from it, Android
 settings, or any external intent follows the ordinary resume handshake. There
 is no broad `busy` or `ignoreBackground` bypass.
@@ -90,7 +105,9 @@ session and can lose unsaved in-memory work; Nian Pass does not create plaintext
 crash persistence to avoid that loss.
 
 Foreground inactivity defaults to five minutes, with 1, 5, 15, 30 minute and
-Never choices held only in application memory. Meaningful pointer/touch,
+Never choices held only in process-level React memory. The choice survives
+Lock/unlock and source selection in the same running app process, then resets to
+five minutes when a new application root/process starts. Meaningful pointer/touch,
 keyboard, navigation/edit actions, successful unlock, explicit Continue, and
 Save completion reset the deadline. Internal polling and render work do not.
 `performance.now()` advances the foreground estimate, while every resume
