@@ -12,6 +12,56 @@ M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
 coverage ratchets, and Forgejo jobs that call the same targets used locally.
 
+## M6 browser extension boundary
+
+M6 adds `apps/browser-extension` without changing the Rust, Tauri, Android, or
+deferred Apple runtime. One typed manifest source generates a Chromium MV3
+shell with `background.service_worker` and a Firefox MV3 shell with
+non-persistent `background.scripts`. Both bundle the same Promise-based browser
+adapter, background authority, isolated content script, and popup locally.
+
+```text
+HTTP(S) web page / hostile DOM
+→ explicit browser host permission
+→ isolated top-frame content script (low-trust adapter)
+→ versioned, exact-shape structural message
+→ browser-owned sender tab/frame/URL validation
+→ background extension authority
+→ popup/status UI
+
+M6.5 later:
+background authority
+→ Native Messaging
+→ desktop/shared Rust credential authority
+```
+
+The browser permission system is the site-access authority. `permissions.getAll`
+is canonicalized into one sorted `nian-pass-site-content` registration through
+`scripting.registerContentScripts`; install, startup, permission addition, and
+permission removal all reconcile idempotently. The Chromium service worker and
+Firefox event background may disappear. Registration correctness is rebuilt
+from browser state, while login detection status is intentionally ephemeral and
+may return to waiting after background loss.
+
+Content authority is top-frame only (`frameId == 0`). The background derives
+the exact current page from `sender.tab`, `sender.frameId`, and `sender.url`, not
+from a content-provided origin. The detector reports only protocol version,
+random document nonce, login-form presence, password count, username-candidate
+count, and form count. It reads structure but never existing input values.
+Dynamic DOM changes are debounced and signature-deduplicated. Open Shadow DOM
+and all cross-origin iframe credential semantics are deferred.
+
+The future-fill foundation maps live inputs to random per-document handles with
+a `WeakMap`, checks the exact document nonce and live eligible types, uses the
+native input value setter, and emits `input` plus `change`. It never submits or
+searches for a replacement field after stale-handle failure. No production M6
+path supplies a credential or emits `applyCredential` from background.
+
+Browser host permission is not credential identity. Even if a browser grant is
+broader than one origin, M6.5 must pass the browser-provided exact origin/host
+to Rust-owned credential matching before any secret release. TypeScript does no
+PSL, eTLD+1, wildcard credential, fuzzy-host, KDBX, or master-password work.
+
 ## M5.5 Android security lifecycle
 
 M5.5 adds an Android-owned visibility boundary around the existing Rust-owned

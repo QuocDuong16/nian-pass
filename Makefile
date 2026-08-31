@@ -11,9 +11,11 @@ RUST_VERSION := $(shell awk -F'"' '/^rust = / { print $$2 }' .mise.toml)
 RUST_COVERAGE_MIN ?= 87
 RUST_COVERAGE_DIFF_MIN ?= 85
 DESKTOP_COVERAGE_DIFF_MIN ?= 85
+BROWSER_COVERAGE_DIFF_MIN ?= 85
 COVERAGE_DIFF_BASE ?=
 RUST_LCOV := target/coverage/rust-lcov.info
 DESKTOP_LCOV := apps/desktop/coverage/lcov.info
+BROWSER_LCOV := apps/browser-extension/coverage/lcov.info
 DIFF_BASE_ARGS = $(if $(strip $(COVERAGE_DIFF_BASE)),--base "$(COVERAGE_DIFF_BASE)" --require-base,)
 
 CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync \
@@ -27,6 +29,9 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	desktop-coverage-diff desktop-dead-code desktop-build desktop-audit \
 	desktop-contract-rust-check desktop-contract-frontend-check desktop-contract-check \
 	desktop-native-check desktop-check windows-cross-check \
+	browser-install browser-format-check browser-lint browser-typecheck browser-test \
+	browser-test-coverage browser-coverage-check browser-coverage-diff browser-dead-code \
+	browser-build browser-artifact-check browser-audit browser-source-check browser-extension-check \
 	architecture-check security-check docs-check scripts-install scripts-check mobile-source-check \
 	mobile-tools-check mobile-android-check mobile-ios-tools-check mobile-ios-source-check mobile-ios-check \
 	compat-check compat-check-required policy-check quick-check quality-check
@@ -198,6 +203,68 @@ desktop-check:
 	$(MAKE) desktop-build
 	$(MAKE) desktop-audit
 
+browser-install:
+	@echo "Install browser extension dependencies from the frozen lockfile..."
+	pnpm install --frozen-lockfile
+
+browser-format-check:
+	@echo "Check browser extension formatting..."
+	pnpm --filter @nian-pass/browser-extension format:check
+
+browser-lint:
+	@echo "Check strict browser extension ESLint policy..."
+	pnpm --filter @nian-pass/browser-extension lint
+
+browser-typecheck:
+	@echo "Check strict browser extension TypeScript..."
+	pnpm --filter @nian-pass/browser-extension typecheck
+
+browser-test:
+	@echo "Run browser extension tests..."
+	pnpm --filter @nian-pass/browser-extension test
+
+browser-test-coverage:
+	@echo "Run browser extension coverage ratchets..."
+	pnpm --filter @nian-pass/browser-extension test:coverage
+
+browser-coverage-check: browser-test-coverage
+	@test -f "$(BROWSER_LCOV)" || { echo "Vitest did not produce $(BROWSER_LCOV)." >&2; exit 1; }
+
+browser-coverage-diff:
+	@echo "Check changed browser extension TypeScript lines ($(BROWSER_COVERAGE_DIFF_MIN)%)..."
+	node scripts/check_diff_coverage.mjs --file "$(BROWSER_LCOV)" --threshold "$(BROWSER_COVERAGE_DIFF_MIN)" --path apps/browser-extension --extension ts $(DIFF_BASE_ARGS)
+
+browser-dead-code:
+	@echo "Check browser extension dead code and dependency declarations..."
+	pnpm --filter @nian-pass/browser-extension dead-code
+
+browser-build:
+	@echo "Build Chromium and Firefox extension artifacts..."
+	pnpm --filter @nian-pass/browser-extension build
+
+browser-artifact-check:
+	@echo "Validate built browser extension artifacts..."
+	node scripts/check_browser_extension.mjs --artifacts
+
+browser-audit:
+	@echo "Check browser extension production dependency vulnerabilities..."
+	pnpm audit --prod
+
+browser-source-check:
+	@echo "Check browser extension source security invariants..."
+	node scripts/check_browser_extension.mjs --source
+
+browser-extension-check: browser-install
+	$(MAKE) browser-format-check
+	$(MAKE) browser-lint
+	$(MAKE) browser-typecheck
+	$(MAKE) browser-coverage-check
+	$(MAKE) browser-coverage-diff
+	$(MAKE) browser-dead-code
+	$(MAKE) browser-build
+	$(MAKE) browser-artifact-check
+	$(MAKE) browser-audit
+
 windows-cross-check:
 	@echo "Cross-check persistence and sync crates for Windows..."
 	cargo check --locked --all-targets --target x86_64-pc-windows-gnu -p vault-session -p vault-sync
@@ -288,6 +355,8 @@ quick-check:
 	$(MAKE) desktop-no-eslint-disable
 	$(MAKE) desktop-typecheck
 	$(MAKE) desktop-test
+	$(MAKE) browser-source-check
+	$(MAKE) browser-extension-check
 	$(MAKE) security-check
 	$(MAKE) docs-check
 
@@ -299,6 +368,8 @@ quality-check:
 	$(MAKE) mobile-source-check
 	$(MAKE) rust-check
 	$(MAKE) desktop-check
+	$(MAKE) browser-source-check
+	$(MAKE) browser-extension-check
 	$(MAKE) security-check
 	$(MAKE) docs-check
 	$(MAKE) compat-check

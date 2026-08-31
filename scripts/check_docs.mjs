@@ -32,9 +32,15 @@ export function runChecks(root) {
   const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
   const makefile = readRequired(root, "Makefile", violations);
 
-  requirePattern(violations, "README.md", readme, /## Current milestone[\s\S]{0,100}M5\.5\s*[—-]\s*Android Mobile Security \/ Lifecycle/i, "current milestone must report M5.5 Android lifecycle");
+  requirePattern(violations, "README.md", readme, /## Current milestone[\s\S]{0,100}M6\s*[—-]\s*Browser Extension Foundation/i, "current milestone must report M6 browser foundation");
   requirePattern(violations, "README.md", readme, /M5\.4\s*[—-]\s*iOS Password AutoFill \+ Keychain[^\n]*DEFERRED/, "roadmap must retain M5.4 deferred");
-  requirePattern(violations, "README.md", readme, /M5\.5\s+Android Mobile Security \/ Lifecycle\s+CURRENT[\s\S]{0,240}M6\s+Browser Extension Foundation\s+NEXT/i, "M5.5-current and browser-next roadmap is missing");
+  requirePattern(violations, "README.md", readme, /M5\.5\s+Android Mobile Security \/ Lifecycle\s+DONE[\s\S]{0,240}M6\s+Browser Extension Foundation\s+DONE[\s\S]{0,240}M6\.5\s+Browser Native Messaging \/ Desktop Integration\s+NEXT/i, "M6-done and M6.5-next roadmap is missing");
+  requirePattern(violations, "README.md", readme, /Chromium MV3 build[\s\S]{0,300}Firefox MV3 build[\s\S]{0,300}explicit per-site permission[\s\S]{0,300}top-frame login-form detection[\s\S]{0,300}no credential retrieval yet/i, "M6 browser status boundary is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /M6 browser extension boundary[\s\S]{0,1800}background extension authority[\s\S]{0,1000}Native Messaging[\s\S]{0,500}Rust credential authority/i, "M6 browser authority architecture is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /browser host permission[\s\S]{0,300}(?:not|isn't)[\s\S]{0,80}credential identity/i, "browser permission and credential identity separation is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /web page \/ DOM[\s\S]{0,300}untrusted[\s\S]{0,600}content script[\s\S]{0,300}low-trust[\s\S]{0,600}background extension context[\s\S]{0,300}privileged/i, "M6 browser trust hierarchy is missing");
+  requirePattern(violations, "docs/quality.md", quality, /browser-source-check[\s\S]{0,300}browser-extension-check/i, "M6 browser quality targets are missing");
+  requirePattern(violations, "docs/quality.md", quality, /do not[\s\S]{0,80}(?:require|launch)[\s\S]{0,120}(?:Chrome|Chromium)[\s\S]{0,120}Firefox/i, "M6 browser no-GUI policy is missing");
   requirePattern(violations, "README.md", readme, /read-only providers[\s\S]{0,160}(?:editing|Save) disabled/i, "M5.2 read-only provider boundary is missing");
   requirePattern(violations, "README.md", readme, /AtomicFile[\s\S]{0,300}save_uncertain[\s\S]{0,160}recovery_required/i, "M5.2 recovery and uncertainty boundary is missing");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");

@@ -18,7 +18,7 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "## Current milestone\nM5.5 — Android Mobile Security / Lifecycle\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle CURRENT\nM6 Browser Extension Foundation NEXT\nRead-only providers have editing and Save disabled. " +
+    "## Current milestone\nM6 — Browser Extension Foundation\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle DONE\nM6 Browser Extension Foundation DONE\nM6.5 Browser Native Messaging / Desktop Integration NEXT\nChromium MV3 build. Firefox MV3 build. Explicit per-site permission. Top-frame login-form detection. No credential retrieval yet. Read-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
@@ -41,7 +41,8 @@ function fixture(t) {
       "A populated origin failure is unavailable; isOriginPopulated() then getOrigin(privilegedAllowlist). " +
       "retrieveBeginGetCredentialRequest() and retrieveProviderGetCredentialRequest() rebuild authority after process restart. " +
       "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n" +
-      "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
+    "M6 browser extension boundary: background extension authority then later Native Messaging then Rust credential authority. Browser host permission is not credential identity. " +
+    "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
       "SystemClock.elapsedRealtime() feeds a monotonic generation and exact safe-UI acknowledgement. " +
       "Global processForeground and screen state are separate from per-Activity activityResumed and windowFocused. ProcessLifecycleOwner is not the immediate confidentiality boundary. MainActivity and CredentialActivity cannot authorize one another. " +
       "PowerManager.isInteractive precedes KeyguardManager.isDeviceLocked. " +
@@ -54,7 +55,7 @@ function fixture(t) {
   write(
     root,
     "docs/threat-model.md",
-    "Compromised supply-chain dependencies. OS clipboard history may retain data. " +
+    "Compromised supply-chain dependencies. OS clipboard history may retain data. Web page / DOM is untrusted; content script is a low-trust adapter; background extension context is privileged. " +
       "A dirty timeout never performs discard without explicit user intent. " +
       "iOS is not initialized or built on Linux; validation requires macOS with Xcode. " +
       "A fake Android application, changed signing key, unverified web target, and replayed request token fail closed. " +
@@ -78,7 +79,7 @@ function fixture(t) {
       "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
       "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
       "M5.5 requires PowerManager.isInteractive and SystemClock.elapsedRealtime lifecycle source ratchets; same-process Lock/unlock timeout retention and new-root reset are tested; Android instrumentation only compiles headlessly.\n" +
-      "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension.\n",
+    "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension. browser-source-check and browser-extension-check do not require Chrome Chromium or Firefox GUI browsers.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");

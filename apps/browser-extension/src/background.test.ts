@@ -1,0 +1,75 @@
+import { vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  runtimeMessage: vi.fn(),
+  installed: vi.fn(),
+  startup: vi.fn(),
+  permissionAdded: vi.fn(),
+  permissionRemoved: vi.fn(),
+  tabRemoved: vi.fn(),
+  tabUpdated: vi.fn(),
+  getAllPermissions: vi.fn().mockResolvedValue({ origins: [] }),
+  getRegisteredScripts: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("webextension-polyfill", () => ({
+  default: {
+    runtime: {
+      onMessage: { addListener: mocks.runtimeMessage },
+      onInstalled: { addListener: mocks.installed },
+      onStartup: { addListener: mocks.startup },
+    },
+    permissions: {
+      onAdded: { addListener: mocks.permissionAdded },
+      onRemoved: { addListener: mocks.permissionRemoved },
+    },
+    tabs: {
+      onRemoved: { addListener: mocks.tabRemoved },
+      onUpdated: { addListener: mocks.tabUpdated },
+    },
+  },
+}));
+
+vi.mock("./browser-binding", () => ({
+  browserApi: {
+    getAllPermissions: mocks.getAllPermissions,
+    getRegisteredScripts: mocks.getRegisteredScripts,
+    containsOrigin: vi.fn().mockResolvedValue(false),
+    requestOrigin: vi.fn().mockResolvedValue(false),
+    removeOrigin: vi.fn().mockResolvedValue(false),
+    unregisterScripts: vi.fn().mockResolvedValue(undefined),
+    registerScript: vi.fn().mockResolvedValue(undefined),
+    queryActiveTab: vi.fn().mockResolvedValue(null),
+    extensionId: () => "test-id",
+    popupUrl: () => "moz-extension://test-id/popup.html",
+  },
+}));
+
+test("registers all background listeners synchronously and schedules lifecycle work", async () => {
+  await import("./background");
+  expect(mocks.runtimeMessage).toHaveBeenCalledOnce();
+  expect(mocks.installed).toHaveBeenCalledOnce();
+  expect(mocks.startup).toHaveBeenCalledOnce();
+  expect(mocks.permissionAdded).toHaveBeenCalledOnce();
+  expect(mocks.permissionRemoved).toHaveBeenCalledOnce();
+  expect(mocks.tabRemoved).toHaveBeenCalledOnce();
+  expect(mocks.tabUpdated).toHaveBeenCalledOnce();
+
+  const installed = mocks.installed.mock.calls[0]?.[0] as () => void;
+  const removed = mocks.permissionRemoved.mock.calls[0]?.[0] as () => void;
+  const tabRemoved = mocks.tabRemoved.mock.calls[0]?.[0] as (
+    tabId: number,
+  ) => void;
+  const tabUpdated = mocks.tabUpdated.mock.calls[0]?.[0] as (
+    tabId: number,
+    change: { status?: string; url?: string },
+  ) => void;
+  installed();
+  removed();
+  tabRemoved(3);
+  tabUpdated(3, { status: "loading" });
+  tabUpdated(3, { url: "https://example.test/" });
+  await vi.waitFor(() => {
+    expect(mocks.getAllPermissions).toHaveBeenCalled();
+  });
+});

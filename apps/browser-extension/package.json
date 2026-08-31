@@ -1,0 +1,39 @@
+{
+  "name": "@nian-pass/browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build/build.mjs all",
+    "build:chromium": "node build/build.mjs chromium",
+    "build:firefox": "node build/build.mjs firefox",
+    "package": "node build/package.mjs",
+    "format": "prettier --write src build package.json tsconfig.json knip.json eslint.config.js vite.config.ts",
+    "format:check": "prettier --check src build package.json tsconfig.json knip.json eslint.config.js vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src vite.config.ts --max-warnings 0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "dead-code": "knip"
+  },
+  "dependencies": {
+    "webextension-polyfill": "0.12.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.4.0",
+    "@types/webextension-polyfill": "0.12.5",
+    "@vitest/coverage-v8": "4.1.11",
+    "eslint": "10.8.1",
+    "eslint-plugin-no-unsanitized": "4.1.5",
+    "eslint-plugin-security": "4.0.1",
+    "globals": "17.11.0",
+    "jsdom": "30.0.1",
+    "knip": "6.32.2",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

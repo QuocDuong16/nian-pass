@@ -1,0 +1,39 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 300px;
+}
+
+main {
+  padding: 16px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0 0 12px;
+}
+
+p {
+  margin: 8px 0;
+}
+
+button {
+  margin: 8px 8px 0 0;
+  padding: 7px 10px;
+}
+
+.future {
+  border-top: 1px solid currentColor;
+  margin-top: 16px;
+  opacity: 0.75;
+  padding-top: 12px;
+}
+
+#error {
+  color: #b42318;
+  min-height: 1.2em;
+}

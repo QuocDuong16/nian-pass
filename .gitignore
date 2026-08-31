@@ -5,3 +5,7 @@
 /apps/desktop/coverage/
 /apps/desktop/node_modules/
 /apps/desktop/src-tauri/gen/schemas/
+/apps/browser-extension/dist/
+/apps/browser-extension/coverage/
+/apps/browser-extension/node_modules/
+/apps/browser-extension/*.zip

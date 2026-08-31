@@ -19,6 +19,32 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
+M6 — Browser Extension Foundation
+
+M6 provides production-shaped Manifest V3 artifacts for Chromium-family
+browsers and Firefox. Site access is disabled by default: the popup requests
+only the active HTTP(S) host after an explicit user action, then the background
+authority reconciles one top-frame dynamic content-script registration from
+browser-owned permissions. The isolated content script reports only a random
+document nonce and structural login-form counts; it never reads field values.
+
+The extension has no vault access, credential retrieval, credential storage,
+network traffic, Native Messaging, KDBX code, master-password UI, automatic
+fill, or automatic submit. A document- and opaque-field-bound fill primitive is
+covered only by synthetic tests so M6.5 can add a reviewed native credential
+authority without redesigning DOM interaction. M6 is not complete browser
+autofill.
+
+Browser Extension Foundation status:
+
+- Chromium MV3 build
+- Firefox MV3 build
+- Explicit per-site permission
+- Top-frame login-form detection
+- No credential retrieval yet
+
+## Completed M5.5 milestone
+
 M5.5 — Android Mobile Security / Lifecycle
 
 M5.5 protects every sensitive Android Activity with native `FLAG_SECURE`, adds
@@ -82,19 +108,24 @@ M5.3 Android Credential Provider + Autofill     DONE
 
 M5.4 iOS Password AutoFill + Keychain           DEFERRED
 
-M5.5 Android Mobile Security / Lifecycle        CURRENT
-M6   Browser Extension Foundation               NEXT
-M6.5 Browser Native Messaging / Desktop Integration
+M5.5 Android Mobile Security / Lifecycle        DONE
+M6   Browser Extension Foundation               DONE
+M6.5 Browser Native Messaging / Desktop Integration NEXT
 M7   BYO-cloud Sync Providers
 M7.5 Self-hosted Sync Gateway
 M8   Security Hardening / Release Engineering
 M9+  Apple Platform Resume
 ```
 
-After M5.5, the next major product priority is a browser
-extension backed by Native Messaging and the Nian Pass desktop/shared Rust
-authority, preferring KeePassXC Browser protocol interoperability where
-practical. Browser work is not implemented by M5.5.
+The next milestone is M6.5 Browser Native Messaging / Desktop Integration.
+It should prefer KeePassXC Browser protocol interoperability where practical,
+using a clean-room/API-level implementation without copying GPL implementation
+code. M6 makes no KeePassXC Browser compatibility claim and does not implement
+Native Messaging or a localhost credential service. Chromium publishing or
+native-host packaging must explicitly resolve a final/development extension
+ID; no Chrome Web Store ID or private signing key is invented here. Firefox
+uses the neutral development ID `browser@nian-pass.local`, which a future
+production publishing identity may replace.
 
 The Desktop MVP remains complete through M4.5 and the M5.2 Android CRUD/Save
 protocol remains unchanged. Android now adds password retrieval through a

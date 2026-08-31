@@ -4,8 +4,46 @@ This is the threat model for the M3 local vault session/filesystem foundation,
 the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
 M4.3 mutation UI, the M4.4 save/conflict flow, the M4.Q quality/security gates,
 the M5.2 Android CRUD/provider-persistence flow, the M5.3 Android credential
-retrieval flow, and the M5.5 Android security lifecycle. It records boundaries and assumptions; it is not a
+retrieval flow, the M5.5 Android security lifecycle, and the M6 browser
+extension boundary. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
+
+## M6 browser trust hierarchy and threats
+
+```text
+web page / DOM                  = untrusted
+isolated content script         = low-trust adapter
+background extension context   = privileged browser authority
+native desktop/shared Rust      = future credential authority (M6.5)
+```
+
+M6 assumes a hostile page DOM, forged or compromised content-script messages,
+stale document handles, navigation races, permission drift, over-broad host
+grants, service-worker suspension/background loss, page attempts to confuse fill
+routing, and popup XSS. It also treats the future native host as a potential
+confused-deputy boundary. The background validates exact message shapes and
+versions plus browser-owned tab, top-frame ID, URL scheme, and current host
+permission. A content-script-claimed URL never establishes credential identity.
+
+Each document has a cryptographically random nonce and opaque field handles.
+Navigation creates new authority; a stale nonce, missing handle, disconnected
+node, wrong field type, disabled/readonly/hidden target, or non-top frame fails
+closed. Detection observes only bounded DOM structure and never reads existing
+values. Filling is test-only in M6, dispatches ordinary events, and never
+submits. Closed shadow roots and cross-origin login/federation/payment frames
+are explicitly unsupported rather than guessed.
+
+The popup uses fixed local HTML and `textContent`, shows at most the canonical
+host, and exposes generic errors. No page title, path, query, fragment, form
+label, value, or DOM snapshot is displayed or logged. There is no telemetry,
+analytics, remote code, network API, extension storage, browser-side password
+cache, Native Messaging, localhost server, KDBX parser, or master password.
+
+For M6.5, one credential response must flow from native Rust authority to the
+exact tab/frame/document, be written once, never persisted, and have references
+dropped. Possessing a browser host permission is not proof that a credential
+matches. Rust-owned exact current-origin/host policy must decide before secret
+release.
 
 ## Secret material
 

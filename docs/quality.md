@@ -46,6 +46,25 @@ Forgejo's compatibility job uses `compat-check-required` so a missing external
 binary fails. Cargo always uses `--locked`; pnpm install always uses
 `--frozen-lockfile`.
 
+M6 adds `browser-source-check` and `browser-extension-check` to both normal
+`quick-check` and `quality-check`. The focused browser gate runs frozen install,
+Prettier, strict typed ESLint, TypeScript, Vitest coverage, 85% changed-line
+coverage, Knip, Chromium and Firefox builds, parsed-manifest/artifact validation,
+an exact synthetic-secret marker scan, and production dependency audit. Package
+coverage ratchets are 85% statements, 80% branches, 85% functions, and 85%
+lines. The source ratchet enforces MV3, optional HTTP(S) permissions, dynamic
+top-frame registration, synchronous lifecycle listeners, browser-owned sender
+identity, no Native Messaging/network/storage/external messages/MAIN-world
+bridge, detector-local `.value` prohibition, and no submit path.
+
+These deterministic gates build `dist/chromium` and `dist/firefox` but do not
+require or launch Chrome, Chromium, Edge, Firefox, X11, Wayland, or any GUI.
+Manual unpacked/temporary-extension smoke uses only a synthetic loopback page
+bound to `127.0.0.1` and is reported separately. Chromium and Firefox manual
+smoke are not deterministic completion gates.
+The Forgejo Node frontend job runs this focused gate with the same resolved diff
+base as desktop changed-line coverage.
+
 `mobile-source-check` is environment-independent and participates in the normal
 policy, quick, and quality gates. It verifies the committed Tauri-generated
 Android project, API 26 minimum, normal generated ABI set, machine-local ignore
