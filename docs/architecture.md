@@ -38,14 +38,17 @@ show/hide requests are idempotent, Activity references are weak, and every
 recreated Activity starts covered. No filename, vault title, username, entry
 metadata, URI, or error detail enters the curtain or Recents task metadata.
 
-The native policy tracks `activityResumed`, `windowFocused`,
-`processForeground`, screen state, and a process-local generation. Activity
-pause and focus loss invalidate the generation and require the curtain
-immediately, even while `ProcessLifecycleOwner` still reports foreground. The
-process observer remains useful for app-wide foreground/background state, but
-its delayed callbacks are not the immediate Activity confidentiality boundary.
-Resume alone is insufficient: a new focus transition and explicit handshake
-are required.
+The native policy separates global `processForeground`/screen state from a weak
+registry of Activity-local `activityResumed`, `windowFocused`, generation, and
+curtain authority. Activity pause and focus loss invalidate only that exact
+Activity and require its curtain immediately, even while
+`ProcessLifecycleOwner` still reports foreground. Global process or device
+transitions invalidate every attached Activity exactly once. The process
+observer remains useful for app-wide foreground/background state, but its
+delayed callbacks are not the immediate Activity confidentiality boundary.
+Resume alone is insufficient: the same Activity needs a new focus transition
+and explicit handshake. `MainActivity` and `CredentialActivity` cannot use one
+another's resumed/focused state or generation to remove a curtain.
 
 `PowerManager.isInteractive` classifies a non-interactive device as screen-off
 before `KeyguardManager.isDeviceLocked` distinguishes device-locked from active
@@ -54,10 +57,11 @@ The policy uses `SystemClock.elapsedRealtime()` and advances its generation only
 when an authority-relevant state actually changes. The narrow Rust command
 combines that secret-free native snapshot with only `locked`, `clean`, `dirty`,
 and operation-pending state. React validators require the exact keys. A safe-UI
-acknowledgement succeeds only when its generation is current, the Activity is
-resumed and focused, the process is foreground, and the screen is interactive
-and device-unlocked. A stale unlock, Save, mutation, Lock callback, duplicate
-resume, or configuration-recreation callback cannot uncover a newer curtain.
+acknowledgement succeeds only when its generation belongs to the exact attached
+caller Activity, that Activity is resumed and focused, the process is
+foreground, and the screen is interactive and device-unlocked. A stale unlock,
+Save, mutation, Lock callback, duplicate resume, cross-Activity callback, or
+configuration-recreation callback cannot uncover a newer curtain.
 
 The clean path performs the existing authoritative Lock:
 

@@ -502,6 +502,20 @@ export function runChecks(root) {
     }
   }
   for (const required of [
+    "WeakHashMap<Activity, ActivitySecurityState>",
+    "onPause(activity: Activity)",
+    "policy.onActivityResumed(activity",
+    "policy.onWindowFocused(activity",
+    "policy.acknowledgeSafeUi(activity, generation)",
+  ]) {
+    if (!mobileSecurityRuntime.includes(required)) {
+      violations.push(`M5.5 native lifecycle authority must be Activity-scoped via ${required}`);
+    }
+  }
+  for (const required of [
+    "ActivitySecurityState",
+    "MutableMap<K, ActivitySecurityState>",
+    "activities[activity]",
     "activityResumed",
     "windowFocused",
     "processForeground",
@@ -510,6 +524,8 @@ export function runChecks(root) {
     "onWindowFocused",
     "onScreenStateChanged",
     "acknowledgementEligible",
+    "invalidateAllActivities",
+    "MAX_SAFE_GENERATION",
     "classifyMobileScreenState",
     "expectedGeneration",
     "CurtainAttachmentModel",
@@ -526,6 +542,13 @@ export function runChecks(root) {
     "focusWithoutResumedCannotAcknowledge",
     "screenClassifierPrioritizesInteractiveStateBeforeKeyguard",
     "curtainAndApiPoliciesAreIdempotent",
+    "activityAStateCannotAuthorizeActivityB",
+    "activityBStateCannotAuthorizePausedActivityA",
+    "staleFocusCallbackFromADoesNotInvalidateFocusedB",
+    "globalBackgroundInvalidatesAllActivities",
+    "screenOffInvalidatesAllActivities",
+    "duplicateGlobalTransitionIsIdempotent",
+    "detachedActivityCannotAcknowledge",
   ]) {
     if (!mobileSecurityPolicyTest.includes(required)) {
       violations.push(`M5.5 lifecycle policy tests must retain ${required}`);

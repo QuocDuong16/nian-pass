@@ -43,7 +43,7 @@ function fixture(t) {
       "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n" +
       "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
       "SystemClock.elapsedRealtime() feeds a monotonic generation and exact safe-UI acknowledgement. " +
-      "activityResumed, windowFocused, and processForeground precede ProcessLifecycleOwner, which is not the immediate confidentiality boundary. " +
+      "Global processForeground and screen state are separate from per-Activity activityResumed and windowFocused. ProcessLifecycleOwner is not the immediate confidentiality boundary. MainActivity and CredentialActivity cannot authorize one another. " +
       "PowerManager.isInteractive precedes KeyguardManager.isDeviceLocked. " +
       "Security attention suppresses Save and reload dialogs; in-flight work continues and is reconciled rather than cancelled. " +
       "A dirty draft remains shielded and lifecycle never autosaves or discards it.\n" +

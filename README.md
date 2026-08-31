@@ -23,13 +23,16 @@ M5.5 — Android Mobile Security / Lifecycle
 
 M5.5 protects every sensitive Android Activity with native `FLAG_SECURE`, adds
 API 33+ Recents screenshot suppression, and places an opaque native privacy
-curtain over the WebView before foreground is lost. Activity pause or focus
-loss immediately invalidates the process-local monotonic lifecycle generation;
-delayed process lifecycle callbacks are not the confidentiality boundary. An
-explicit resume acknowledgement requires the current resumed, focused,
-process-foreground, interactive, device-unlocked generation and keeps the
-curtain in place until React has reconciled the real Rust vault state. The
-curtain is a visual/accessibility boundary; it is not backend Lock.
+curtain over the WebView before foreground is lost. Each sensitive Activity has
+its own resumed/focused authority and monotonic generation; pause or focus loss
+immediately invalidates only that Activity, while process/screen transitions
+invalidate every attached Activity. `MainActivity` and `CredentialActivity`
+cannot acknowledge one another's curtain. Delayed process lifecycle callbacks
+are not the confidentiality boundary. An explicit resume acknowledgement
+requires the exact caller Activity's current generation plus foreground,
+interactive, device-unlocked state and keeps the curtain in place until React
+has reconciled the real Rust vault state. The curtain is a visual/accessibility
+boundary; it is not backend Lock.
 
 Clean background, screen-lock, and foreground-idle expiry invoke the existing
 two-phase Rust Lock transaction. Dirty Rust mutations and frontend edit drafts

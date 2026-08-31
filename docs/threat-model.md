@@ -356,18 +356,24 @@ They do not defeat root, malware with process access, a compromised OS, a
 physical camera, every OEM bug, or an attacker who already observed plaintext
 while the device and vault were legitimately unlocked.
 
-Activity pause/focus loss atomically invalidates the prior lifecycle generation
-and attaches an opaque native privacy curtain before the WebView is trusted to
-redraw. The curtain has only a generic accessible label and makes covered
-WebView descendants inaccessible. It is intentionally distinct from backend
-Lock: it prevents display and interaction while the native/React/Rust state is
-reconciled, whereas successful Lock drops the decrypted Rust session. Only an
-acknowledgement for the current generation while the Activity is resumed and
-focused, the process is foreground, and the device is interactive and unlocked
-removes the curtain. `ProcessLifecycleOwner` remains a secondary process-state
-signal; its delayed stop callback is never relied upon to invalidate Activity
-confidentiality. Rotation creates a newly covered Activity and does not reset
-the policy object; stale callbacks, Back, returning
+Activity pause/focus loss atomically invalidates that exact Activity's prior
+lifecycle generation and attaches its opaque native privacy curtain before the
+WebView is trusted to redraw. Process foreground and device screen state are
+global, while resumed/focused state, generation, and curtain authority are held
+in a weak per-Activity registry. A global process/screen transition invalidates
+all attached authorities; an Activity-local transition does not corrupt another
+Activity. `MainActivity` and `CredentialActivity` therefore cannot authorize
+one another's curtain. The curtain has only a generic accessible label and makes
+covered WebView descendants inaccessible. It is intentionally distinct from
+backend Lock: it prevents display and interaction while the native/React/Rust
+state is reconciled, whereas successful Lock drops the decrypted Rust session.
+Only an acknowledgement for the exact attached caller Activity's current
+generation while it is resumed and focused, the process is foreground, and the
+device is interactive and unlocked removes that Activity's curtain.
+`ProcessLifecycleOwner` remains a secondary process-state signal; its delayed
+stop callback is never relied upon to invalidate Activity confidentiality.
+Rotation creates a newly covered Activity; detached authority cannot be
+acknowledged. Stale callbacks, Back, returning
 from a document picker or Settings, multi-window focus changes, and external
 intents cannot implicitly continue editing or reveal the vault. PiP,
 AccessibilityService detection, overlay permissions, notifications, and a

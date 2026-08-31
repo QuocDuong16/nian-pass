@@ -148,17 +148,17 @@ fingerprint(save.readBack)
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityRuntime.kt",
-    'FLAG_SECURE setRecentsScreenshotEnabled(false) Build.VERSION.SDK_INT PrivacyCurtainController ProcessLifecycleOwner PowerManager isInteractive SystemClock::elapsedRealtime contentDescription = "Nian Pass locked" acknowledgeSafeUi\n',
+    'FLAG_SECURE setRecentsScreenshotEnabled(false) Build.VERSION.SDK_INT PrivacyCurtainController ProcessLifecycleOwner PowerManager isInteractive SystemClock::elapsedRealtime contentDescription = "Nian Pass locked" acknowledgeSafeUi WeakHashMap<Activity, ActivitySecurityState> onPause(activity: Activity) policy.onActivityResumed(activity policy.onWindowFocused(activity policy.acknowledgeSafeUi(activity, generation)\n',
   );
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityPolicy.kt",
-    "activityResumed windowFocused processForeground onProcessForegroundChanged onActivityResumed onWindowFocused onScreenStateChanged acknowledgementEligible classifyMobileScreenState expectedGeneration CurtainAttachmentModel\n",
+    "ActivitySecurityState MutableMap<K, ActivitySecurityState> activities[activity] activityResumed windowFocused processForeground onProcessForegroundChanged onActivityResumed onWindowFocused onScreenStateChanged acknowledgementEligible invalidateAllActivities MAX_SAFE_GENERATION classifyMobileScreenState expectedGeneration CurtainAttachmentModel\n",
   );
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/test/java/dev/nian/pass/MobileSecurityPolicyTest.kt",
-    "duplicateIdenticalTransitionsAreIdempotent pauseInvalidatesOldGenerationBeforeDelayedProcessStop focusLossInvalidatesOldGenerationImmediately resumeWithoutFocusCannotAcknowledge focusWithoutResumedCannotAcknowledge screenClassifierPrioritizesInteractiveStateBeforeKeyguard curtainAndApiPoliciesAreIdempotent\n",
+    "duplicateIdenticalTransitionsAreIdempotent pauseInvalidatesOldGenerationBeforeDelayedProcessStop focusLossInvalidatesOldGenerationImmediately resumeWithoutFocusCannotAcknowledge focusWithoutResumedCannotAcknowledge screenClassifierPrioritizesInteractiveStateBeforeKeyguard curtainAndApiPoliciesAreIdempotent activityAStateCannotAuthorizeActivityB activityBStateCannotAuthorizePausedActivityA staleFocusCallbackFromADoesNotInvalidateFocusedB globalBackgroundInvalidatesAllActivities screenOffInvalidatesAllActivities duplicateGlobalTransitionIsIdempotent detachedActivityCannotAcknowledge\n",
   );
   write(
     root,
@@ -569,4 +569,18 @@ test("M5.5 secure lifecycle, monotonic time, and memory-only policy cannot drift
   assert.match(violations, /application-memory only/);
   assert.match(violations, /biometric quick unlock must remain deferred/);
   assert.match(violations, /CredentialActivity lifecycle must retain/);
+});
+
+test("M5.5 native lifecycle authority cannot regress to one cross-Activity state", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/MobileSecurityRuntime.kt",
+    'FLAG_SECURE setRecentsScreenshotEnabled(false) Build.VERSION.SDK_INT PrivacyCurtainController ProcessLifecycleOwner PowerManager isInteractive SystemClock::elapsedRealtime contentDescription = "Nian Pass locked" acknowledgeSafeUi\n',
+  );
+
+  assert.match(
+    runChecks(root).join("\n"),
+    /native lifecycle authority must be Activity-scoped/,
+  );
 });

@@ -2,117 +2,245 @@ package dev.nian.pass
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MobileSecurityPolicyTest {
-  private fun safePolicy(): MobileSecurityPolicy = MobileSecurityPolicy { 50L }.apply {
-    onProcessForegroundChanged(true)
-    onActivityResumed(true)
-    onWindowFocused(true)
-  }
+  private fun newPolicy(): MobileSecurityPolicy<String> =
+    MobileSecurityPolicy(clock = { 50L })
+
+  private fun safePolicy(activity: String = "A"): MobileSecurityPolicy<String> =
+    newPolicy().apply {
+      attach(activity)
+      onProcessForegroundChanged(true)
+      onActivityResumed(activity, true)
+      onWindowFocused(activity, true)
+    }
 
   @Test
   fun duplicateIdenticalTransitionsAreIdempotent() {
-    val policy = MobileSecurityPolicy { 10L }
-    assertEquals(0L, policy.snapshot().generation)
-    assertEquals(1L, policy.onProcessForegroundChanged(true).generation)
-    assertEquals(1L, policy.onProcessForegroundChanged(true).generation)
-    assertEquals(2L, policy.onActivityResumed(true).generation)
-    assertEquals(2L, policy.onActivityResumed(true).generation)
-    assertEquals(3L, policy.onWindowFocused(true).generation)
-    assertEquals(3L, policy.onWindowFocused(true).generation)
+    val policy = newPolicy()
+    assertEquals(1L, policy.attach("A").generation)
+    assertEquals(1L, policy.attach("A").generation)
+    assertTrue(policy.onProcessForegroundChanged(true))
+    assertFalse(policy.onProcessForegroundChanged(true))
+    assertEquals(2L, policy.snapshot("A")?.generation)
+    assertEquals(3L, policy.onActivityResumed("A", true)?.generation)
+    assertEquals(3L, policy.onActivityResumed("A", true)?.generation)
+    assertEquals(4L, policy.onWindowFocused("A", true)?.generation)
+    assertEquals(4L, policy.onWindowFocused("A", true)?.generation)
   }
 
   @Test
   fun pauseInvalidatesOldGenerationBeforeDelayedProcessStop() {
     val policy = safePolicy()
-    val safeGeneration = policy.snapshot().generation
-    val paused = policy.onActivityResumed(false)
+    val safeGeneration = policy.snapshot("A")!!.generation
+    val paused = policy.onActivityResumed("A", false)!!
 
     assertTrue(paused.foreground)
     assertFalse(paused.activityResumed)
     assertFalse(paused.windowFocused)
     assertTrue(paused.generation > safeGeneration)
     assertTrue(paused.curtainVisible)
-    assertFalse(policy.acknowledgeSafeUi(safeGeneration))
+    assertFalse(policy.acknowledgeSafeUi("A", safeGeneration))
   }
 
   @Test
   fun focusLossInvalidatesOldGenerationImmediately() {
     val policy = safePolicy()
-    val safeGeneration = policy.snapshot().generation
-    val unfocused = policy.onWindowFocused(false)
+    val safeGeneration = policy.snapshot("A")!!.generation
+    val unfocused = policy.onWindowFocused("A", false)!!
 
     assertTrue(unfocused.generation > safeGeneration)
     assertTrue(unfocused.curtainVisible)
-    assertFalse(policy.acknowledgeSafeUi(safeGeneration))
-    val focused = policy.onWindowFocused(true)
-    assertFalse(policy.acknowledgeSafeUi(unfocused.generation))
-    assertTrue(policy.acknowledgeSafeUi(focused.generation))
+    assertFalse(policy.acknowledgeSafeUi("A", safeGeneration))
+    val focused = policy.onWindowFocused("A", true)!!
+    assertFalse(policy.acknowledgeSafeUi("A", unfocused.generation))
+    assertTrue(policy.acknowledgeSafeUi("A", focused.generation))
   }
 
   @Test
   fun processStopInvalidatesGenerationAndAcknowledgement() {
     val policy = safePolicy()
-    val safeGeneration = policy.snapshot().generation
-    val stopped = policy.onProcessForegroundChanged(false)
+    val safeGeneration = policy.snapshot("A")!!.generation
+    assertTrue(policy.onProcessForegroundChanged(false))
+    val stopped = policy.snapshot("A")!!
 
     assertTrue(stopped.generation > safeGeneration)
     assertTrue(stopped.curtainVisible)
-    assertFalse(policy.acknowledgeSafeUi(stopped.generation))
+    assertFalse(policy.acknowledgeSafeUi("A", stopped.generation))
   }
 
   @Test
   fun screenOffAndDeviceLockInvalidateGeneration() {
     val policy = safePolicy()
-    val safeGeneration = policy.snapshot().generation
-    val screenOff = policy.onScreenStateChanged(MobileScreenState.SCREEN_OFF)
+    val safeGeneration = policy.snapshot("A")!!.generation
+    assertTrue(policy.onScreenStateChanged(MobileScreenState.SCREEN_OFF))
+    val screenOff = policy.snapshot("A")!!
     assertTrue(screenOff.generation > safeGeneration)
-    assertFalse(policy.acknowledgeSafeUi(screenOff.generation))
+    assertFalse(policy.acknowledgeSafeUi("A", screenOff.generation))
 
-    val locked = policy.onScreenStateChanged(MobileScreenState.DEVICE_LOCKED)
+    assertTrue(policy.onScreenStateChanged(MobileScreenState.DEVICE_LOCKED))
+    val locked = policy.snapshot("A")!!
     assertTrue(locked.generation > screenOff.generation)
-    assertFalse(policy.acknowledgeSafeUi(locked.generation))
+    assertFalse(policy.acknowledgeSafeUi("A", locked.generation))
   }
 
   @Test
   fun resumeWithoutFocusCannotAcknowledge() {
     val policy = safePolicy()
-    policy.onActivityResumed(false)
-    val resumed = policy.onActivityResumed(true)
+    policy.onActivityResumed("A", false)
+    val resumed = policy.onActivityResumed("A", true)!!
 
     assertTrue(resumed.activityResumed)
     assertFalse(resumed.windowFocused)
-    assertFalse(policy.acknowledgeSafeUi(resumed.generation))
+    assertFalse(policy.acknowledgeSafeUi("A", resumed.generation))
   }
 
   @Test
   fun focusWithoutResumedCannotAcknowledge() {
-    val policy = MobileSecurityPolicy { 50L }
+    val policy = newPolicy()
+    policy.attach("A")
     policy.onProcessForegroundChanged(true)
-    val focused = policy.onWindowFocused(true)
+    val focused = policy.onWindowFocused("A", true)!!
 
     assertFalse(focused.activityResumed)
     assertFalse(focused.windowFocused)
-    assertFalse(policy.acknowledgeSafeUi(focused.generation))
+    assertFalse(policy.acknowledgeSafeUi("A", focused.generation))
   }
 
   @Test
   fun processBackgroundCannotAcknowledge() {
     val policy = safePolicy()
-    val background = policy.onProcessForegroundChanged(false)
-    assertFalse(policy.acknowledgeSafeUi(background.generation))
+    policy.onProcessForegroundChanged(false)
+    val background = policy.snapshot("A")!!
+    assertFalse(policy.acknowledgeSafeUi("A", background.generation))
   }
 
   @Test
   fun onlyCurrentFullySafeGenerationMayAcknowledge() {
     val policy = safePolicy()
-    val current = policy.snapshot()
+    val current = policy.snapshot("A")!!
 
-    assertFalse(policy.acknowledgeSafeUi(current.generation - 1))
-    assertTrue(policy.acknowledgeSafeUi(current.generation))
-    assertFalse(policy.snapshot().curtainVisible)
+    assertFalse(policy.acknowledgeSafeUi("A", current.generation - 1))
+    assertTrue(policy.acknowledgeSafeUi("A", current.generation))
+    assertFalse(policy.snapshot("A")!!.curtainVisible)
+  }
+
+  @Test
+  fun activityAStateCannotAuthorizeActivityB() {
+    val policy = newPolicy()
+    policy.attach("A")
+    policy.attach("B")
+    policy.onProcessForegroundChanged(true)
+    policy.onActivityResumed("A", true)
+    val activityA = policy.onWindowFocused("A", true)!!
+    val activityB = policy.snapshot("B")!!
+
+    assertTrue(policy.acknowledgeSafeUi("A", activityA.generation))
+    assertFalse(policy.acknowledgeSafeUi("B", activityB.generation))
+    assertFalse(activityB.activityResumed)
+    assertFalse(activityB.windowFocused)
+  }
+
+  @Test
+  fun activityBStateCannotAuthorizePausedActivityA() {
+    val policy = safePolicy()
+    policy.attach("B")
+    val pausedA = policy.onActivityResumed("A", false)!!
+    policy.onActivityResumed("B", true)
+    val focusedB = policy.onWindowFocused("B", true)!!
+
+    assertFalse(policy.acknowledgeSafeUi("A", pausedA.generation))
+    assertTrue(policy.acknowledgeSafeUi("B", focusedB.generation))
+  }
+
+  @Test
+  fun staleFocusCallbackFromADoesNotInvalidateFocusedB() {
+    val policy = safePolicy()
+    policy.attach("B")
+    policy.onActivityResumed("B", true)
+    val focusedB = policy.onWindowFocused("B", true)!!
+
+    policy.onWindowFocused("A", false)
+
+    val unchangedB = policy.snapshot("B")!!
+    assertEquals(focusedB.generation, unchangedB.generation)
+    assertTrue(unchangedB.activityResumed)
+    assertTrue(unchangedB.windowFocused)
+    assertTrue(policy.acknowledgeSafeUi("B", focusedB.generation))
+  }
+
+  @Test
+  fun globalBackgroundInvalidatesAllActivities() {
+    val policy = safePolicy()
+    policy.attach("B")
+    policy.onActivityResumed("B", true)
+    policy.onWindowFocused("B", true)
+    val oldA = policy.snapshot("A")!!.generation
+    val oldB = policy.snapshot("B")!!.generation
+
+    policy.onProcessForegroundChanged(false)
+
+    val backgroundA = policy.snapshot("A")!!
+    val backgroundB = policy.snapshot("B")!!
+    assertNotEquals(oldA, backgroundA.generation)
+    assertNotEquals(oldB, backgroundB.generation)
+    assertTrue(backgroundA.curtainVisible)
+    assertTrue(backgroundB.curtainVisible)
+    assertFalse(policy.acknowledgeSafeUi("A", oldA))
+    assertFalse(policy.acknowledgeSafeUi("B", oldB))
+  }
+
+  @Test
+  fun screenOffInvalidatesAllActivities() {
+    val policy = safePolicy()
+    policy.attach("B")
+    val oldA = policy.snapshot("A")!!.generation
+    val oldB = policy.snapshot("B")!!.generation
+
+    policy.onScreenStateChanged(MobileScreenState.SCREEN_OFF)
+
+    val screenOffA = policy.snapshot("A")!!
+    val screenOffB = policy.snapshot("B")!!
+    assertNotEquals(oldA, screenOffA.generation)
+    assertNotEquals(oldB, screenOffB.generation)
+    assertTrue(screenOffA.curtainVisible)
+    assertTrue(screenOffB.curtainVisible)
+    assertFalse(policy.acknowledgeSafeUi("A", oldA))
+    assertFalse(policy.acknowledgeSafeUi("B", oldB))
+  }
+
+  @Test
+  fun duplicateGlobalTransitionIsIdempotent() {
+    val policy = safePolicy()
+    policy.attach("B")
+    assertTrue(policy.onProcessForegroundChanged(false))
+    val backgroundA = policy.snapshot("A")!!.generation
+    val backgroundB = policy.snapshot("B")!!.generation
+
+    assertFalse(policy.onProcessForegroundChanged(false))
+    assertEquals(backgroundA, policy.snapshot("A")!!.generation)
+    assertEquals(backgroundB, policy.snapshot("B")!!.generation)
+    assertTrue(policy.onScreenStateChanged(MobileScreenState.SCREEN_OFF))
+    val screenOffA = policy.snapshot("A")!!.generation
+    val screenOffB = policy.snapshot("B")!!.generation
+    assertFalse(policy.onScreenStateChanged(MobileScreenState.SCREEN_OFF))
+    assertEquals(screenOffA, policy.snapshot("A")!!.generation)
+    assertEquals(screenOffB, policy.snapshot("B")!!.generation)
+  }
+
+  @Test
+  fun detachedActivityCannotAcknowledge() {
+    val policy = safePolicy()
+    val oldGeneration = policy.snapshot("A")!!.generation
+
+    assertTrue(policy.detach("A"))
+    assertNull(policy.snapshot("A"))
+    assertFalse(policy.acknowledgeSafeUi("A", oldGeneration))
+    assertFalse(policy.detach("A"))
   }
 
   @Test

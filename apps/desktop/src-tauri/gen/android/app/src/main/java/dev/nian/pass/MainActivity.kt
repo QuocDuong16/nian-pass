@@ -17,7 +17,7 @@ open class MainActivity : TauriActivity() {
   }
 
   override fun onPause() {
-    MobileSecurityRuntime.onPause()
+    MobileSecurityRuntime.onPause(this)
     super.onPause()
   }
 

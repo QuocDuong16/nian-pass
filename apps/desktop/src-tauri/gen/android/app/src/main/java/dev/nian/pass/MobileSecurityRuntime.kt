@@ -19,15 +19,17 @@ import android.widget.TextView
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
-import java.util.IdentityHashMap
+import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 
-internal class PrivacyCurtainController(private val activity: Activity) {
-  private var curtain: View? = null
-  private val coveredAccessibility = IdentityHashMap<View, Int>()
+internal class PrivacyCurtainController(activity: Activity) {
+  private val activity = WeakReference(activity)
+  private var curtain = WeakReference<View>(null)
+  private val coveredAccessibility = WeakHashMap<View, Int>()
 
   fun show() {
-    if (curtain?.parent != null) return
+    if (curtain.get()?.parent != null) return
+    val activity = activity.get() ?: return
     val content = activity.findViewById<ViewGroup>(android.R.id.content)
     for (index in 0 until content.childCount) {
       val child = content.getChildAt(index)
@@ -54,25 +56,28 @@ internal class PrivacyCurtainController(private val activity: Activity) {
     )
     view.bringToFront()
     view.requestFocus()
-    curtain = view
+    curtain = WeakReference(view)
   }
 
   fun hide() {
-    val view = curtain ?: return
+    val view = curtain.get() ?: return
     (view.parent as? ViewGroup)?.removeView(view)
     coveredAccessibility.forEach { (covered, importance) ->
       covered.importantForAccessibility = importance
     }
     coveredAccessibility.clear()
-    curtain = null
+    curtain.clear()
   }
 
-  fun isVisible(): Boolean = curtain?.parent != null
+  fun isVisible(): Boolean = curtain.get()?.parent != null
 }
 
 /** Native authority for secure-window setup, lifecycle generation, and the resume curtain. */
 internal object MobileSecurityRuntime {
-  private val policy = MobileSecurityPolicy(SystemClock::elapsedRealtime)
+  private val policy = MobileSecurityPolicy(
+    SystemClock::elapsedRealtime,
+    WeakHashMap<Activity, ActivitySecurityState>(),
+  )
   private val curtains = WeakHashMap<Activity, PrivacyCurtainController>()
   private val receivers = WeakHashMap<Activity, BroadcastReceiver>()
   private var processObserverInstalled = false
@@ -87,6 +92,7 @@ internal object MobileSecurityRuntime {
 
   @Synchronized
   fun attach(activity: Activity) {
+    policy.attach(activity)
     curtains.getOrPut(activity) { PrivacyCurtainController(activity) }.show()
     registerScreenReceiver(activity)
     refreshDeviceState(activity)
@@ -102,41 +108,42 @@ internal object MobileSecurityRuntime {
         // Already detached by Android during Activity teardown.
       }
     }
+    policy.detach(activity)
     curtains.remove(activity)?.hide()
   }
 
   @Synchronized
   fun onResume(activity: Activity) {
-    showAll()
-    policy.onActivityResumed(true)
+    policy.onActivityResumed(activity, true)
+    show(activity)
     refreshDeviceState(activity)
   }
 
   @Synchronized
-  fun onPause() {
-    policy.onActivityResumed(false)
-    showAll()
+  fun onPause(activity: Activity) {
+    policy.onActivityResumed(activity, false)
+    show(activity)
   }
 
   @Synchronized
   fun onWindowFocusChanged(activity: Activity, hasFocus: Boolean) {
-    policy.onWindowFocused(hasFocus)
-    if (!hasFocus || policy.snapshot().curtainVisible) showAll()
+    val snapshot = policy.onWindowFocused(activity, hasFocus)
+    if (!hasFocus || snapshot?.curtainVisible != false) show(activity)
     refreshDeviceState(activity)
   }
 
   @Synchronized
   fun status(activity: Activity): MobileSecuritySnapshot {
     refreshDeviceState(activity)
-    val snapshot = policy.snapshot()
+    val snapshot = policy.snapshot(activity) ?: return policy.detachedSnapshot()
     return snapshot.copy(curtainVisible = curtains[activity]?.isVisible() == true)
   }
 
   @Synchronized
   fun acknowledgeSafeUi(activity: Activity, generation: Long): Boolean {
     refreshDeviceState(activity)
-    if (!policy.acknowledgeSafeUi(generation)) {
-      showAll()
+    if (!policy.acknowledgeSafeUi(activity, generation)) {
+      show(activity)
       return false
     }
     curtains[activity]?.hide()
@@ -146,6 +153,10 @@ internal object MobileSecurityRuntime {
   @Synchronized
   fun hasCurtain(activity: Activity): Boolean = curtains[activity]?.isVisible() == true
 
+  private fun show(activity: Activity) {
+    curtains[activity]?.show()
+  }
+
   private fun showAll() {
     curtains.values.forEach(PrivacyCurtainController::show)
   }
@@ -154,27 +165,28 @@ internal object MobileSecurityRuntime {
     val power = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
     val keyguard = activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
     val next = classifyMobileScreenState(power.isInteractive, keyguard.isDeviceLocked)
-    val snapshot = policy.onScreenStateChanged(next)
-    if (snapshot.curtainVisible) showAll()
+    if (policy.onScreenStateChanged(next)) showAll()
   }
 
   private fun registerScreenReceiver(activity: Activity) {
     if (receivers.containsKey(activity)) return
+    val activityReference = WeakReference(activity)
     val receiver = object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
         synchronized(this@MobileSecurityRuntime) {
+          val attachedActivity = activityReference.get() ?: return
           when (intent?.action) {
             Intent.ACTION_SCREEN_OFF -> {
               showAll()
-              refreshDeviceState(activity)
+              refreshDeviceState(attachedActivity)
             }
             Intent.ACTION_SCREEN_ON -> {
               showAll()
-              refreshDeviceState(activity)
+              refreshDeviceState(attachedActivity)
             }
             Intent.ACTION_USER_PRESENT -> {
               showAll()
-              refreshDeviceState(activity)
+              refreshDeviceState(attachedActivity)
             }
           }
         }
@@ -195,15 +207,13 @@ internal object MobileSecurityRuntime {
     ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
       override fun onStart(owner: LifecycleOwner) {
         synchronized(this@MobileSecurityRuntime) {
-          val snapshot = policy.onProcessForegroundChanged(true)
-          if (snapshot.curtainVisible) showAll()
+          if (policy.onProcessForegroundChanged(true)) showAll()
         }
       }
 
       override fun onStop(owner: LifecycleOwner) {
         synchronized(this@MobileSecurityRuntime) {
-          policy.onProcessForegroundChanged(false)
-          showAll()
+          if (policy.onProcessForegroundChanged(false)) showAll()
         }
       }
     })

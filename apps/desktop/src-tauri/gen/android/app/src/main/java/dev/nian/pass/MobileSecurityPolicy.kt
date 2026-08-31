@@ -12,74 +12,144 @@ internal data class MobileSecuritySnapshot(
   val curtainVisible: Boolean,
 )
 
-/** Pure process-local lifecycle policy. Android UI ownership stays in MobileSecurityRuntime. */
-internal class MobileSecurityPolicy(private val clock: () -> Long) {
+internal data class ActivitySecurityState(
+  var activityResumed: Boolean = false,
+  var windowFocused: Boolean = false,
+  var generation: Long,
+  var curtainRequired: Boolean = true,
+)
+
+/** Pure Activity-scoped authority policy. Android UI ownership stays in MobileSecurityRuntime. */
+internal class MobileSecurityPolicy<K : Any>(
+  private val clock: () -> Long,
+  private val activities: MutableMap<K, ActivitySecurityState> = mutableMapOf(),
+) {
   private var processForeground = false
-  private var activityResumed = false
-  private var windowFocused = false
-  private var generation = 0L
   private var screenState = MobileScreenState.ACTIVE
-  private var curtainRequired = true
+  private var generationSequence = 0L
+  private var generationExhausted = false
 
   @Synchronized
-  fun onProcessForegroundChanged(foreground: Boolean): MobileSecuritySnapshot {
-    val changed = processForeground != foreground
+  fun attach(activity: K): MobileSecuritySnapshot {
+    activities[activity]?.let { return snapshot(it) }
+    val state = ActivitySecurityState(generation = nextGeneration())
+    activities[activity] = state
+    return snapshot(state)
+  }
+
+  @Synchronized
+  fun detach(activity: K): Boolean = activities.remove(activity) != null
+
+  @Synchronized
+  fun onProcessForegroundChanged(foreground: Boolean): Boolean {
+    if (processForeground == foreground) return false
     processForeground = foreground
-    return finishAuthorityTransition(changed)
-  }
-
-  @Synchronized
-  fun onActivityResumed(resumed: Boolean): MobileSecuritySnapshot {
-    val changed = activityResumed != resumed || (!resumed && windowFocused)
-    activityResumed = resumed
-    if (!resumed) windowFocused = false
-    return finishAuthorityTransition(changed)
-  }
-
-  @Synchronized
-  fun onWindowFocused(focused: Boolean): MobileSecuritySnapshot {
-    val acceptedFocus = focused && activityResumed
-    val changed = windowFocused != acceptedFocus
-    windowFocused = acceptedFocus
-    return finishAuthorityTransition(changed)
-  }
-
-  @Synchronized
-  fun onScreenStateChanged(next: MobileScreenState): MobileSecuritySnapshot {
-    val changed = screenState != next
-    screenState = next
-    return finishAuthorityTransition(changed)
-  }
-
-  @Synchronized
-  fun acknowledgeSafeUi(expectedGeneration: Long): Boolean {
-    if (expectedGeneration != generation || !acknowledgementEligible()) return false
-    curtainRequired = false
+    invalidateAllActivities()
     return true
   }
 
   @Synchronized
-  fun snapshot(): MobileSecuritySnapshot = MobileSecuritySnapshot(
-    foreground = processForeground,
-    activityResumed = activityResumed,
-    windowFocused = windowFocused,
-    elapsedRealtimeMs = clock(),
-    generation = generation,
-    screenState = screenState,
-    curtainVisible = curtainRequired,
-  )
-
-  private fun finishAuthorityTransition(changed: Boolean): MobileSecuritySnapshot {
-    if (changed) generation += 1
-    if (!acknowledgementEligible()) curtainRequired = true
-    return snapshot()
+  fun onActivityResumed(activity: K, resumed: Boolean): MobileSecuritySnapshot? {
+    val state = activities[activity] ?: return null
+    val changed = state.activityResumed != resumed || (!resumed && state.windowFocused)
+    state.activityResumed = resumed
+    if (!resumed) state.windowFocused = false
+    finishActivityTransition(state, changed)
+    return snapshot(state)
   }
 
-  private fun acknowledgementEligible(): Boolean =
-    activityResumed &&
-      windowFocused &&
+  @Synchronized
+  fun onWindowFocused(activity: K, focused: Boolean): MobileSecuritySnapshot? {
+    val state = activities[activity] ?: return null
+    val acceptedFocus = focused && state.activityResumed
+    val changed = state.windowFocused != acceptedFocus
+    state.windowFocused = acceptedFocus
+    finishActivityTransition(state, changed)
+    return snapshot(state)
+  }
+
+  @Synchronized
+  fun onScreenStateChanged(next: MobileScreenState): Boolean {
+    if (screenState == next) return false
+    screenState = next
+    invalidateAllActivities()
+    return true
+  }
+
+  @Synchronized
+  fun acknowledgeSafeUi(activity: K, expectedGeneration: Long): Boolean {
+    val state = activities[activity] ?: return false
+    if (
+      generationExhausted ||
+      expectedGeneration != state.generation ||
+      !acknowledgementEligible(state)
+    ) {
+      state.curtainRequired = true
+      return false
+    }
+    state.curtainRequired = false
+    return true
+  }
+
+  @Synchronized
+  fun snapshot(activity: K): MobileSecuritySnapshot? =
+    activities[activity]?.let(::snapshot)
+
+  @Synchronized
+  fun detachedSnapshot(): MobileSecuritySnapshot = MobileSecuritySnapshot(
+    foreground = processForeground,
+    activityResumed = false,
+    windowFocused = false,
+    elapsedRealtimeMs = clock(),
+    generation = generationSequence,
+    screenState = screenState,
+    curtainVisible = true,
+  )
+
+  private fun finishActivityTransition(state: ActivitySecurityState, changed: Boolean) {
+    if (changed) {
+      state.generation = nextGeneration()
+      state.curtainRequired = true
+    }
+    if (!acknowledgementEligible(state)) state.curtainRequired = true
+  }
+
+  private fun invalidateAllActivities() {
+    activities.values.forEach { state ->
+      state.generation = nextGeneration()
+      state.curtainRequired = true
+    }
+  }
+
+  private fun nextGeneration(): Long {
+    if (generationSequence >= MAX_SAFE_GENERATION) {
+      generationExhausted = true
+      return MAX_SAFE_GENERATION
+    }
+    generationSequence += 1
+    return generationSequence
+  }
+
+  private fun acknowledgementEligible(state: ActivitySecurityState): Boolean =
+    state.activityResumed &&
+      state.windowFocused &&
       processForeground &&
       screenState == MobileScreenState.ACTIVE
+
+  private fun snapshot(state: ActivitySecurityState): MobileSecuritySnapshot =
+    MobileSecuritySnapshot(
+      foreground = processForeground,
+      activityResumed = state.activityResumed,
+      windowFocused = state.windowFocused,
+      elapsedRealtimeMs = clock(),
+      generation = state.generation,
+      screenState = screenState,
+      curtainVisible = state.curtainRequired,
+    )
+
+  private companion object {
+    const val MAX_SAFE_GENERATION = 9_007_199_254_740_991L
+  }
 }
 
 internal fun classifyMobileScreenState(
