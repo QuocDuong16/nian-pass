@@ -4,11 +4,11 @@ import "./popup.css";
 
 import {
   PROTOCOL_VERSION,
-  parseActionResult,
   parseSiteStatus,
   type PopupToBackground,
   type SiteStatus,
 } from "./protocol";
+import { createPopupPermissionApi } from "./popup-permissions";
 
 function requiredElement(id: string): HTMLElement {
   const element = document.getElementById(id);
@@ -22,12 +22,15 @@ const detectionText = requiredElement("detection");
 const errorText = requiredElement("error");
 const enableButton = requiredElement("enable") as HTMLButtonElement;
 const disableButton = requiredElement("disable") as HTMLButtonElement;
+const permissionApi = createPopupPermissionApi(browser);
+let currentStatus: SiteStatus | null = null;
 
 async function send(message: PopupToBackground): Promise<unknown> {
   return browser.runtime.sendMessage(message);
 }
 
 function render(status: SiteStatus): void {
+  currentStatus = status;
   siteText.textContent =
     status.site === null
       ? "Current site: unavailable"
@@ -59,32 +62,45 @@ async function refresh(): Promise<void> {
   render(response);
 }
 
-async function changePermission(
-  type: "enableSite" | "disableSite",
-): Promise<void> {
-  errorText.textContent = "";
-  const result = parseActionResult(
-    await send({ protocolVersion: PROTOCOL_VERSION, type }),
-  );
-  if (result?.ok !== true) {
-    errorText.textContent =
-      type === "enableSite"
-        ? "Could not enable Nian Pass on this site."
-        : "Could not disable Nian Pass on this site.";
-    return;
-  }
-  await refresh();
+function finishPermissionChange(
+  operation: Promise<boolean>,
+  failureMessage: string,
+): void {
+  void operation
+    .then(async (changed) => {
+      if (!changed) errorText.textContent = failureMessage;
+      await refresh();
+    })
+    .catch(() => {
+      errorText.textContent = failureMessage;
+    });
 }
 
 enableButton.addEventListener("click", () => {
-  void changePermission("enableSite").catch(() => {
+  const pattern = currentStatus?.site?.permissionPattern;
+  if (pattern === undefined) return;
+  errorText.textContent = "";
+  try {
+    finishPermissionChange(
+      permissionApi.requestOrigin(pattern),
+      "Could not enable Nian Pass on this site.",
+    );
+  } catch {
     errorText.textContent = "Could not enable Nian Pass on this site.";
-  });
+  }
 });
 disableButton.addEventListener("click", () => {
-  void changePermission("disableSite").catch(() => {
+  const pattern = currentStatus?.site?.permissionPattern;
+  if (pattern === undefined) return;
+  errorText.textContent = "";
+  try {
+    finishPermissionChange(
+      permissionApi.removeOrigin(pattern),
+      "Could not disable Nian Pass on this site.",
+    );
+  } catch {
     errorText.textContent = "Could not disable Nian Pass on this site.";
-  });
+  }
 });
 
 void refresh().catch(() => {

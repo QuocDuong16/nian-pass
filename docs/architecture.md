@@ -22,7 +22,7 @@ adapter, background authority, isolated content script, and popup locally.
 
 ```text
 HTTP(S) web page / hostile DOM
-→ explicit browser host permission
+→ popup user gesture directly requests/removes exact browser host permission
 → isolated top-frame content script (low-trust adapter)
 → versioned, exact-shape structural message
 → browser-owned sender tab/frame/URL validation
@@ -35,13 +35,22 @@ background authority
 → desktop/shared Rust credential authority
 ```
 
-The browser permission system is the site-access authority. `permissions.getAll`
-is canonicalized into one sorted `nian-pass-site-content` registration through
-`scripting.registerContentScripts`; install, startup, permission addition, and
-permission removal all reconcile idempotently. The Chromium service worker and
-Firefox event background may disappear. Registration correctness is rebuilt
-from browser state, while login detection status is intentionally ephemeral and
-may return to waiting after background loss.
+Browser host permission is not credential identity.
+
+The browser permission system is the site-access authority. Background derives
+the active tab's exact canonical permission pattern for secret-free popup
+status; popup keeps that value in memory. Its Enable/Disable click invokes
+`permissions.request`/`permissions.remove` immediately, before any asynchronous
+query or message. Background never mutates optional permission. Browser
+`permissions.onAdded`/`onRemoved` events cover popup actions and browser-settings
+drift, then `permissions.getAll` is canonicalized into one sorted
+`nian-pass-site-content` registration through
+`scripting.registerContentScripts`. Install and startup reconcile identically.
+The Chromium service worker and Firefox event background may disappear.
+Registration correctness is rebuilt from browser state, while login detection
+status is intentionally ephemeral and may return to waiting after background
+loss. If the active tab changes while a popup is open, post-operation refresh
+derives the active site again and never applies old status to the new site.
 
 Content authority is top-frame only (`frameId == 0`). The background derives
 the exact current page from `sender.tab`, `sender.frameId`, and `sender.url`, not
@@ -57,10 +66,36 @@ native input value setter, and emits `input` plus `change`. It never submits or
 searches for a replacement field after stale-handle failure. No production M6
 path supplies a credential or emits `applyCredential` from background.
 
-Browser host permission is not credential identity. Even if a browser grant is
+Content initiates a fixed, internal `nian-pass-content-v1` runtime Port and
+sends a strict `documentHello` with only protocol version and document nonce.
+Background accepts that Port only when extension ID, tab ID, top-frame ID,
+browser-owned sender URL, and current permission all validate. It retains only
+tab/frame, exact origin, nonce, and Port reference in ephemeral memory. A new
+document for the same tab/frame retires the old binding; disconnect, navigation,
+permission removal, or background loss removes authority. Content may reconnect
+once for the same live document, but credentials are never queued. Popup and
+other privileged extension pages lack a validated content sender tab and cannot
+become fill authority. In M6.5, a native response may flow only background →
+exact document Port → nonce/handle-checked fill primitive.
+
+The popup `permissionPattern` is browser site-access authority only. Browser
+host permission is not credential identity. Even if a browser grant is
 broader than one origin, M6.5 must pass the browser-provided exact origin/host
 to Rust-owned credential matching before any secret release. TypeScript does no
 PSL, eTLD+1, wildcard credential, fuzzy-host, KDBX, or master-password work.
+
+## CI and future release boundary
+
+Forgejo Actions owns routine development CI and calls repository Make targets
+on self-hosted Docker/DIND infrastructure. GitHub Actions is reserved for a
+future tag-triggered, native-hosted multi-platform production release build:
+Windows, potentially Linux packaging, and macOS only if deferred Apple work
+resumes. That future workflow must use an explicit version-tag trigger such as
+`push.tags: ["v*"]` and must not run for branch pushes, pull requests, or
+schedules. Before release automation lands, Forgejo's broad push trigger should
+be narrowed during the release-engineering milestone so a tag does not launch
+both full Forgejo CI and full GitHub release work. M6 changes neither workflow
+triggers nor release artifacts.
 
 ## M5.5 Android security lifecycle
 

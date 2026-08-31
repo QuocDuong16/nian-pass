@@ -25,11 +25,15 @@ Cross-origin frame credential filling is deferred. M6 browser form detection is
 top-frame only. Open and closed Shadow DOM traversal is deferred.
 
 Required permissions are exactly `activeTab` and `scripting`. HTTP(S) host
-patterns are optional. Clicking Enable on this site requests only the active
-tab's canonical host, then one dynamic registration is reconciled from browser
-permission state. Disable removes that permission and ephemeral detection
-status. Browser settings may also revoke access; permission events reconcile
-the same registration.
+patterns are optional. Background-derived status gives the popup the active
+tab's canonical host pattern before any click. Clicking Enable or Disable calls
+`permissions.request` or `permissions.remove` immediately in that popup user
+gesture; the background never mutates optional permission. Permission events
+then reconcile one dynamic registration from browser state. Browser settings
+may also revoke access and drive the same reconciliation. A tab change while a
+popup remains open is a residual browser-UI race: after the operation, refreshed
+status is derived again from the browser's current active tab and is never
+displayed against the old site.
 
 The detector reports only protocol version, a random document nonce, login-form
 presence, password-field count, username-candidate count, and form count. It
@@ -37,7 +41,18 @@ never reads field values. A synthetic-only fill primitive binds the exact
 document and opaque live field handles, emits `input` and `change`, and never
 submits. No production path supplies or requests a credential.
 
-Browser host permission is not credential identity. M6.5 must revalidate the
+Each content document initiates the fixed internal extension Port
+`nian-pass-content-v1` and sends an exact `documentHello` containing only its
+protocol version and nonce. Background accepts it only for this extension's
+permitted HTTP(S) top frame, using browser-owned sender tab, frame, and URL
+metadata. The ephemeral binding stores only tab/frame, exact origin, nonce, and
+Port reference; a replacement document retires the old Port. Popup and other
+extension pages have no tab-bound sender authority and cannot deliver fill
+commands. Background-state loss fails closed; content performs at most one
+bounded reconnect and no secret is queued.
+
+The popup's `permissionPattern` is browser site-access authority only. Browser
+host permission is not credential identity. M6.5 must revalidate the
 browser-provided exact current origin/host with Rust credential policy before
 release. The browser extension must never receive a KDBX master password, parse
 KDBX, retain a credential response, or use browser storage as a credential

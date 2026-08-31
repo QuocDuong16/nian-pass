@@ -55,7 +55,13 @@ coverage ratchets are 85% statements, 80% branches, 85% functions, and 85%
 lines. The source ratchet enforces MV3, optional HTTP(S) permissions, dynamic
 top-frame registration, synchronous lifecycle listeners, browser-owned sender
 identity, no Native Messaging/network/storage/external messages/MAIN-world
-bridge, detector-local `.value` prohibition, and no submit path.
+bridge, detector-local `.value` prohibition, and no submit path. M6 regression
+tests additionally prove that the popup invokes optional permission mutation
+directly from its click with a preloaded background-derived pattern, background
+has no permission-request API, and fill authority requires a validated
+content/background Port. Popup, wrong-extension, non-top-frame, unsupported,
+and unpermitted Port senders fail closed; document replacement and disconnect
+retire ephemeral authority.
 
 These deterministic gates build `dist/chromium` and `dist/firefox` but do not
 require or launch Chrome, Chromium, Edge, Firefox, X11, Wayland, or any GUI.
@@ -64,6 +70,15 @@ bound to `127.0.0.1` and is reported separately. Chromium and Firefox manual
 smoke are not deterministic completion gates.
 The Forgejo Node frontend job runs this focused gate with the same resolved diff
 base as desktop changed-line coverage.
+
+Routine CI remains in Forgejo Actions on the project's self-hosted Docker/DIND
+infrastructure. GitHub Actions is reserved for a future multi-platform
+production release workflow on native hosted OS runners and must be tag-only
+(initial policy `v*`), never normal branch push, pull request, or schedule CI.
+This avoids duplicating ordinary validation cost. Windows is in current release
+direction, Linux packaging may join it, and native macOS release work remains
+conditional on deferred Apple support resuming. No such GitHub workflow runs or
+is added in M6; Forgejo tag-trigger exclusion is deferred to release engineering.
 
 `mobile-source-check` is environment-independent and participates in the normal
 policy, quick, and quality gates. It verifies the committed Tauri-generated

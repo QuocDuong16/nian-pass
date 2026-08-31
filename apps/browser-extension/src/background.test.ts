@@ -2,6 +2,7 @@ import { vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   runtimeMessage: vi.fn(),
+  runtimeConnect: vi.fn(),
   installed: vi.fn(),
   startup: vi.fn(),
   permissionAdded: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("webextension-polyfill", () => ({
   default: {
     runtime: {
       onMessage: { addListener: mocks.runtimeMessage },
+      onConnect: { addListener: mocks.runtimeConnect },
       onInstalled: { addListener: mocks.installed },
       onStartup: { addListener: mocks.startup },
     },
@@ -35,8 +37,6 @@ vi.mock("./browser-binding", () => ({
     getAllPermissions: mocks.getAllPermissions,
     getRegisteredScripts: mocks.getRegisteredScripts,
     containsOrigin: vi.fn().mockResolvedValue(false),
-    requestOrigin: vi.fn().mockResolvedValue(false),
-    removeOrigin: vi.fn().mockResolvedValue(false),
     unregisterScripts: vi.fn().mockResolvedValue(undefined),
     registerScript: vi.fn().mockResolvedValue(undefined),
     queryActiveTab: vi.fn().mockResolvedValue(null),
@@ -48,6 +48,7 @@ vi.mock("./browser-binding", () => ({
 test("registers all background listeners synchronously and schedules lifecycle work", async () => {
   await import("./background");
   expect(mocks.runtimeMessage).toHaveBeenCalledOnce();
+  expect(mocks.runtimeConnect).toHaveBeenCalledOnce();
   expect(mocks.installed).toHaveBeenCalledOnce();
   expect(mocks.startup).toHaveBeenCalledOnce();
   expect(mocks.permissionAdded).toHaveBeenCalledOnce();

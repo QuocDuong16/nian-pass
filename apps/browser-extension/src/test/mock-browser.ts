@@ -1,15 +1,13 @@
 import type {
   ActiveTab,
-  BrowserAuthorityApi,
+  BackgroundBrowserApi,
   RegisteredScript,
 } from "../browser-api";
 
-export class MockBrowserApi implements BrowserAuthorityApi {
+export class MockBrowserApi implements BackgroundBrowserApi {
   origins: string[] = [];
   registered: RegisteredScript[] = [];
   activeTab: ActiveTab | null = { id: 7, url: "https://example.com/login" };
-  requestAllowed = true;
-  removeAllowed = true;
   registerCalls = 0;
   unregisterCalls = 0;
 
@@ -19,19 +17,6 @@ export class MockBrowserApi implements BrowserAuthorityApi {
 
   containsOrigin(pattern: string): Promise<boolean> {
     return Promise.resolve(this.origins.includes(pattern));
-  }
-
-  requestOrigin(pattern: string): Promise<boolean> {
-    if (!this.requestAllowed) return Promise.resolve(false);
-    if (!this.origins.includes(pattern)) this.origins.push(pattern);
-    return Promise.resolve(true);
-  }
-
-  removeOrigin(pattern: string): Promise<boolean> {
-    if (!this.removeAllowed) return Promise.resolve(false);
-    const before = this.origins.length;
-    this.origins = this.origins.filter((origin) => origin !== pattern);
-    return Promise.resolve(this.origins.length !== before);
   }
 
   getRegisteredScripts(id: string): Promise<RegisteredScript[]> {

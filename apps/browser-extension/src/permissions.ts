@@ -1,8 +1,8 @@
-import type { BrowserAuthorityApi, RegisteredScript } from "./browser-api";
+import type { BackgroundBrowserApi, RegisteredScript } from "./browser-api";
 import { canonicalGrantedPatterns } from "./site-policy";
 
 export const CONTENT_SCRIPT_ID = "nian-pass-site-content";
-const reconciliationQueues = new WeakMap<BrowserAuthorityApi, Promise<void>>();
+const reconciliationQueues = new WeakMap<BackgroundBrowserApi, Promise<void>>();
 
 function expectedScript(matches: string[]): RegisteredScript {
   return {
@@ -28,7 +28,7 @@ function sameScript(
   );
 }
 
-async function reconcileNow(api: BrowserAuthorityApi): Promise<void> {
+async function reconcileNow(api: BackgroundBrowserApi): Promise<void> {
   const permissions = await api.getAllPermissions();
   const matches = canonicalGrantedPatterns(permissions.origins ?? []);
   const registered = await api.getRegisteredScripts(CONTENT_SCRIPT_ID);
@@ -49,7 +49,7 @@ async function reconcileNow(api: BrowserAuthorityApi): Promise<void> {
 }
 
 export function reconcileContentScript(
-  api: BrowserAuthorityApi,
+  api: BackgroundBrowserApi,
 ): Promise<void> {
   const previous = reconciliationQueues.get(api) ?? Promise.resolve();
   const current = previous.catch(() => undefined).then(() => reconcileNow(api));

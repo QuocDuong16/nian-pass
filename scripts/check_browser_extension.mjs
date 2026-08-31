@@ -72,6 +72,16 @@ export function runSourceChecks(root) {
   const permissions = sources.get(`${packageRoot}/src/permissions.ts`) ?? "";
   const background = sources.get(`${packageRoot}/src/background.ts`) ?? "";
   const authority = sources.get(`${packageRoot}/src/background-authority.ts`) ?? "";
+  const backgroundChannel = sources.get(`${packageRoot}/src/background-channel.ts`) ?? "";
+  const backgroundApi = sources.get(`${packageRoot}/src/browser-api.ts`) ?? "";
+  const content = sources.get(`${packageRoot}/src/content.ts`) ?? "";
+  const contentChannel = sources.get(`${packageRoot}/src/content-channel.ts`) ?? "";
+  const popup = sources.get(`${packageRoot}/src/popup.ts`) ?? "";
+  const popupPermissions = sources.get(`${packageRoot}/src/popup-permissions.ts`) ?? "";
+  const nonPopupSources = [...sources]
+    .filter(([name]) => !name.endsWith("/popup.ts") && !name.endsWith("/popup-permissions.ts"))
+    .map(([, source]) => source)
+    .join("\n");
   const detector = [
     sources.get(`${packageRoot}/src/content/detector.ts`) ?? "",
     sources.get(`${packageRoot}/src/content/detection-controller.ts`) ?? "",
@@ -97,6 +107,19 @@ export function runSourceChecks(root) {
   requireSource(violations, "background-authority.ts", authority, /sender\.frameId\s*!==\s*0/, "content authority must reject non-top frames");
   requireSource(violations, "background-authority.ts", authority, /sender\.id\s*!==\s*this\.api\.extensionId\(\)/, "content authority must require this extension sender ID");
   requireSource(violations, "background-authority.ts", authority, /sender\.url\s*\?\?\s*sender\.tab\?\.url/, "browser sender metadata must own page identity");
+  requireSource(violations, "popup-permissions.ts", popupPermissions, /permissions\.request\(\{\s*origins:\s*\[pattern\]/, "popup must directly own optional permission requests");
+  requireSource(violations, "popup-permissions.ts", popupPermissions, /permissions\.remove\(\{\s*origins:\s*\[pattern\]/, "popup must directly own optional permission removal");
+  rejectMatches(violations, "non-popup production", nonPopupSources, /permissions\.(?:request|remove)\s*\(/g, "optional site permission mutation belongs only to popup production code");
+  requireSource(violations, "popup.ts", popup, /enableButton\.addEventListener\([\s\S]{0,500}permissionApi\.requestOrigin\(pattern\)/, "permission request must start inside the popup click handler");
+  requireSource(violations, "popup.ts", popup, /disableButton\.addEventListener\([\s\S]{0,500}permissionApi\.removeOrigin\(pattern\)/, "permission removal must start inside the popup click handler");
+  rejectMatches(violations, "popup.ts", popup, /\b(?:enableSite|disableSite|applyCredential|usernameFieldHandle|passwordFieldHandle|tabs\.sendMessage)\b/g, "popup must not expose permission delegation or credential delivery");
+  requireSource(violations, "content.ts", content, /runtime\.connect\(\{\s*name\s*\}\)/, "content must initiate the fixed internal Port");
+  requireSource(violations, "background.ts", background, /runtime\.onConnect\.addListener/, "background must register the Port listener synchronously");
+  requireSource(violations, "background-channel.ts", backgroundChannel, /sender\?\.id\s*!==\s*this\.api\.extensionId\(\)/, "Port authority must require this extension sender ID");
+  requireSource(violations, "background-channel.ts", backgroundChannel, /frameId\s*!==\s*0/, "Port authority must reject non-top frames");
+  requireSource(violations, "background-channel.ts", backgroundChannel, /containsOrigin\(sender\.permissionPattern\)/, "Port authority must require current browser permission");
+  requireSource(violations, "content-channel.ts", contentChannel, /parseApplyCredential\(message\)/, "fill commands must use the strict Port protocol parser");
+  rejectMatches(violations, "content fill channel", `${content}\n${contentChannel}`, /runtime\.onMessage/g, "content must not accept fill through generic runtime messages");
   return violations;
 }
 

@@ -8,8 +8,6 @@ function extensionMock(): typeof browser {
     permissions: {
       getAll: vi.fn().mockResolvedValue({ origins: ["https://example.com/*"] }),
       contains: vi.fn().mockResolvedValue(true),
-      request: vi.fn().mockResolvedValue(true),
-      remove: vi.fn().mockResolvedValue(true),
     },
     scripting: {
       getRegisteredContentScripts: vi.fn().mockResolvedValue([]),
@@ -38,8 +36,6 @@ describe.each(["Chromium", "Firefox"])("%s Promise API adapter", () => {
       origins: ["https://example.com/*"],
     });
     expect(await api.containsOrigin("https://example.com/*")).toBe(true);
-    expect(await api.requestOrigin("https://example.com/*")).toBe(true);
-    expect(await api.removeOrigin("https://example.com/*")).toBe(true);
     expect(await api.getRegisteredScripts("script-id")).toEqual([]);
     await api.registerScript({
       id: "script-id",

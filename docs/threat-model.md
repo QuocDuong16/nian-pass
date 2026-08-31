@@ -20,10 +20,20 @@ native desktop/shared Rust      = future credential authority (M6.5)
 M6 assumes a hostile page DOM, forged or compromised content-script messages,
 stale document handles, navigation races, permission drift, over-broad host
 grants, service-worker suspension/background loss, page attempts to confuse fill
-routing, and popup XSS. It also treats the future native host as a potential
+routing, popup XSS, permission user-gesture loss, privileged extension-page
+impersonation, stale Ports, and an active-tab change while the popup is open. It
+also treats the future native host as a potential
 confused-deputy boundary. The background validates exact message shapes and
 versions plus browser-owned tab, top-frame ID, URL scheme, and current host
 permission. A content-script-claimed URL never establishes credential identity.
+
+Permission mutation remains at the actual popup gesture boundary. Background
+provides a browser-derived canonical pattern before the click but cannot call
+`permissions.request` or `permissions.remove`; permission lifecycle events then
+reconcile authority. A popup-lifetime tab-change race may grant the previously
+displayed host, but refresh uses the new browser-owned active tab and cannot
+misrepresent that grant as authority for a different site. The pattern grants
+browser site access only and is never treated as credential matching identity.
 
 Each document has a cryptographically random nonce and opaque field handles.
 Navigation creates new authority; a stale nonce, missing handle, disconnected
@@ -32,6 +42,15 @@ closed. Detection observes only bounded DOM structure and never reads existing
 values. Filling is test-only in M6, dispatches ordinary events, and never
 submits. Closed shadow roots and cross-origin login/federation/payment frames
 are explicitly unsupported rather than guessed.
+
+Future fill delivery is accepted only on a content-initiated internal Port that
+background binds to this extension's exact tab, frame, browser sender origin,
+current permission, and document nonce. Popup/options pages cannot impersonate
+that sender merely by knowing the Port name. Duplicate documents replace the
+old binding; disconnect and navigation remove it. If service-worker state is
+lost, content may reconnect once, and no credential is delivered until authority
+is reconstructed. No secret queue exists, and content still rejects a stale
+nonce or handle as defense in depth.
 
 The popup uses fixed local HTML and `textContent`, shows at most the canonical
 host, and exposes generic errors. No page title, path, query, fragment, form

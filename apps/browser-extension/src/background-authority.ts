@@ -1,10 +1,9 @@
-import type { BrowserAuthorityApi } from "./browser-api";
+import type { BackgroundBrowserApi } from "./browser-api";
 import { PageStatusStore } from "./page-status";
 import {
   PROTOCOL_VERSION,
   parsePageStateChanged,
   parsePopupMessage,
-  type ActionResult,
   type PageStateChanged,
   type SiteStatus,
 } from "./protocol";
@@ -21,7 +20,7 @@ export interface MessageSender {
 export class BackgroundAuthority {
   readonly #status = new PageStatusStore();
 
-  constructor(private readonly api: BrowserAuthorityApi) {}
+  constructor(private readonly api: BackgroundBrowserApi) {}
 
   async handleMessage(
     message: unknown,
@@ -31,8 +30,7 @@ export class BackgroundAuthority {
     if (pageState !== null) return this.#acceptPageState(pageState, sender);
     const popupMessage = parsePopupMessage(message);
     if (popupMessage === null || !this.#isPopup(sender)) return undefined;
-    if (popupMessage.type === "getSiteStatus") return this.#siteStatus();
-    return this.#changePermission(popupMessage.type === "enableSite");
+    return this.#siteStatus();
   }
 
   clearTab(tabId: number): void {
@@ -50,7 +48,7 @@ export class BackgroundAuthority {
   async #acceptPageState(
     message: PageStateChanged,
     sender: MessageSender,
-  ): Promise<ActionResult | undefined> {
+  ): Promise<void> {
     const tabId = sender.tab?.id;
     const authoritativeUrl = sender.url ?? sender.tab?.url;
     if (
@@ -59,16 +57,10 @@ export class BackgroundAuthority {
       sender.frameId !== 0 ||
       authoritativeUrl === undefined
     )
-      return undefined;
+      return;
     const site = siteIdentityFromUrl(authoritativeUrl);
-    if (site === null || !(await this.api.containsOrigin(site.pattern)))
-      return undefined;
+    if (site === null || !(await this.api.containsOrigin(site.pattern))) return;
     this.#status.update(tabId, site.origin, message);
-    return {
-      protocolVersion: PROTOCOL_VERSION,
-      type: "actionResult",
-      ok: true,
-    };
   }
 
   #isPopup(sender: MessageSender): boolean {
@@ -106,44 +98,15 @@ export class BackgroundAuthority {
     return {
       protocolVersion: PROTOCOL_VERSION,
       type: "siteStatus",
-      site: { host: site.host, origin: site.origin },
+      site: {
+        host: site.host,
+        origin: site.origin,
+        permissionPattern: site.pattern,
+      },
       permission: enabled ? "enabled" : "disabled",
       detection: enabled
         ? this.#status.detection(site.tabId, site.origin)
         : "unavailable",
     };
-  }
-
-  async #changePermission(enable: boolean): Promise<ActionResult> {
-    const site = await this.#activeSite();
-    if (site === null)
-      return {
-        protocolVersion: PROTOCOL_VERSION,
-        type: "actionResult",
-        ok: false,
-      };
-    try {
-      const changed = enable
-        ? await this.api.requestOrigin(site.pattern)
-        : await this.api.removeOrigin(site.pattern);
-      await this.reconcile();
-      if (!enable) {
-        this.#status.clearOrigin(site.origin);
-        this.#status.clearTab(site.tabId);
-      }
-      const expected = enable;
-      const actual = await this.api.containsOrigin(site.pattern);
-      return {
-        protocolVersion: PROTOCOL_VERSION,
-        type: "actionResult",
-        ok: (changed || actual === expected) && actual === expected,
-      };
-    } catch {
-      return {
-        protocolVersion: PROTOCOL_VERSION,
-        type: "actionResult",
-        ok: false,
-      };
-    }
   }
 }

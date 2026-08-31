@@ -1,7 +1,7 @@
 import {
   PROTOCOL_VERSION,
-  parseActionResult,
   parseApplyCredential,
+  parseDocumentHello,
   parsePageStateChanged,
   parsePopupMessage,
   parseSiteStatus,
@@ -24,13 +24,21 @@ describe("message validation", () => {
       parsePopupMessage({ protocolVersion: 1, type: "getSiteStatus" }),
     ).not.toBeNull();
     expect(
-      parseActionResult({ protocolVersion: 1, type: "actionResult", ok: true }),
+      parseDocumentHello({
+        protocolVersion: 1,
+        type: "documentHello",
+        documentNonce: "c".repeat(32),
+      }),
     ).not.toBeNull();
     expect(
       parseSiteStatus({
         protocolVersion: 1,
         type: "siteStatus",
-        site: { host: "example.com", origin: "https://example.com" },
+        site: {
+          host: "example.com",
+          origin: "https://example.com",
+          permissionPattern: "https://example.com/*",
+        },
         permission: "enabled",
         detection: "waiting",
       }),
@@ -54,7 +62,7 @@ describe("message validation", () => {
       type: "applyCredential",
       documentNonce: "b".repeat(32),
       usernameFieldHandle: null,
-      passwordFieldHandle: "opaque",
+      passwordFieldHandle: "d".repeat(32),
       username: "synthetic-user",
       password: "synthetic-password",
     };
@@ -63,5 +71,28 @@ describe("message validation", () => {
     expect(
       parseApplyCredential({ ...command, type: "fillAnything" }),
     ).toBeNull();
+    expect(
+      parseApplyCredential({ ...command, passwordFieldHandle: "selector" }),
+    ).toBeNull();
+    expect(
+      parseApplyCredential({ ...command, password: "x".repeat(65_537) }),
+    ).toBeNull();
+  });
+
+  test.each([
+    {
+      protocolVersion: 2,
+      type: "documentHello",
+      documentNonce: "a".repeat(32),
+    },
+    { protocolVersion: 1, type: "documentHello", documentNonce: "bad" },
+    {
+      protocolVersion: 1,
+      type: "documentHello",
+      documentNonce: "a".repeat(32),
+      extra: true,
+    },
+  ])("rejects invalid document hello %#", (message) => {
+    expect(parseDocumentHello(message)).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,6 +21,34 @@ const repositoryRoot = resolve(import.meta.dirname, "../..");
 
 test("current browser extension source satisfies security ratchets", () => {
   assert.deepEqual(runSourceChecks(repositoryRoot), []);
+});
+
+function sourceFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-browser-source-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const destination = join(root, "apps/browser-extension/src");
+  mkdirSync(destination, { recursive: true });
+  cpSync(join(repositoryRoot, "apps/browser-extension/src"), destination, {
+    recursive: true,
+  });
+  return root;
+}
+
+test("source ratchet rejects background permission mutation", (t) => {
+  const root = sourceFixture(t);
+  const path = join(root, "apps/browser-extension/src/background.ts");
+  writeFileSync(path, `${readFile(path)}\npermissions.request({ origins: [] });\n`);
+  assert.match(
+    runSourceChecks(root).join("\n"),
+    /permission mutation belongs only to popup/,
+  );
+});
+
+test("source ratchet rejects generic content fill messaging", (t) => {
+  const root = sourceFixture(t);
+  const path = join(root, "apps/browser-extension/src/content.ts");
+  writeFileSync(path, `${readFile(path)}\nruntime.onMessage;\n`);
+  assert.match(runSourceChecks(root).join("\n"), /generic runtime messages/);
 });
 
 test("artifact secret scanner rejects exact synthetic markers", () => {

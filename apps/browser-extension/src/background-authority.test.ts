@@ -26,7 +26,7 @@ const pageState = (nonce: string, hasLoginForm = true) => ({
 });
 
 describe("background authority", () => {
-  test("derives active site, enables, and disables without a popup URL parameter", async () => {
+  test("derives active site status and exact permission pattern", async () => {
     const api = new MockBrowserApi();
     const authority = new BackgroundAuthority(api);
     const disabled = await authority.handleMessage(
@@ -35,23 +35,19 @@ describe("background authority", () => {
     );
     expect(disabled).toMatchObject({
       permission: "disabled",
-      site: { host: "example.com" },
+      site: {
+        host: "example.com",
+        origin: "https://example.com",
+        permissionPattern: "https://example.com/*",
+      },
     });
     expect(
       await authority.handleMessage(
         { protocolVersion: 1, type: "enableSite" },
         popupSender,
       ),
-    ).toMatchObject({ ok: true });
-    expect(api.origins).toEqual(["https://example.com/*"]);
-    expect(
-      await authority.handleMessage(
-        { protocolVersion: 1, type: "disableSite" },
-        popupSender,
-      ),
-    ).toMatchObject({ ok: true });
+    ).toBeUndefined();
     expect(api.origins).toEqual([]);
-    expect(api.registered).toEqual([]);
   });
 
   test("rejects content messages without browser-owned authority", async () => {
@@ -110,6 +106,14 @@ describe("background authority", () => {
         popupSender,
       ),
     ).toMatchObject({ detection: "waiting" });
+    api.origins = [];
+    authority.clearEphemeralState();
+    expect(
+      await authority.handleMessage(
+        { protocolVersion: 1, type: "getSiteStatus" },
+        popupSender,
+      ),
+    ).toMatchObject({ permission: "disabled", detection: "unavailable" });
   });
 
   test("rejects unsupported tabs and non-popup extension senders", async () => {

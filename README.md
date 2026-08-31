@@ -22,11 +22,12 @@ Early development. The project is not ready for real vaults.
 M6 — Browser Extension Foundation
 
 M6 provides production-shaped Manifest V3 artifacts for Chromium-family
-browsers and Firefox. Site access is disabled by default: the popup requests
-only the active HTTP(S) host after an explicit user action, then the background
-authority reconciles one top-frame dynamic content-script registration from
-browser-owned permissions. The isolated content script reports only a random
-document nonce and structural login-form counts; it never reads field values.
+browsers and Firefox. Site access is disabled by default: the popup directly
+requests only the active HTTP(S) host from its Enable click user gesture, then
+the background authority reconciles one top-frame dynamic content-script
+registration from browser-owned permission events. The isolated content script
+reports only a random document nonce and structural login-form counts; it never
+reads field values.
 
 The extension has no vault access, credential retrieval, credential storage,
 network traffic, Native Messaging, KDBX code, master-password UI, automatic
@@ -42,6 +43,14 @@ Browser Extension Foundation status:
 - Explicit per-site permission
 - Top-frame login-form detection
 - No credential retrieval yet
+
+The future release architecture intentionally separates routine validation from
+production release builds. Forgejo Actions remains the normal development CI on
+self-hosted Docker/DIND infrastructure. A future GitHub Actions workflow may use
+native hosted Windows, Linux, and—only if Apple work resumes—macOS runners for
+multi-platform production release builds, triggered only by explicit `v*` tag
+pushes. It must not duplicate normal branch-push, pull-request, or scheduled CI.
+No GitHub release workflow or release artifact is introduced by M6.
 
 ## Completed M5.5 milestone
 

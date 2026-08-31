@@ -15,17 +15,13 @@ interface GetSiteStatus {
   type: "getSiteStatus";
 }
 
-interface EnableSite {
-  protocolVersion: typeof PROTOCOL_VERSION;
-  type: "enableSite";
-}
+export type PopupToBackground = GetSiteStatus;
 
-interface DisableSite {
+export interface DocumentHello {
   protocolVersion: typeof PROTOCOL_VERSION;
-  type: "disableSite";
+  type: "documentHello";
+  documentNonce: string;
 }
-
-export type PopupToBackground = GetSiteStatus | EnableSite | DisableSite;
 
 export interface ApplyCredential {
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -40,16 +36,12 @@ export interface ApplyCredential {
 export interface SiteStatus {
   protocolVersion: typeof PROTOCOL_VERSION;
   type: "siteStatus";
-  site: { host: string; origin: string } | null;
+  site: { host: string; origin: string; permissionPattern: string } | null;
   permission: "enabled" | "disabled" | "unsupported";
   detection: "detected" | "notDetected" | "waiting" | "unavailable";
 }
 
-export interface ActionResult {
-  protocolVersion: typeof PROTOCOL_VERSION;
-  type: "actionResult";
-  ok: boolean;
-}
+const MAX_CREDENTIAL_FIELD_LENGTH = 65_536;
 
 type RecordValue = Record<string, unknown>;
 
@@ -75,7 +67,7 @@ function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isNonce(value: unknown): value is string {
+function isOpaqueToken(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
 }
 
@@ -97,7 +89,7 @@ export function parsePageStateChanged(value: unknown): PageStateChanged | null {
     return null;
   }
   if (
-    !isNonce(value["documentNonce"]) ||
+    !isOpaqueToken(value["documentNonce"]) ||
     typeof value["hasLoginForm"] !== "boolean" ||
     !isCount(value["passwordFieldCount"]) ||
     !isCount(value["usernameCandidateCount"]) ||
@@ -114,11 +106,7 @@ export function parsePopupMessage(value: unknown): PopupToBackground | null {
     !hasProtocol(value)
   )
     return null;
-  if (
-    value["type"] === "getSiteStatus" ||
-    value["type"] === "enableSite" ||
-    value["type"] === "disableSite"
-  ) {
+  if (value["type"] === "getSiteStatus") {
     return value as unknown as PopupToBackground;
   }
   return null;
@@ -143,11 +131,13 @@ export function parseApplyCredential(value: unknown): ApplyCredential | null {
   }
   const usernameHandle = value["usernameFieldHandle"];
   if (
-    !isNonce(value["documentNonce"]) ||
-    !(usernameHandle === null || typeof usernameHandle === "string") ||
-    typeof value["passwordFieldHandle"] !== "string" ||
+    !isOpaqueToken(value["documentNonce"]) ||
+    !(usernameHandle === null || isOpaqueToken(usernameHandle)) ||
+    !isOpaqueToken(value["passwordFieldHandle"]) ||
     typeof value["username"] !== "string" ||
-    typeof value["password"] !== "string"
+    value["username"].length > MAX_CREDENTIAL_FIELD_LENGTH ||
+    typeof value["password"] !== "string" ||
+    value["password"].length > MAX_CREDENTIAL_FIELD_LENGTH
   ) {
     return null;
   }
@@ -165,9 +155,13 @@ export function parseSiteStatus(value: unknown): SiteStatus | null {
   const site = value["site"];
   const validSite =
     site === null ||
-    (recordWithKeys(site, ["host", "origin"]) &&
+    (recordWithKeys(site, ["host", "origin", "permissionPattern"]) &&
       typeof site["host"] === "string" &&
-      typeof site["origin"] === "string");
+      typeof site["origin"] === "string" &&
+      typeof site["permissionPattern"] === "string" &&
+      /^(?:http|https):\/\/(?:\[[0-9a-fA-F:]+\]|[^/*]+)\/\*$/.test(
+        site["permissionPattern"],
+      ));
   const validPermission =
     value["permission"] === "enabled" ||
     value["permission"] === "disabled" ||
@@ -182,13 +176,13 @@ export function parseSiteStatus(value: unknown): SiteStatus | null {
     : null;
 }
 
-export function parseActionResult(value: unknown): ActionResult | null {
+export function parseDocumentHello(value: unknown): DocumentHello | null {
   if (
-    !recordWithKeys(value, ["protocolVersion", "type", "ok"]) ||
+    !recordWithKeys(value, ["protocolVersion", "type", "documentNonce"]) ||
     !hasProtocol(value) ||
-    value["type"] !== "actionResult" ||
-    typeof value["ok"] !== "boolean"
+    value["type"] !== "documentHello" ||
+    !isOpaqueToken(value["documentNonce"])
   )
     return null;
-  return value as unknown as ActionResult;
+  return value as unknown as DocumentHello;
 }

@@ -13,11 +13,9 @@ export interface RegisteredScript {
   runAt?: "document_start" | "document_end" | "document_idle";
 }
 
-export interface BrowserAuthorityApi {
+export interface BackgroundBrowserApi {
   getAllPermissions(): Promise<{ origins?: string[] }>;
   containsOrigin(pattern: string): Promise<boolean>;
-  requestOrigin(pattern: string): Promise<boolean>;
-  removeOrigin(pattern: string): Promise<boolean>;
   getRegisteredScripts(id: string): Promise<RegisteredScript[]>;
   unregisterScripts(id: string): Promise<void>;
   registerScript(script: RegisteredScript): Promise<void>;
@@ -28,19 +26,13 @@ export interface BrowserAuthorityApi {
 
 export function createBrowserApi(
   webExtension: typeof Browser,
-): BrowserAuthorityApi {
+): BackgroundBrowserApi {
   return {
     async getAllPermissions() {
       return webExtension.permissions.getAll();
     },
     async containsOrigin(pattern) {
       return webExtension.permissions.contains({ origins: [pattern] });
-    },
-    async requestOrigin(pattern) {
-      return webExtension.permissions.request({ origins: [pattern] });
-    },
-    async removeOrigin(pattern) {
-      return webExtension.permissions.remove({ origins: [pattern] });
     },
     async getRegisteredScripts(id) {
       return webExtension.scripting.getRegisteredContentScripts({ ids: [id] });
