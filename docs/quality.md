@@ -46,28 +46,47 @@ Forgejo's compatibility job uses `compat-check-required` so a missing external
 binary fails. Cargo always uses `--locked`; pnpm install always uses
 `--frozen-lockfile`.
 
-M6 adds `browser-source-check` and `browser-extension-check` to both normal
-`quick-check` and `quality-check`. The focused browser gate runs frozen install,
+M6.5 keeps `browser-source-check` and `browser-extension-check` and adds
+`browser-native-protocol-check`, `browser-native-host-check`, and
+`browser-integration-check` to normal `quick-check` and `quality-check`. The
+focused browser gate runs frozen install,
 Prettier, strict typed ESLint, TypeScript, Vitest coverage, 85% changed-line
 coverage, Knip, Chromium and Firefox builds, parsed-manifest/artifact validation,
 an exact synthetic-secret marker scan, and production dependency audit. Package
 coverage ratchets are 85% statements, 80% branches, 85% functions, and 85%
 lines. The source ratchet enforces MV3, optional HTTP(S) permissions, dynamic
 top-frame registration, synchronous lifecycle listeners, browser-owned sender
-identity, no Native Messaging/network/storage/external messages/MAIN-world
-bridge, detector-local `.value` prohibition, and no submit path. M6 regression
+identity, exactly one background-owned `connectNative`, no network/storage/
+external messages/MAIN-world bridge, detector-local `.value` prohibition, and
+no submit path. M6.5 regression
 tests additionally prove that the popup invokes optional permission mutation
 directly from its click with a preloaded background-derived pattern, background
 has no permission-request API, and fill authority requires a validated
 content/background Port. Popup, wrong-extension, non-top-frame, unsupported,
 and unpermitted Port senders fail closed; document replacement and disconnect
-retire ephemeral authority.
+retire ephemeral authority. Candidate-handle and deterministic race tests cover
+navigation, origin change, permission removal, document replacement, native
+reconnect, duplicate response, and replay.
+
+`browser-native-protocol-check` runs the shared Rust/TypeScript golden contract
+and strict framing tests for valid, empty, invalid, oversized, truncated,
+multiple, unknown-version, and unknown-message frames.
+`browser-native-host-check` spawns the real host with piped stdio and a fake
+local IPC server for approval/candidate/credential round trips, and rejects any
+KDBX, vault-session, network, or stdout-diagnostic drift. Local IPC tests cover
+request-before-approval, Allow, Deny, monotonic timeout, disconnect, and
+per-stream approval. A Linux process test exercises install, doctor, and
+uninstall under a temporary registration root; tests never modify actual
+browser configuration or HKCU. `windows-cross-check` compiles the named-pipe,
+HKCU installer, native host, and desktop bridge paths, but is compile evidence
+only and does not claim Windows runtime validation.
 
 These deterministic gates build `dist/chromium` and `dist/firefox` but do not
 require or launch Chrome, Chromium, Edge, Firefox, X11, Wayland, or any GUI.
 Manual unpacked/temporary-extension smoke uses only a synthetic loopback page
-bound to `127.0.0.1` and is reported separately. Chromium and Firefox manual
-smoke are not deterministic completion gates.
+bound to `127.0.0.1` and is reported separately. Chromium Native Messaging,
+Firefox Native Messaging, Linux host install/IPC, and Windows Native Messaging
+smoke must each be reported as RUN or NOT RUN; they are not deterministic gates.
 The Forgejo Node frontend job runs this focused gate with the same resolved diff
 base as desktop changed-line coverage.
 
@@ -78,7 +97,7 @@ production release workflow on native hosted OS runners and must be tag-only
 This avoids duplicating ordinary validation cost. Windows is in current release
 direction, Linux packaging may join it, and native macOS release work remains
 conditional on deferred Apple support resuming. No such GitHub workflow runs or
-is added in M6; Forgejo tag-trigger exclusion is deferred to release engineering.
+is added in M6.5; Forgejo tag-trigger exclusion is deferred to release engineering.
 
 `mobile-source-check` is environment-independent and participates in the normal
 policy, quick, and quality gates. It verifies the committed Tauri-generated
@@ -211,7 +230,9 @@ review. Workspace crates are private and are not assigned an invented project
 license by this milestone. Approved dependency licenses are enumerated in
 `deny.toml`. M4.2 adds the OSI-approved `BSL-1.0` license used by the official
 clipboard plugin's Windows-only transitive crates; this is a license approval,
-not an advisory, source, or package exception.
+not an advisory, source, or package exception. M6.5 likewise approves the
+OSI-approved `0BSD` license used only by `interprocess` transitive support
+crates for the local browser bridge.
 
 Wildcard registry dependency requirements are denied. A declaration such as
 `foo = "*"` is not allowed; dependencies use the repository's existing exact

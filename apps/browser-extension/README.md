@@ -1,100 +1,94 @@
-# Nian Pass Browser Extension Foundation
+# Nian Pass Browser Integration
 
-This package is M6: a Manifest V3 browser boundary for Chromium-family browsers
-and Firefox. It is not browser autofill and has no vault or credential source.
+This package is the M6.5 Chromium/Firefox MV3 browser boundary. It provides
+explicit per-site credential filling through the running Nian Pass desktop and
+never opens a vault or asks for a KDBX master password.
 
 ## Architecture
 
 ```text
 HTTP(S) page
-→ explicit per-site browser permission
 → isolated top-frame content script
-→ secret-free structural detection
-→ validated browser-owned sender metadata
+→ validated internal extension Port
 → background authority
-→ popup/status UI
-
-M6.5 later:
-background authority → Native Messaging → desktop/shared Rust authority
+→ runtime.connectNative("io.nianpass.browser")
+→ Nian Pass native host
+→ user-local OS IPC
+→ explicit desktop approval
+→ DesktopVaultService / credential-provider-core
+→ exact document and exact field handles
+→ fill only; no submit
 ```
 
-The web page/DOM is untrusted, the content script is a low-trust adapter, the
-background is privileged browser authority, and native Rust will be the future
-credential authority. M6 never trusts a URL claimed inside a content message.
-Cross-origin frame credential filling is deferred. M6 browser form detection is
-top-frame only. Open and closed Shadow DOM traversal is deferred.
+Site access stays optional. The popup directly owns the Enable/Disable user
+gesture; the background owns browser-derived tab, frame, origin, current
+permission, internal Port, and Native Messaging authority. Only
+`background-native.ts` calls `connectNative`, and only background channel
+infrastructure owns `runtime.onConnect`.
 
-Required permissions are exactly `activeTab` and `scripting`. HTTP(S) host
-patterns are optional. Background-derived status gives the popup the active
-tab's canonical host pattern before any click. Clicking Enable or Disable calls
-`permissions.request` or `permissions.remove` immediately in that popup user
-gesture; the background never mutates optional permission. Permission events
-then reconcile one dynamic registration from browser state. Browser settings
-may also revoke access and drive the same reconciliation. A tab change while a
-popup remains open is a residual browser-UI race: after the operation, refreshed
-status is derived again from the browser's current active tab and is never
-displayed against the old site.
+The value-blind detector never reads `input.value`. It reports a fill target
+only for one unambiguous eligible password field and zero or one username field,
+using random per-document opaque handles. Cross-origin frames, Shadow DOM, and
+ambiguous multiple login forms are unsupported.
 
-The detector reports only protocol version, a random document nonce, login-form
-presence, password-field count, username-candidate count, and form count. It
-never reads field values. A synthetic-only fill primitive binds the exact
-document and opaque live field handles, emits `input` and `change`, and never
-submits. No production path supplies or requests a credential.
+Opening the popup does not connect automatically. The user presses Connect to
+Nian Pass and approves the new connection in desktop. Approval and candidate
+state are memory-only and session-scoped. A service-worker, native-host, or
+desktop restart requires reconnecting and approving again.
 
-Each content document initiates the fixed internal extension Port
-`nian-pass-content-v1` and sends an exact `documentHello` containing only its
-protocol version and nonce. Background accepts it only for this extension's
-permitted HTTP(S) top frame, using browser-owned sender tab, frame, and URL
-metadata. The ephemeral binding stores only tab/frame, exact origin, nonce, and
-Port reference; a replacement document retires the old Port. Popup and other
-extension pages have no tab-bound sender authority and cannot deliver fill
-commands. Background-state loss fails closed; content performs at most one
-bounded reconnect and no secret is queued.
+Candidate lists contain only random candidate handles, title summaries,
+username summaries/protected markers, and a truncation signal. Candidate handles
+bind the exact tab, origin, document nonce, field handles, native generation,
+and vault session. They are single-use and invalidated by navigation, origin or
+permission change, Port replacement, native disconnect, tab close, or a new
+vault session.
 
-The popup's `permissionPattern` is browser site-access authority only. Browser
-host permission is not credential identity. M6.5 must revalidate the
-browser-provided exact current origin/host with Rust credential policy before
-release. The browser extension must never receive a KDBX master password, parse
-KDBX, retain a credential response, or use browser storage as a credential
-cache.
+Before requesting a secret and again after receiving it, background revalidates
+the complete browser authority. A stale response is dropped and cannot mutate
+the new document. The password never passes through popup messages or DOM and is
+not stored in localStorage, extension storage, IndexedDB, logs, or a retry
+queue. JavaScript strings cannot be reliably zeroized, so their lifetime and
+references are minimized without claiming secure erase.
 
-## Targets and identity
+## Permissions and identities
 
-- `dist/chromium`: MV3 `background.service_worker`; usable as the packaging
-  basis for Chrome, Chromium, Edge, Brave, and Vivaldi without claiming each was
-  validated.
-- `dist/firefox`: MV3 non-persistent `background.scripts`, with neutral
-  development ID `browser@nian-pass.local`. Publishing may replace it.
+Required permissions are exactly `activeTab`, `scripting`, and
+`nativeMessaging`; HTTP(S) host patterns remain optional. The fixed native host
+name is `io.nianpass.browser`.
 
-M6 invents no Chrome Web Store production ID and commits no private signing
-key. M6.5 native-host packaging must resolve Chromium identity explicitly.
+- Chromium development ID: `hikglhjadglkpicocjdjipeifnemoplg`, derived from the
+  committed public Manifest `key`. This is not guaranteed to be the final Chrome
+  Web Store ID. No private signing key is committed.
+- Firefox development ID: `browser@nian-pass.local`. Publishing may replace it
+  during release engineering.
 
 ## Commands
 
 ```text
 make browser-source-check
 make browser-extension-check
-pnpm --filter @nian-pass/browser-extension build
-pnpm --filter @nian-pass/browser-extension package
+make browser-native-protocol-check
+make browser-native-host-check
+make browser-integration-check
 ```
 
-The focused check performs typecheck, lint, formatting, tests, coverage, Knip,
-both builds, artifact validation/secret scan, and audit. No installed browser or
-GUI is required. Zip packaging is local only; no store publication or Firefox
-production signing occurs.
+Deterministic checks build both extension artifacts, validate the shared
+Rust/TypeScript protocol fixture, spawn the real native host against fake local
+IPC, and cover browser navigation/permission/session races. They do not require
+or launch an installed browser.
 
-## Manual smoke
+## Security and limitations
 
-Optional smoke should load the unpacked Chromium directory or temporary Firefox
-directory against a synthetic HTTP page served on `127.0.0.1`: verify Disabled,
-explicit Enable, reload and detection, then Disable and reload. Never use real
-credentials or public websites. Current M6 completion evidence records both
-Chromium and Firefox manual smoke separately from deterministic gates.
+Ordinary HTTPS origins are supported. Rust rejects arbitrary plaintext HTTP;
+loopback HTTP is narrowly available for development. Filling is top-frame only,
+requires explicit candidate selection, and never automatically submits.
 
-## Explicit non-goals
+Browser credential storage is none. Persistent browser pairing is none. The
+browser never receives the master password. M6.5 does not provide passkeys,
+TOTP, HTTP Auth, automatic fill, store publication, or trusted-browser
+remembering.
 
-No Native Messaging, KeePassXC Browser protocol, native-host manifest, registry
-entry, stdio proxy, localhost API, remote request, telemetry, storage, KDBX,
-master-password form, real credential retrieval, automatic fill, or automatic
-submit exists in M6. M6.5 should prefer clean-room/API-level KeePassXC Browser
-protocol interoperability where practical, but no compatibility claim exists.
+Nian Pass uses standard Native Messaging transport but does not implement the
+KeePassXC-Browser wire protocol and requires no KeePassXC proxy or executable.
+Any future interoperability work must be a separate clean-room/API-level
+adapter; this package makes no compatibility claim.

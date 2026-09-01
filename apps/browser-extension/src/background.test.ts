@@ -1,5 +1,8 @@
 import { vi } from "vitest";
 
+import { CONTENT_PORT_NAME } from "./runtime-port";
+import { MockRuntimePort } from "./test/mock-port";
+
 const mocks = vi.hoisted(() => ({
   runtimeMessage: vi.fn(),
   runtimeConnect: vi.fn(),
@@ -11,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   tabUpdated: vi.fn(),
   getAllPermissions: vi.fn().mockResolvedValue({ origins: [] }),
   getRegisteredScripts: vi.fn().mockResolvedValue([]),
+  containsOrigin: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("webextension-polyfill", () => ({
@@ -36,7 +40,7 @@ vi.mock("./browser-binding", () => ({
   browserApi: {
     getAllPermissions: mocks.getAllPermissions,
     getRegisteredScripts: mocks.getRegisteredScripts,
-    containsOrigin: vi.fn().mockResolvedValue(false),
+    containsOrigin: mocks.containsOrigin,
     unregisterScripts: vi.fn().mockResolvedValue(undefined),
     registerScript: vi.fn().mockResolvedValue(undefined),
     queryActiveTab: vi.fn().mockResolvedValue(null),
@@ -65,6 +69,23 @@ test("registers all background listeners synchronously and schedules lifecycle w
     tabId: number,
     change: { status?: string; url?: string },
   ) => void;
+  const acceptPort = mocks.runtimeConnect.mock.calls[0]?.[0] as (
+    port: MockRuntimePort,
+  ) => void;
+  mocks.containsOrigin.mockResolvedValue(true);
+  const port = new MockRuntimePort(CONTENT_PORT_NAME, {
+    id: "test-id",
+    frameId: 0,
+    url: "https://example.test/login",
+    tab: { id: 3, url: "https://example.test/login" },
+  });
+  acceptPort(port);
+  port.emitMessage({
+    protocolVersion: 1,
+    type: "documentHello",
+    documentNonce: "a".repeat(32),
+  });
+  await Promise.resolve();
   installed();
   removed();
   tabRemoved(3);

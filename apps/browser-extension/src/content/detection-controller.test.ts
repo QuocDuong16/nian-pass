@@ -18,6 +18,7 @@ describe("MutationObserver detection", () => {
       (message) => {
         reports.push(message);
       },
+      () => "c".repeat(32),
       20,
     );
     controller.start();
@@ -44,6 +45,7 @@ describe("MutationObserver detection", () => {
       (message) => {
         reports.push(message);
       },
+      () => "d".repeat(32),
       10,
     );
     controller.start();

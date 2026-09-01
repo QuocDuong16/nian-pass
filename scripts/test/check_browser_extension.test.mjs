@@ -70,7 +70,7 @@ function artifactFixture(t) {
     }
     const manifest = {
       manifest_version: 3,
-      permissions: ["activeTab", "scripting"],
+      permissions: ["activeTab", "scripting", "nativeMessaging"],
       optional_host_permissions: ["http://*/*", "https://*/*"],
       content_security_policy: {
         extension_pages: "default-src 'self'; script-src 'self'; connect-src 'none'",
@@ -80,7 +80,9 @@ function artifactFixture(t) {
         : { scripts: ["background.js"], persistent: false },
       ...(target === "firefox"
         ? { browser_specific_settings: { gecko: { id: "browser@nian-pass.local" } } }
-        : {}),
+        : {
+            key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp0mZzbgUx7NmPGCUdqH63zsgvX1e6K/ZCBv2pcmwQ5cWqPAgrHVHHGvSSJ+4GzQhTlviC6aGyHqwjcxPOuFest9YtubMxsR36k4fGj/wa9swH4rhlBNNikXhbOKOi7qqmxSDuMkBnRn/Zn+Sv5cg2ck2W1IpjfORCGCUoIb5qBqL2HVsHC+58J+kHoSI5JjorjKsOmuavJp/CxlvkAiPNGtks4SlTvqbTvvefZbn8h9wsB42haY1tjlB0ET2HYAx297t43r5PyaNMMuAgKJ+AlikV4NRDV6NqaRlipw9e28N3wQCL9PnqFRQLjbESBpXRN9mPeONivdVNjLGb378wQIDAQAB",
+          }),
     };
     writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest));
   }
@@ -95,12 +97,12 @@ test("artifact validation rejects permission and background drift", (t) => {
   const root = artifactFixture(t);
   const manifestPath = join(root, "apps/browser-extension/dist/chromium/manifest.json");
   const manifest = JSON.parse(readFile(manifestPath));
-  manifest.permissions.push("nativeMessaging");
+  manifest.permissions.push("cookies");
   manifest.host_permissions = ["https://*/*"];
   manifest.background = { scripts: ["background.js"] };
   writeFileSync(manifestPath, JSON.stringify(manifest));
   const violations = validateArtifacts(root).join("\n");
-  assert.match(violations, /forbidden permission nativeMessaging/);
+  assert.match(violations, /forbidden permission cookies/);
   assert.match(violations, /mandatory host_permissions/);
   assert.match(violations, /service_worker is missing/);
 });

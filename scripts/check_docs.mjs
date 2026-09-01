@@ -32,14 +32,17 @@ export function runChecks(root) {
   const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
   const makefile = readRequired(root, "Makefile", violations);
 
-  requirePattern(violations, "README.md", readme, /## Current milestone[\s\S]{0,100}M6\s*[—-]\s*Browser Extension Foundation/i, "current milestone must report M6 browser foundation");
+  requirePattern(violations, "README.md", readme, /## Current milestone[\s\S]{0,120}M6\.5\s*[—-]\s*Browser Native Messaging \/ Desktop Integration/i, "current milestone must report M6.5 browser desktop integration");
   requirePattern(violations, "README.md", readme, /M5\.4\s*[—-]\s*iOS Password AutoFill \+ Keychain[^\n]*DEFERRED/, "roadmap must retain M5.4 deferred");
-  requirePattern(violations, "README.md", readme, /M5\.5\s+Android Mobile Security \/ Lifecycle\s+DONE[\s\S]{0,240}M6\s+Browser Extension Foundation\s+DONE[\s\S]{0,240}M6\.5\s+Browser Native Messaging \/ Desktop Integration\s+NEXT/i, "M6-done and M6.5-next roadmap is missing");
-  requirePattern(violations, "README.md", readme, /Chromium MV3 build[\s\S]{0,300}Firefox MV3 build[\s\S]{0,300}explicit per-site permission[\s\S]{0,300}top-frame login-form detection[\s\S]{0,300}no credential retrieval yet/i, "M6 browser status boundary is missing");
-  requirePattern(violations, "docs/architecture.md", architecture, /M6 browser extension boundary[\s\S]{0,1800}background extension authority[\s\S]{0,1000}Native Messaging[\s\S]{0,500}Rust credential authority/i, "M6 browser authority architecture is missing");
+  requirePattern(violations, "README.md", readme, /M5\.5\s+Android Mobile Security \/ Lifecycle\s+DONE[\s\S]{0,240}M6\s+Browser Extension Foundation\s+DONE[\s\S]{0,240}M6\.5\s+Browser Native Messaging \/ Desktop Integration\s+DONE[\s\S]{0,160}M7\s+BYO-cloud Sync Providers\s+NEXT/i, "M6.5-done and M7-next roadmap is missing");
+  requirePattern(violations, "README.md", readme, /Browser integration[\s\S]{0,500}Chromium\/Firefox MV3[\s\S]{0,500}explicit\s+per-site access[\s\S]{0,500}Native Messaging host/i, "M6.5 browser feature boundary is missing");
+  requirePattern(violations, "README.md", readme, /exact-document[\s\S]{0,200}never automatically[\s\S]{0,80}submits?/i, "M6.5 exact fill and no-submit boundary is missing");
+  requirePattern(violations, "docs/architecture.md", architecture, /M6\.5 browser and desktop credential boundary[\s\S]{0,1600}Native Messaging stdio[\s\S]{0,800}user-local Unix socket or Windows named pipe[\s\S]{0,800}DesktopVaultService[\s\S]{0,600}credential-provider-core/i, "M6.5 browser transport architecture is missing");
   requirePattern(violations, "docs/architecture.md", architecture, /browser host permission[\s\S]{0,300}(?:not|isn't)[\s\S]{0,80}credential identity/i, "browser permission and credential identity separation is missing");
-  requirePattern(violations, "docs/threat-model.md", threatModel, /web page \/ DOM[\s\S]{0,300}untrusted[\s\S]{0,600}content script[\s\S]{0,300}low-trust[\s\S]{0,600}background extension context[\s\S]{0,300}privileged/i, "M6 browser trust hierarchy is missing");
-  requirePattern(violations, "docs/quality.md", quality, /browser-source-check[\s\S]{0,300}browser-extension-check/i, "M6 browser quality targets are missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /web page \/ DOM[\s\S]{0,300}untrusted[\s\S]{0,600}content script[\s\S]{0,300}low-trust[\s\S]{0,600}background extension context[\s\S]{0,300}privileged[\s\S]{0,500}native host[\s\S]{0,300}transport-only/i, "M6.5 browser trust hierarchy is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /same-user local IPC attacker[\s\S]{0,700}desktop approval/i, "M6.5 same-user approval threat is missing");
+  requirePattern(violations, "docs/threat-model.md", threatModel, /fully compromised OS[\s\S]{0,300}root\/Administrator/i, "M6.5 residual OS threats are missing");
+  requirePattern(violations, "docs/quality.md", quality, /browser-source-check[\s\S]{0,300}browser-extension-check[\s\S]{0,300}browser-native-protocol-check[\s\S]{0,300}browser-native-host-check[\s\S]{0,300}browser-integration-check/i, "M6.5 browser quality targets are missing");
   requirePattern(violations, "docs/quality.md", quality, /do not[\s\S]{0,80}(?:require|launch)[\s\S]{0,120}(?:Chrome|Chromium)[\s\S]{0,120}Firefox/i, "M6 browser no-GUI policy is missing");
   requirePattern(violations, "README.md", readme, /read-only providers[\s\S]{0,160}(?:editing|Save) disabled/i, "M5.2 read-only provider boundary is missing");
   requirePattern(violations, "README.md", readme, /AtomicFile[\s\S]{0,300}save_uncertain[\s\S]{0,160}recovery_required/i, "M5.2 recovery and uncertainty boundary is missing");

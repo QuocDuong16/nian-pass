@@ -26,6 +26,17 @@ button {
   padding: 7px 10px;
 }
 
+#candidates {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.candidate {
+  text-align: left;
+  width: 100%;
+}
+
 .future {
   border-top: 1px solid currentColor;
   margin-top: 16px;

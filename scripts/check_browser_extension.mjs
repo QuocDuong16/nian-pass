@@ -5,7 +5,6 @@ import { pathToFileURL } from "node:url";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const packageRoot = "apps/browser-extension";
 const forbiddenPermissions = new Set([
-  "nativeMessaging",
   "tabs",
   "cookies",
   "webRequest",
@@ -20,6 +19,9 @@ const forbiddenPermissions = new Set([
   "management",
   "unlimitedStorage",
 ]);
+const nativeContract = JSON.parse(
+  readFileSync(resolve(repositoryRoot, "browser/native-contract-v1.json"), "utf8"),
+);
 const secretMarkers = [
   "SECRET_MUST_NOT_BE_READ",
   "M6_ARTIFACT_SECRET_MARKER",
@@ -71,6 +73,7 @@ export function runSourceChecks(root) {
   const manifest = sources.get(`${packageRoot}/src/manifest.ts`) ?? "";
   const permissions = sources.get(`${packageRoot}/src/permissions.ts`) ?? "";
   const background = sources.get(`${packageRoot}/src/background.ts`) ?? "";
+  const backgroundNative = sources.get(`${packageRoot}/src/background-native.ts`) ?? "";
   const authority = sources.get(`${packageRoot}/src/background-authority.ts`) ?? "";
   const backgroundChannel = sources.get(`${packageRoot}/src/background-channel.ts`) ?? "";
   const backgroundApi = sources.get(`${packageRoot}/src/browser-api.ts`) ?? "";
@@ -91,7 +94,18 @@ export function runSourceChecks(root) {
   requireSource(violations, "manifest.ts", manifest, /manifest_version:\s*3/, "Manifest V3 is required");
   requireSource(violations, "manifest.ts", manifest, /optional_host_permissions:[\s\S]*http:\/\/\*\/\*[\s\S]*https:\/\/\*\/\*/, "optional HTTP(S) host permissions are required");
   rejectMatches(violations, "manifest.ts", manifest, /\bhost_permissions\b/g, "mandatory host permissions are forbidden");
-  rejectMatches(violations, "extension production", combined, /\bnativeMessaging\b/g, "Native Messaging belongs to M6.5");
+  requireSource(violations, "manifest.ts", manifest, /permissions:\s*\["activeTab",\s*"scripting",\s*"nativeMessaging"\]/, "permissions must include only the reviewed Native Messaging capability");
+  requireSource(violations, "background-native.ts", backgroundNative, /\.connect\(NATIVE_HOST_NAME\)/, "background native integration must use the centralized host name");
+  requireSource(violations, "background-native.ts", backgroundNative, /runtime\.connectNative\(hostName\)/, "background native integration must own connectNative");
+  const connectNativeCalls = [...combined.matchAll(/\.connectNative\s*\(/g)];
+  if (connectNativeCalls.length !== 1) {
+    violations.push("extension production: exactly one production connectNative call is required");
+  }
+  for (const [name, source] of sources) {
+    if (name !== `${packageRoot}/src/background-native.ts`) {
+      rejectMatches(violations, name, source, /\.connectNative\s*\(/g, "connectNative is background-native-only");
+    }
+  }
   rejectMatches(violations, "extension production", combined, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b/g, "network APIs are forbidden");
   rejectMatches(violations, "extension production", combined, /\b(?:localStorage|sessionStorage|indexedDB|storage\.sync|storage\.local)\b/g, "extension storage is not used in M6");
   rejectMatches(violations, "extension production", combined, /\beval\s*\(|\bnew\s+Function\s*\(/g, "dynamic code execution is forbidden");
@@ -113,6 +127,7 @@ export function runSourceChecks(root) {
   requireSource(violations, "popup.ts", popup, /enableButton\.addEventListener\([\s\S]{0,500}permissionApi\.requestOrigin\(pattern\)/, "permission request must start inside the popup click handler");
   requireSource(violations, "popup.ts", popup, /disableButton\.addEventListener\([\s\S]{0,500}permissionApi\.removeOrigin\(pattern\)/, "permission removal must start inside the popup click handler");
   rejectMatches(violations, "popup.ts", popup, /\b(?:enableSite|disableSite|applyCredential|usernameFieldHandle|passwordFieldHandle|tabs\.sendMessage)\b/g, "popup must not expose permission delegation or credential delivery");
+  rejectMatches(violations, "popup.ts", popup, /\b(?:entryId|password)\b/g, "popup must receive candidate handles and no credential fields");
   requireSource(violations, "content.ts", content, /runtime\.connect\(\{\s*name\s*\}\)/, "content must initiate the fixed internal Port");
   requireSource(violations, "background.ts", background, /runtime\.onConnect\.addListener/, "background must register the Port listener synchronously");
   requireSource(violations, "background-channel.ts", backgroundChannel, /sender\?\.id\s*!==\s*this\.api\.extensionId\(\)/, "Port authority must require this extension sender ID");
@@ -136,7 +151,7 @@ function validateManifest(target, manifest) {
   for (const permission of permissions) {
     if (forbiddenPermissions.has(permission)) violations.push(`${target}: forbidden permission ${permission}`);
   }
-  if (permissions.join(",") !== "activeTab,scripting") violations.push(`${target}: required permissions must be exactly activeTab,scripting`);
+  if (permissions.join(",") !== "activeTab,scripting,nativeMessaging") violations.push(`${target}: required permissions must be exactly activeTab,scripting,nativeMessaging`);
   if (manifest.host_permissions !== undefined) violations.push(`${target}: mandatory host_permissions are forbidden`);
   if (JSON.stringify(manifest.optional_host_permissions) !== JSON.stringify(["http://*/*", "https://*/*"])) violations.push(`${target}: optional host permissions must be exact HTTP(S) patterns`);
   const csp = manifest.content_security_policy?.extension_pages;
@@ -144,9 +159,11 @@ function validateManifest(target, manifest) {
   if (target === "chromium") {
     if (manifest.background?.service_worker !== "background.js") violations.push("chromium: service_worker is missing");
     if (manifest.background?.scripts !== undefined) violations.push("chromium: background.scripts is forbidden");
+    if (manifest.key !== nativeContract.chromiumDevelopment.manifestKey) violations.push("chromium: committed development Manifest key is missing or changed");
   } else {
     if (JSON.stringify(manifest.background?.scripts) !== JSON.stringify(["background.js"])) violations.push("firefox: background.scripts is missing");
-    if (manifest.browser_specific_settings?.gecko?.id !== "browser@nian-pass.local") violations.push("firefox: neutral gecko.id is missing");
+    if (manifest.browser_specific_settings?.gecko?.id !== nativeContract.firefoxDevelopmentExtensionId) violations.push("firefox: stable development gecko.id is missing");
+    if (manifest.key !== undefined) violations.push("firefox: Chromium Manifest key is forbidden");
   }
   return violations;
 }

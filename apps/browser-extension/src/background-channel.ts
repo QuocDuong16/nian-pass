@@ -21,7 +21,11 @@ interface SenderAuthority {
 export class BackgroundChannelRegistry {
   readonly #documents = new Map<string, DocumentPortAuthority>();
 
-  constructor(private readonly api: BackgroundBrowserApi) {}
+  constructor(
+    private readonly api: BackgroundBrowserApi,
+    private readonly onAuthorityChanged: (tabId: number) => void = () =>
+      undefined,
+  ) {}
 
   accept(port: RuntimePort): void {
     const sender = this.#senderAuthority(port);
@@ -128,11 +132,13 @@ export class BackgroundChannelRegistry {
       documentNonce: hello.documentNonce,
       port,
     });
+    this.onAuthorityChanged(sender.tabId);
   }
 
   #remove(port: RuntimePort, sender: SenderAuthority): void {
     const key = this.#key(sender.tabId, sender.frameId);
     if (this.#documents.get(key)?.port === port) this.#documents.delete(key);
+    this.onAuthorityChanged(sender.tabId);
   }
 
   #retire(authority: DocumentPortAuthority): void {
@@ -141,6 +147,7 @@ export class BackgroundChannelRegistry {
       this.#documents.delete(key);
     }
     authority.port.disconnect();
+    this.onAuthorityChanged(authority.tabId);
   }
 
   #key(tabId: number, frameId: number): string {

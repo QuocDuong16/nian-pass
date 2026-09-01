@@ -3,9 +3,8 @@ import {
   parseApplyCredential,
   parseDocumentHello,
   parsePageStateChanged,
-  parsePopupMessage,
-  parseSiteStatus,
 } from "./protocol";
+import { parsePopupMessage, parseSiteStatus } from "./popup-protocol";
 
 const pageState = {
   protocolVersion: PROTOCOL_VERSION,
@@ -15,6 +14,10 @@ const pageState = {
   passwordFieldCount: 1,
   usernameCandidateCount: 1,
   formCount: 1,
+  fillTarget: {
+    usernameFieldHandle: "e".repeat(32),
+    passwordFieldHandle: "f".repeat(32),
+  },
 };
 
 describe("message validation", () => {

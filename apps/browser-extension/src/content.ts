@@ -9,6 +9,7 @@ const detector = new DetectionController(
   document,
   fields.documentNonce,
   (message) => browser.runtime.sendMessage(message).then(() => undefined),
+  (input) => fields.handleFor(input),
 );
 
 const channel = new ContentChannel({

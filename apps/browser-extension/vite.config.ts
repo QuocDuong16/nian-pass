@@ -47,7 +47,7 @@ export default defineConfig(({ mode }) => {
           );
           writeFileSync(
             resolve(outDir, "popup.html"),
-            '<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nian Pass</title><link rel="stylesheet" href="popup.css"></head><body><main><h1>Nian Pass</h1><p id="site">Current site</p><p id="permission">Waiting</p><p id="detection">Waiting for page detection</p><button id="enable" type="button">Enable on this site</button><button id="disable" type="button">Disable on this site</button><p class="future">Desktop credential integration arrives in M6.5.</p><p id="error" role="status"></p></main><script src="popup.js"></script></body></html>\n',
+            '<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nian Pass</title><link rel="stylesheet" href="popup.css"></head><body><main><h1>Nian Pass</h1><p id="site">Current site</p><p id="permission">Waiting</p><p id="detection">Waiting for page detection</p><button id="enable" type="button">Enable on this site</button><button id="disable" type="button">Disable on this site</button><hr><p id="desktop">Disconnected</p><button id="connect" type="button">Connect to Nian Pass</button><div id="candidates" aria-label="Matching credentials"></div><p id="error" role="status"></p></main><script src="popup.js"></script></body></html>\n',
           );
         },
       },

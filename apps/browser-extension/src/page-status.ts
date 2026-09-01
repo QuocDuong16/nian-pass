@@ -1,9 +1,10 @@
 import type { PageStateChanged } from "./protocol";
 
-interface StoredPageState {
+export interface StoredPageState {
   documentNonce: string;
   origin: string;
   detected: boolean;
+  fillTarget: PageStateChanged["fillTarget"];
 }
 
 export class PageStatusStore {
@@ -14,7 +15,13 @@ export class PageStatusStore {
       documentNonce: state.documentNonce,
       origin,
       detected: state.hasLoginForm,
+      fillTarget: state.fillTarget,
     });
+  }
+
+  current(tabId: number, origin: string): StoredPageState | null {
+    const state = this.#states.get(tabId);
+    return state?.origin === origin ? state : null;
   }
 
   detection(

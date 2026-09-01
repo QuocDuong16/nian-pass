@@ -4,28 +4,29 @@ This is the threat model for the M3 local vault session/filesystem foundation,
 the M3.5 provider-independent merge core, the M4.2 reveal/copy desktop, the
 M4.3 mutation UI, the M4.4 save/conflict flow, the M4.Q quality/security gates,
 the M5.2 Android CRUD/provider-persistence flow, the M5.3 Android credential
-retrieval flow, the M5.5 Android security lifecycle, and the M6 browser
-extension boundary. It records boundaries and assumptions; it is not a
+retrieval flow, the M5.5 Android security lifecycle, and the M6.5 browser
+desktop bridge. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
-## M6 browser trust hierarchy and threats
+## M6.5 browser trust hierarchy and threats
 
 ```text
 web page / DOM                  = untrusted
 isolated content script         = low-trust adapter
 background extension context   = privileged browser authority
-native desktop/shared Rust      = future credential authority (M6.5)
+native host                    = transport-only, untrusted until approval
+running desktop Rust           = current vault and credential authority
 ```
 
-M6 assumes a hostile page DOM, forged or compromised content-script messages,
-stale document handles, navigation races, permission drift, over-broad host
-grants, service-worker suspension/background loss, page attempts to confuse fill
-routing, popup XSS, permission user-gesture loss, privileged extension-page
-impersonation, stale Ports, and an active-tab change while the popup is open. It
-also treats the future native host as a potential
-confused-deputy boundary. The background validates exact message shapes and
-versions plus browser-owned tab, top-frame ID, URL scheme, and current host
-permission. A content-script-claimed URL never establishes credential identity.
+M6.5 assumes a malicious webpage, compromised content-script input, privileged
+popup confusion, stale candidate replay, navigation during a secret request,
+permission revocation, native-Port reconnect, manual host launch by a same-user
+attacker, a same-user local IPC attacker, desktop approval spoof/confusion,
+stale `vaultSessionId`, oversized frames, stdout protocol corruption,
+browser/native protocol drift, and native-host registration hijack. Exact
+versioned validators, browser-owned metadata, random generations and single-use
+handles, bounded framing, user-private IPC, and explicit desktop approval fail
+closed across those boundaries.
 
 Permission mutation remains at the actual popup gesture boundary. Background
 provides a browser-derived canonical pattern before the click but cannot call
@@ -35,15 +36,15 @@ displayed host, but refresh uses the new browser-owned active tab and cannot
 misrepresent that grant as authority for a different site. The pattern grants
 browser site access only and is never treated as credential matching identity.
 
-Each document has a cryptographically random nonce and opaque field handles.
+Each document has a collision-resistant random nonce and opaque field handles.
 Navigation creates new authority; a stale nonce, missing handle, disconnected
 node, wrong field type, disabled/readonly/hidden target, or non-top frame fails
 closed. Detection observes only bounded DOM structure and never reads existing
-values. Filling is test-only in M6, dispatches ordinary events, and never
-submits. Closed shadow roots and cross-origin login/federation/payment frames
-are explicitly unsupported rather than guessed.
+values. Filling dispatches ordinary events and never submits. Closed shadow
+roots, cross-origin frames, and ambiguous multiple login targets are explicitly
+unsupported rather than guessed.
 
-Future fill delivery is accepted only on a content-initiated internal Port that
+Fill delivery is accepted only on a content-initiated internal Port that
 background binds to this extension's exact tab, frame, browser sender origin,
 current permission, and document nonce. Popup/options pages cannot impersonate
 that sender merely by knowing the Port name. Duplicate documents replace the
@@ -52,17 +53,33 @@ lost, content may reconnect once, and no credential is delivered until authority
 is reconstructed. No secret queue exists, and content still rejects a stale
 nonce or handle as defense in depth.
 
-The popup uses fixed local HTML and `textContent`, shows at most the canonical
-host, and exposes generic errors. No page title, path, query, fragment, form
-label, value, or DOM snapshot is displayed or logged. There is no telemetry,
-analytics, remote code, network API, extension storage, browser-side password
-cache, Native Messaging, localhost server, KDBX parser, or master password.
+The popup uses fixed local HTML and `textContent`, shows generic state and
+secret-free candidate summaries, and never receives a password. There is no
+telemetry, network API, extension storage, persistent pairing, localhost server,
+browser KDBX parser, or browser master-password form.
 
-For M6.5, one credential response must flow from native Rust authority to the
-exact tab/frame/document, be written once, never persisted, and have references
-dropped. Possessing a browser host permission is not proof that a credential
-matches. Rust-owned exact current-origin/host policy must decide before secret
-release.
+Candidate handles bind tab, top frame, exact origin, document nonce, field
+handles, native generation, and `vaultSessionId`, and are consumed before the
+secret request. Navigation, origin change, permission removal, Port replacement,
+native reconnect, or vault replacement invalidates them. Background repeats
+the complete browser check after the native response; stale responses are
+dropped without DOM mutation. Unknown, stale, duplicate, or timed-out request
+IDs cannot complete another request, and credentials are never queued for retry.
+
+The same OS user is not trusted as browser authorization. Every IPC stream
+requires a generic desktop Allow/Deny decision within a monotonic timeout; no UI
+means deny, and authority ends with that stream. The native host never opens
+KDBX or owns `VaultSession`. Current `DesktopVaultService`, random session
+identity, current `EntryId`, and Rust exact-origin matching remain the final
+secret authority. Connection approval does not imply an unlocked vault.
+
+Residual threats remain: M6.5 cannot protect against a fully compromised OS,
+root/Administrator, sufficiently privileged process-memory inspection, a
+malicious browser itself, native-host registration changed with equivalent
+privilege, or a user approving a fraudulent same-user request. Explicit
+approval mitigates silent same-user connection abuse but cannot cure a
+compromised machine. JavaScript strings cannot be reliably zeroized, so the
+implementation minimizes lifetime and references without claiming secure erase.
 
 ## Secret material
 

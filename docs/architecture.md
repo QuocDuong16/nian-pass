@@ -12,77 +12,79 @@ M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
 coverage ratchets, and Forgejo jobs that call the same targets used locally.
 
-## M6 browser extension boundary
+## M6.5 browser and desktop credential boundary
 
-M6 adds `apps/browser-extension` without changing the Rust, Tauri, Android, or
-deferred Apple runtime. One typed manifest source generates a Chromium MV3
-shell with `background.service_worker` and a Firefox MV3 shell with
-non-persistent `background.scripts`. Both bundle the same Promise-based browser
-adapter, background authority, isolated content script, and popup locally.
+M6.5 extends the accepted M6 browser extension without changing Android or the
+deferred Apple runtime. One manifest source generates Chromium and Firefox MV3
+artifacts with exactly `activeTab`, `scripting`, and `nativeMessaging`; HTTP(S)
+page access remains optional and explicit per site.
 
 ```text
 HTTP(S) web page / hostile DOM
-→ popup user gesture directly requests/removes exact browser host permission
-→ isolated top-frame content script (low-trust adapter)
-→ versioned, exact-shape structural message
-→ browser-owned sender tab/frame/URL validation
-→ background extension authority
-→ popup/status UI
-
-M6.5 later:
-background authority
-→ Native Messaging
-→ desktop/shared Rust credential authority
+→ isolated top-frame content script and exact opaque field handles
+→ validated internal extension Port
+→ background extension authority and single-use candidate handle
+→ Native Messaging stdio (native-endian u32 length + strict JSON)
+→ `nian-pass-browser-host` transport-only process
+→ user-local Unix socket or Windows named pipe
+→ explicit connection-scoped desktop Allow/Deny
+→ running `DesktopVaultService` and current `VaultSession`
+→ `credential-provider-core` exact-origin final read
+→ background post-response revalidation
+→ exact content Port and exact field handles
+→ fill only; the user submits
 ```
 
-Browser host permission is not credential identity.
+Browser host permission is not credential identity. The popup mutates optional
+site permission only from the user's Enable/Disable gesture; browser permission
+events reconcile the single top-frame dynamic registration. Background derives
+tab, frame, origin, and permission from browser-owned metadata, never from a URL
+claimed by content. A service-worker restart loses the Native Port and all
+candidate handles, so reconnection and desktop approval are required again.
 
-The browser permission system is the site-access authority. Background derives
-the active tab's exact canonical permission pattern for secret-free popup
-status; popup keeps that value in memory. Its Enable/Disable click invokes
-`permissions.request`/`permissions.remove` immediately, before any asynchronous
-query or message. Background never mutates optional permission. Browser
-`permissions.onAdded`/`onRemoved` events cover popup actions and browser-settings
-drift, then `permissions.getAll` is canonicalized into one sorted
-`nian-pass-site-content` registration through
-`scripting.registerContentScripts`. Install and startup reconcile identically.
-The Chromium service worker and Firefox event background may disappear.
-Registration correctness is rebuilt from browser state, while login detection
-status is intentionally ephemeral and may return to waiting after background
-loss. If the active tab changes while a popup is open, post-operation refresh
-derives the active site again and never applies old status to the new site.
+The value-blind detector reports structural counts and an opaque target only
+when exactly one eligible password field and at most one associated username
+field exist. Random document and field handles are checked again at fill time;
+ambiguous pages, replacement documents, navigation, origin change, permission
+removal, Port replacement, or native-generation change fail closed. The popup
+receives candidate handles and summaries only. A credential flows only from
+background to the exact content Port and is never sent through the popup.
 
-Content authority is top-frame only (`frameId == 0`). The background derives
-the exact current page from `sender.tab`, `sender.frameId`, and `sender.url`, not
-from a content-provided origin. The detector reports only protocol version,
-random document nonce, login-form presence, password count, username-candidate
-count, and form count. It reads structure but never existing input values.
-Dynamic DOM changes are debounced and signature-deduplicated. Open Shadow DOM
-and all cross-origin iframe credential semantics are deferred.
+The background derives a canonical exact origin from the active tab and Port.
+Rust `url` parsing accepts HTTPS and narrowly allows loopback HTTP for
+development; arbitrary remote HTTP, userinfo, malformed, unsupported, and opaque
+origins fail closed. Additive `CredentialTarget::WebOrigin` matches scheme,
+canonical host, and effective port without changing Android/iOS `WebHost`.
 
-The future-fill foundation maps live inputs to random per-document handles with
-a `WeakMap`, checks the exact document nonce and live eligible types, uses the
-native input value setter, and emits `input` plus `change`. It never submits or
-searches for a replacement field after stale-handle failure. No production M6
-path supplies a credential or emits `applyCredential` from background.
+`apps/browser-native-host` owns only strict bounded framing, registration, and
+proxying. Browser and IPC frames share protocol version 1, random request IDs,
+exact message types, unknown-field rejection, and a 256 KiB cap. Candidate
+responses are capped at 100 with `truncated`. The host has no KDBX,
+`vault-session`, Tauri, database, or network dependency, never caches a
+credential, and reserves stdout for Native Messaging frames in normal mode.
+Chromium manifests use `allowed_origins`; Firefox uses `allowed_extensions`.
 
-Content initiates a fixed, internal `nian-pass-content-v1` runtime Port and
-sends a strict `documentHello` with only protocol version and document nonce.
-Background accepts that Port only when extension ID, tab ID, top-frame ID,
-browser-owned sender URL, and current permission all validate. It retains only
-tab/frame, exact origin, nonce, and Port reference in ephemeral memory. A new
-document for the same tab/frame retires the old binding; disconnect, navigation,
-permission removal, or background loss removes authority. Content may reconnect
-once for the same live document, but credentials are never queued. Popup and
-other privileged extension pages lack a validated content sender tab and cannot
-become fill authority. In M6.5, a native response may flow only background →
-exact document Port → nonce/handle-checked fill primitive.
+Linux owns `$XDG_RUNTIME_DIR/nian-pass/browser-v1.sock` under a 0700 directory
+with socket mode 0600 and no insecure fallback. Stale cleanup occurs only after
+proving that no live listener owns the socket. Windows owns
+`\\.\pipe\LOCAL\nian-pass-browser-v1` with a current-owner-only security
+descriptor. Every accepted stream creates its own random, 60-second monotonic
+approval request. No usable UI, denial, timeout, disconnect, or restart revokes
+that stream. The frontend sees only an opaque request ID; candidate or credential
+data never crosses a Tauri event or React state.
 
-The popup `permissionPattern` is browser site-access authority only. Browser
-host permission is not credential identity. Even if a browser grant is
-broader than one origin, M6.5 must pass the browser-provided exact origin/host
-to Rust-owned credential matching before any secret release. TypeScript does no
-PSL, eTLD+1, wildcard credential, fuzzy-host, KDBX, or master-password work.
+Unlock and session-replacing reload generate a random process-local
+`vaultSessionId`; Lock invalidates it. Candidate enumeration is secret-free.
+Final retrieval takes the existing secret-operation gate, verifies the current
+session ID, `EntryId`, and exact origin, then calls
+`credential_provider_core::credential` against the current in-memory document.
+Dirty edits are visible naturally; browser reads never autosave or snapshot the
+decrypted vault.
+
+JavaScript strings cannot be reliably zeroized. The background minimizes their
+lifetime and retains no credential cache; Rust uses `SecretString`, `Zeroizing`,
+and bounded scoped transport buffers where practical. Browser credential
+storage and persistent pairing are both absent.
 
 ## CI and future release boundary
 
@@ -94,7 +96,7 @@ resumes. That future workflow must use an explicit version-tag trigger such as
 `push.tags: ["v*"]` and must not run for branch pushes, pull requests, or
 schedules. Before release automation lands, Forgejo's broad push trigger should
 be narrowed during the release-engineering milestone so a tag does not launch
-both full Forgejo CI and full GitHub release work. M6 changes neither workflow
+both full Forgejo CI and full GitHub release work. M6.5 changes neither workflow
 triggers nor release artifacts.
 
 ## M5.5 Android security lifecycle

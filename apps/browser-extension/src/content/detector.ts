@@ -5,6 +5,11 @@ export interface DetectionResult {
   formCount: number;
 }
 
+export interface FillTargetInputs {
+  username: HTMLInputElement | null;
+  password: HTMLInputElement;
+}
+
 function isExplicitlyHidden(input: HTMLInputElement): boolean {
   if (input.type === "hidden" || input.hidden) return true;
   for (
@@ -58,6 +63,24 @@ export function detectLoginForms(document: Document): DetectionResult {
     usernameCandidateCount: usernames.size,
     formCount: forms.size,
   };
+}
+
+export function detectFillTarget(document: Document): FillTargetInputs | null {
+  const inputs = [...document.querySelectorAll("input")].filter(
+    (input): input is HTMLInputElement => input instanceof HTMLInputElement,
+  );
+  const passwords = inputs.filter(
+    (input) => input.type === "password" && isEditableInput(input),
+  );
+  const password = passwords[0];
+  if (passwords.length !== 1 || password === undefined) return null;
+  const scope: ParentNode = password.form ?? document;
+  const usernames = [...scope.querySelectorAll("input")].filter(
+    (input): input is HTMLInputElement =>
+      input instanceof HTMLInputElement && isUsernameInput(input),
+  );
+  if (usernames.length > 1) return null;
+  return { username: usernames[0] ?? null, password };
 }
 
 export function detectionSignature(result: DetectionResult): string {

@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "hostName": "io.nianpass.browser",
+  "chromiumDevelopment": {
+    "manifestKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp0mZzbgUx7NmPGCUdqH63zsgvX1e6K/ZCBv2pcmwQ5cWqPAgrHVHHGvSSJ+4GzQhTlviC6aGyHqwjcxPOuFest9YtubMxsR36k4fGj/wa9swH4rhlBNNikXhbOKOi7qqmxSDuMkBnRn/Zn+Sv5cg2ck2W1IpjfORCGCUoIb5qBqL2HVsHC+58J+kHoSI5JjorjKsOmuavJp/CxlvkAiPNGtks4SlTvqbTvvefZbn8h9wsB42haY1tjlB0ET2HYAx297t43r5PyaNMMuAgKJ+AlikV4NRDV6NqaRlipw9e28N3wQCL9PnqFRQLjbESBpXRN9mPeONivdVNjLGb378wQIDAQAB",
+    "extensionId": "hikglhjadglkpicocjdjipeifnemoplg"
+  },
+  "firefoxDevelopmentExtensionId": "browser@nian-pass.local",
+  "fixtures": {
+    "requests": [
+      {
+        "version": 1,
+        "type": "connect",
+        "requestId": "00112233445566778899aabbccddeeff"
+      },
+      {
+        "version": 1,
+        "type": "candidates",
+        "requestId": "102132435465768798a9bacbdcedfe0f",
+        "origin": "https://example.com"
+      },
+      {
+        "version": 1,
+        "type": "credential",
+        "requestId": "ffeeddccbbaa99887766554433221100",
+        "origin": "https://example.com",
+        "vaultSessionId": "abcdef0123456789abcdef0123456789",
+        "entryId": "synthetic-entry-id"
+      }
+    ],
+    "responses": [
+      {
+        "version": 1,
+        "type": "approvalPending",
+        "requestId": "00112233445566778899aabbccddeeff"
+      },
+      {
+        "version": 1,
+        "type": "connected",
+        "requestId": "00112233445566778899aabbccddeeff",
+        "vaultState": "ready"
+      },
+      {
+        "version": 1,
+        "type": "candidates",
+        "requestId": "102132435465768798a9bacbdcedfe0f",
+        "vaultSessionId": "abcdef0123456789abcdef0123456789",
+        "candidates": [
+          {
+            "entryId": "synthetic-entry-id",
+            "title": { "kind": "visible", "value": "Synthetic" },
+            "username": { "kind": "protected" }
+          }
+        ],
+        "truncated": false
+      },
+      {
+        "version": 1,
+        "type": "credential",
+        "requestId": "ffeeddccbbaa99887766554433221100",
+        "username": "synthetic-user",
+        "password": "synthetic-password"
+      },
+      {
+        "version": 1,
+        "type": "error",
+        "requestId": "102132435465768798a9bacbdcedfe0f",
+        "code": "locked"
+      }
+    ]
+  }
+}

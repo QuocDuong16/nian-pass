@@ -6,9 +6,20 @@ import {
 } from "./background-authority";
 import { browserApi } from "./browser-binding";
 import { BackgroundChannelRegistry } from "./background-channel";
+import { NativeClient, nativeRuntime } from "./background-native";
+import { BrowserIntegration } from "./browser-integration";
 
 const authority = new BackgroundAuthority(browserApi);
-const channels = new BackgroundChannelRegistry(browserApi);
+const integrationRef: { current?: BrowserIntegration } = {};
+const channels = new BackgroundChannelRegistry(browserApi, (tabId) => {
+  integrationRef.current?.clearTab(tabId);
+});
+const native = new NativeClient(nativeRuntime, () => {
+  integrationRef.current?.clearAll();
+});
+const integration = new BrowserIntegration(authority, channels, native);
+integrationRef.current = integration;
+authority.setIntegration(integration);
 let reconciliation = Promise.resolve();
 
 function scheduleReconciliation(): void {
@@ -32,15 +43,18 @@ browser.permissions.onAdded.addListener(scheduleReconciliation);
 browser.permissions.onRemoved.addListener(() => {
   authority.clearEphemeralState();
   channels.clearAll();
+  integration.clearAll();
   scheduleReconciliation();
 });
 browser.tabs.onRemoved.addListener((tabId) => {
   authority.clearTab(tabId);
   channels.clearTab(tabId);
+  integration.clearTab(tabId);
 });
 browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading" || changeInfo.url !== undefined) {
     authority.clearTab(tabId);
     channels.clearTab(tabId);
+    integration.clearTab(tabId);
   }
 });

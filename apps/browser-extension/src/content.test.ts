@@ -27,7 +27,7 @@ vi.mock("webextension-polyfill", () => ({
 
 test("starts structural reporting and a document-bound background Port", async () => {
   vi.useFakeTimers();
-  document.body.textContent = "";
+  document.body.innerHTML = '<form><input type="password"></form>';
   await import("./content");
   await vi.advanceTimersByTimeAsync(40);
   expect(mocks.sendMessage).toHaveBeenCalledOnce();

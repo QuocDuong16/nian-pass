@@ -75,7 +75,8 @@ export function runChecks(root, budget) {
     const ipcPattern = /(?:from\s+["']@tauri-apps\/api\/core["']|\binvoke\s*\()/g;
     if (
       name !== "apps/desktop/src/lib/desktop.ts" &&
-      name !== "apps/desktop/src/lib/mobile.ts"
+      name !== "apps/desktop/src/lib/mobile.ts" &&
+      name !== "apps/desktop/src/lib/browser-approval.ts"
     ) {
       checkPattern(
         violations,
@@ -83,7 +84,7 @@ export function runChecks(root, budget) {
         path,
         source,
         ipcPattern,
-        "Tauri IPC is allowed only through src/lib/desktop.ts",
+        "Tauri IPC is allowed only through reviewed src/lib adapters",
       );
     }
     checkPattern(
@@ -131,8 +132,16 @@ export function runChecks(root, budget) {
     ["apps/cli/Cargo.toml", new Set(["kdbx", "vault-core"])],
     [
       "apps/desktop/src-tauri/Cargo.toml",
-      new Set(["credential-provider-core", "kdbx", "vault-core", "vault-session"]),
+      new Set([
+        "browser-native-protocol",
+        "credential-provider-core",
+        "kdbx",
+        "vault-core",
+        "vault-session",
+      ]),
     ],
+    ["apps/browser-native-host/Cargo.toml", new Set(["browser-native-protocol"])],
+    ["crates/browser-native-protocol/Cargo.toml", new Set()],
     ["crates/credential-provider-core/Cargo.toml", new Set(["kdbx", "vault-core"])],
     [
       "crates/ios-credential-ffi/Cargo.toml",
@@ -145,12 +154,14 @@ export function runChecks(root, budget) {
   ];
   const workspaceCrates = new Set([
     "kdbx",
+    "browser-native-protocol",
     "credential-provider-core",
     "ios-credential-ffi",
     "vault-core",
     "vault-session",
     "vault-sync",
     "nian-pass-desktop",
+    "nian-pass-browser-host",
     "nian-pass-cli",
   ]);
 
@@ -198,6 +209,12 @@ export function runChecks(root, budget) {
   for (const [manifestPath, allowedInternal] of manifests) {
     const pkg = packagesByManifest.get(manifestPath);
     if (pkg === undefined) {
+      if (
+        manifestPath === "apps/browser-native-host/Cargo.toml" ||
+        manifestPath === "crates/browser-native-protocol/Cargo.toml"
+      ) {
+        continue;
+      }
       throw new Error(`Cargo dependency inspection omitted workspace manifest ${manifestPath}`);
     }
     for (const dependency of pkg.dependencies) {

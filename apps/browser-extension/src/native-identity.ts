@@ -1,0 +1,6 @@
+export const NATIVE_HOST_NAME = "io.nianpass.browser";
+export const CHROMIUM_DEVELOPMENT_EXTENSION_ID =
+  "hikglhjadglkpicocjdjipeifnemoplg";
+export const FIREFOX_DEVELOPMENT_EXTENSION_ID = "browser@nian-pass.local";
+export const CHROMIUM_DEVELOPMENT_MANIFEST_KEY =
+  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp0mZzbgUx7NmPGCUdqH63zsgvX1e6K/ZCBv2pcmwQ5cWqPAgrHVHHGvSSJ+4GzQhTlviC6aGyHqwjcxPOuFest9YtubMxsR36k4fGj/wa9swH4rhlBNNikXhbOKOi7qqmxSDuMkBnRn/Zn+Sv5cg2ck2W1IpjfORCGCUoIb5qBqL2HVsHC+58J+kHoSI5JjorjKsOmuavJp/CxlvkAiPNGtks4SlTvqbTvvefZbn8h9wsB42haY1tjlB0ET2HYAx297t43r5PyaNMMuAgKJ+AlikV4NRDV6NqaRlipw9e28N3wQCL9PnqFRQLjbESBpXRN9mPeONivdVNjLGb378wQIDAQAB";

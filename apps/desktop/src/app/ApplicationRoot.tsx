@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import App from "../App";
+import { BrowserConnectionApproval } from "../features/browser/BrowserConnectionApproval";
 import { MobileVaultApp } from "../features/mobile/MobileVaultApp";
 import {
   desktopApi,
@@ -15,12 +16,17 @@ import {
 import type { RuntimeInfoDto } from "../types/runtime";
 import type { MobileApi } from "../types/mobile";
 import { mobileApi } from "../lib/mobile";
+import {
+  browserApprovalApi,
+  type BrowserApprovalApi,
+} from "../lib/browser-approval";
 
 interface ApplicationRootProps {
   api?: DesktopApi;
   runtime?: RuntimeApi;
   windowLifecycle?: DesktopWindowLifecycle | null;
   mobile?: MobileApi;
+  browserApproval?: BrowserApprovalApi | null;
 }
 
 export function ApplicationRoot({
@@ -28,6 +34,7 @@ export function ApplicationRoot({
   runtime = runtimeApi,
   windowLifecycle = desktopWindowLifecycle,
   mobile = mobileApi,
+  browserApproval = browserApprovalApi,
 }: ApplicationRootProps) {
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfoDto | null>(null);
   const [failed, setFailed] = useState(false);
@@ -60,7 +67,11 @@ export function ApplicationRoot({
     return <main className="runtime-loading">Starting Nian Pass…</main>;
   }
   if (runtimeInfo.platform === "desktop") {
-    return <App api={api} windowLifecycle={windowLifecycle} />;
+    return (
+      <BrowserConnectionApproval api={browserApproval}>
+        <App api={api} windowLifecycle={windowLifecycle} />
+      </BrowserConnectionApproval>
+    );
   }
   if (runtimeInfo.platform === "android") {
     return <MobileVaultApp api={mobile} platform="android" />;

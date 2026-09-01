@@ -1,7 +1,9 @@
 [workspace]
 members = [
+    "apps/browser-native-host",
     "apps/cli",
     "apps/desktop/src-tauri",
+    "crates/browser-native-protocol",
     "crates/credential-provider-core",
     "crates/ios-credential-ffi",
     "crates/kdbx",
@@ -31,6 +33,9 @@ uuid = "=1.24.1"
 vault-core = { path = "crates/vault-core" }
 zeroize = "=1.9.0"
 credential-provider-core = { path = "crates/credential-provider-core" }
+browser-native-protocol = { path = "crates/browser-native-protocol" }
+interprocess = "=2.4.3"
+rustix = { version = "=1.1.4", default-features = false, features = ["process"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

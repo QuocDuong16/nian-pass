@@ -81,6 +81,7 @@ jobs:
           if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then base="origin/main"; fi
           COVERAGE_DIFF_BASE="$base" make desktop-check
           COVERAGE_DIFF_BASE="$base" make browser-source-check browser-extension-check
+          make browser-integration-check
 
   desktop-native-check:
     runs-on: docker
@@ -145,7 +146,7 @@ jobs:
           base="${{ forgejo.event.pull_request.base.sha }}"
           if [ -z "$base" ]; then base="${{ forgejo.event.before }}"; fi
           if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then base="origin/main"; fi
-          make desktop-native-check rust-coverage rust-coverage-check
+          make desktop-native-check browser-native-host-check rust-coverage rust-coverage-check
           COVERAGE_DIFF_BASE="$base" make rust-coverage-diff
 
   windows-cross-check:

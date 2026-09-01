@@ -658,6 +658,10 @@ textarea {
   padding: 24px;
   background: rgb(16 26 20 / 48%);
 }
+
+.browser-approval-backdrop {
+  z-index: 1000;
+}
 .modal-panel {
   width: min(520px, 100%);
   max-height: calc(100vh - 48px);

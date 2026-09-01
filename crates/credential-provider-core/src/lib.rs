@@ -16,6 +16,8 @@ pub enum CredentialTarget {
     AndroidApp(String),
     /// Exact canonical web host used by Android browsers and iOS services.
     WebHost(String),
+    /// Exact canonical browser origin (scheme, host, and effective port).
+    WebOrigin(String),
 }
 
 impl CredentialTarget {
@@ -40,11 +42,21 @@ impl CredentialTarget {
             .ok_or(ProviderError::InvalidTarget)
     }
 
+    /// Builds an exact browser origin. HTTPS is supported everywhere; HTTP is
+    /// restricted to loopback development targets.
+    pub fn browser_origin(origin: &str) -> Result<Self, ProviderError> {
+        canonical_browser_origin(origin, true)
+            .map(Self::WebOrigin)
+            .ok_or(ProviderError::InvalidTarget)
+    }
+
     /// Returns the non-secret target label used by the host confirmation UI.
     #[must_use]
     pub fn display(&self) -> &str {
         match self {
-            Self::AndroidApp(package_name) | Self::WebHost(package_name) => package_name,
+            Self::AndroidApp(package_name)
+            | Self::WebHost(package_name)
+            | Self::WebOrigin(package_name) => package_name,
         }
     }
 }
@@ -233,6 +245,15 @@ fn entry_matches_target(
                     canonical_url_host(value.expose_secret()).as_deref() == Some(web_host)
                 })
             }),
+        CredentialTarget::WebOrigin(web_origin) => document
+            .entry_url(id)
+            .map_err(|_| ProviderError::Internal)
+            .map(|value| {
+                value.is_some_and(|value| {
+                    canonical_browser_origin(value.expose_secret(), false).as_deref()
+                        == Some(web_origin)
+                })
+            }),
     }
 }
 
@@ -261,9 +282,51 @@ fn canonical_domain(value: &str) -> Result<String, ProviderError> {
     canonical_url_host(parsed.as_str()).ok_or(ProviderError::InvalidTarget)
 }
 
+fn canonical_browser_origin(value: &str, origin_only: bool) -> Option<String> {
+    let parsed = Url::parse(value).ok()?;
+    if parsed.cannot_be_a_base()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || (origin_only
+            && (parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some()))
+    {
+        return None;
+    }
+    let scheme = parsed.scheme();
+    let host = parsed.host()?;
+    if scheme != "https" && !(scheme == "http" && is_loopback_host(&host)) {
+        return None;
+    }
+    let host_text = match host {
+        Host::Domain(domain) => domain.trim_end_matches('.').to_ascii_lowercase(),
+        Host::Ipv4(address) => address.to_string(),
+        Host::Ipv6(address) => format!("[{address}]"),
+    };
+    let port = parsed.port_or_known_default()?;
+    let default_port = if scheme == "https" { 443 } else { 80 };
+    if port == default_port {
+        Some(format!("{scheme}://{host_text}"))
+    } else {
+        Some(format!("{scheme}://{host_text}:{port}"))
+    }
+}
+
+fn is_loopback_host(host: &Host<&str>) -> bool {
+    match host {
+        Host::Domain(domain) => domain
+            .trim_end_matches('.')
+            .eq_ignore_ascii_case("localhost"),
+        Host::Ipv4(address) => *address == std::net::Ipv4Addr::LOCALHOST,
+        Host::Ipv6(address) => address.is_loopback(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CredentialTarget, ProviderError, canonical_url_host, password_identity};
+    use super::{
+        CredentialTarget, ProviderError, canonical_browser_origin, canonical_url_host,
+        password_identity,
+    };
     use vault_core::{EntryId, EntrySummary, SummaryText};
 
     #[test]
@@ -303,6 +366,30 @@ mod tests {
             assert!(CredentialTarget::web_domain(value).is_err());
         }
         assert!(CredentialTarget::ios_url("not a URL").is_err());
+    }
+
+    #[test]
+    fn browser_origin_is_exact_secure_and_normalized() {
+        let https = CredentialTarget::browser_origin("https://EXAMPLE.com:443")
+            .unwrap_or_else(|_| panic!("HTTPS origin must be accepted"));
+        assert_eq!(https.display(), "https://example.com");
+        assert_eq!(
+            canonical_browser_origin("https://[::1]:8443/login", false).as_deref(),
+            Some("https://[::1]:8443")
+        );
+        assert!(CredentialTarget::browser_origin("http://example.com").is_err());
+        assert!(CredentialTarget::browser_origin("http://localhost:8080").is_ok());
+        assert!(CredentialTarget::browser_origin("http://127.0.0.1").is_ok());
+        assert!(CredentialTarget::browser_origin("http://[::1]").is_ok());
+        assert!(CredentialTarget::browser_origin("http://127.0.0.2").is_err());
+        for malformed in [
+            "https://user@example.com",
+            "https://example.com/path",
+            "data:text/plain,opaque",
+            "not an origin",
+        ] {
+            assert!(CredentialTarget::browser_origin(malformed).is_err());
+        }
     }
 
     #[test]

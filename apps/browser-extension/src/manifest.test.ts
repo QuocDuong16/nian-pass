@@ -1,4 +1,5 @@
 import { generateManifest } from "./manifest";
+import { createHash } from "node:crypto";
 
 describe("Manifest V3 generation", () => {
   test("generates a Chromium service worker manifest", () => {
@@ -6,12 +7,23 @@ describe("Manifest V3 generation", () => {
     expect(manifest).toMatchObject({
       manifest_version: 3,
       version: "0.1.0",
-      permissions: ["activeTab", "scripting"],
+      permissions: ["activeTab", "scripting", "nativeMessaging"],
       optional_host_permissions: ["http://*/*", "https://*/*"],
       background: { service_worker: "background.js" },
     });
     expect(manifest).not.toHaveProperty("browser_specific_settings");
-    expect(JSON.stringify(manifest)).not.toContain("nativeMessaging");
+    expect(manifest.key).toBeDefined();
+    const digest = createHash("sha256")
+      .update(Buffer.from(manifest.key ?? "", "base64"))
+      .digest()
+      .subarray(0, 16)
+      .toString("hex");
+    const developmentId = Array.from(digest)
+      .map((character) =>
+        String.fromCharCode("a".charCodeAt(0) + Number.parseInt(character, 16)),
+      )
+      .join("");
+    expect(developmentId).toBe("hikglhjadglkpicocjdjipeifnemoplg");
   });
 
   test("generates a Firefox event background with a neutral ID", () => {

@@ -115,3 +115,28 @@ fn android_app_matching_reuses_the_same_final_revalidation_core() {
         Err(ProviderError::CredentialUnavailable)
     ));
 }
+
+#[test]
+fn browser_origin_matching_includes_scheme_host_and_effective_port() {
+    let mut document = document();
+    let entry_id = add_web_entry(&mut document);
+    let exact = CredentialTarget::browser_origin("https://login.example.com:443")
+        .unwrap_or_else(|_| panic!("browser origin must be valid"));
+    assert!(
+        candidates(&document, &exact)
+            .unwrap_or_else(|_| panic!("browser candidates must succeed"))
+            .iter()
+            .any(|candidate| candidate.entry_id() == entry_id.as_str())
+    );
+    for origin in [
+        "https://example.com",
+        "https://sub.login.example.com",
+        "https://login.example.com:8443",
+        "http://login.example.com",
+    ] {
+        let target = CredentialTarget::browser_origin(origin);
+        assert!(target.as_ref().map_or(true, |target| {
+            credential(&document, entry_id.as_str(), target).is_err()
+        }));
+    }
+}

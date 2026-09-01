@@ -3,10 +3,13 @@ import { PageStatusStore } from "./page-status";
 import {
   PROTOCOL_VERSION,
   parsePageStateChanged,
-  parsePopupMessage,
   type PageStateChanged,
-  type SiteStatus,
 } from "./protocol";
+import {
+  parsePopupMessage,
+  type PopupToBackground,
+  type SiteStatus,
+} from "./popup-protocol";
 import { reconcileContentScript } from "./permissions";
 import { siteIdentityFromUrl } from "./site-policy";
 
@@ -17,10 +20,29 @@ export interface MessageSender {
   tab?: { id?: number; url?: string };
 }
 
+export interface PopupIntegration {
+  handlePopup(
+    message: Exclude<PopupToBackground, { type: "getSiteStatus" }>,
+  ): Promise<unknown>;
+}
+
+export interface ActiveCredentialContext {
+  tabId: number;
+  origin: string;
+  permissionPattern: string;
+  documentNonce: string;
+  fillTarget: NonNullable<PageStateChanged["fillTarget"]>;
+}
+
 export class BackgroundAuthority {
   readonly #status = new PageStatusStore();
+  #integration: PopupIntegration | null = null;
 
   constructor(private readonly api: BackgroundBrowserApi) {}
+
+  setIntegration(integration: PopupIntegration): void {
+    this.#integration = integration;
+  }
 
   async handleMessage(
     message: unknown,
@@ -30,7 +52,8 @@ export class BackgroundAuthority {
     if (pageState !== null) return this.#acceptPageState(pageState, sender);
     const popupMessage = parsePopupMessage(message);
     if (popupMessage === null || !this.#isPopup(sender)) return undefined;
-    return this.#siteStatus();
+    if (popupMessage.type === "getSiteStatus") return this.#siteStatus();
+    return this.#integration?.handlePopup(popupMessage);
   }
 
   clearTab(tabId: number): void {
@@ -43,6 +66,21 @@ export class BackgroundAuthority {
 
   async reconcile(): Promise<void> {
     await reconcileContentScript(this.api);
+  }
+
+  async activeCredentialContext(): Promise<ActiveCredentialContext | null> {
+    const site = await this.#activeSite();
+    if (site === null || !(await this.api.containsOrigin(site.pattern)))
+      return null;
+    const page = this.#status.current(site.tabId, site.origin);
+    if (page?.fillTarget === null || page === null) return null;
+    return {
+      tabId: site.tabId,
+      origin: site.origin,
+      permissionPattern: site.pattern,
+      documentNonce: page.documentNonce,
+      fillTarget: page.fillTarget,
+    };
   }
 
   async #acceptPageState(

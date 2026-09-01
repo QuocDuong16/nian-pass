@@ -4,6 +4,10 @@ use std::sync::{Arc, Mutex};
 use vault_core::{EntryId, SecretString};
 use vault_session::{SessionError, VaultSession};
 
+use credential_provider_core::ProviderError;
+
+mod browser;
+
 use crate::{
     clipboard::{
         ClipboardClearStatus, ClipboardCopy, ClipboardFailure, ClipboardPort,
@@ -40,6 +44,7 @@ pub enum DesktopError {
 pub struct DesktopVaultService {
     selected_path: Option<PathBuf>,
     session: Option<VaultSession>,
+    browser_session_id: Option<String>,
 }
 
 impl DesktopVaultService {
@@ -48,6 +53,7 @@ impl DesktopVaultService {
         Self {
             selected_path: None,
             session: None,
+            browser_session_id: None,
         }
     }
 
@@ -75,7 +81,9 @@ impl DesktopVaultService {
             .projection()
             .map(|vault| VaultSnapshotDto::from_vault(&vault, session.is_dirty()))
             .map_err(map_open_error)?;
+        let browser_session_id = random_process_token()?;
         self.session = Some(session);
+        self.browser_session_id = Some(browser_session_id);
         Ok(snapshot)
     }
 
@@ -106,7 +114,9 @@ impl DesktopVaultService {
             .projection()
             .map(|vault| VaultSnapshotDto::from_vault(&vault, candidate.is_dirty()))
             .map_err(|_| DesktopError::ReloadFailed)?;
+        let browser_session_id = random_process_token()?;
         self.session = Some(candidate);
+        self.browser_session_id = Some(browser_session_id);
         Ok(snapshot)
     }
 
@@ -199,6 +209,7 @@ impl DesktopVaultService {
 
     pub fn discard_and_lock(&mut self) -> Result<(), DesktopError> {
         let session = self.session.take().ok_or(DesktopError::Locked)?;
+        self.browser_session_id = None;
         session.lock();
         self.selected_path = None;
         Ok(())
@@ -260,6 +271,20 @@ impl AppState {
 
     pub fn discard_changes_and_lock(&self) -> Result<ClipboardClearStatus, DesktopError> {
         self.lock_with(DesktopVaultService::discard_and_lock)
+    }
+
+    pub fn browser_credential(
+        &self,
+        expected_session_id: &str,
+        entry_id: &str,
+        target: &credential_provider_core::CredentialTarget,
+    ) -> Result<credential_provider_core::Credential, DesktopError> {
+        let _operation = self
+            .secret_operation_gate
+            .lock()
+            .map_err(|_| DesktopError::Internal)?;
+        let service = self.service.lock().map_err(|_| DesktopError::Internal)?;
+        service.browser_credential(expected_session_id, entry_id, target)
     }
 
     fn lock_with(
@@ -347,6 +372,26 @@ fn map_clipboard_error(_error: ClipboardFailure) -> DesktopError {
     DesktopError::ClipboardFailed
 }
 
+fn map_provider_error(error: ProviderError) -> DesktopError {
+    match error {
+        ProviderError::InvalidTarget => DesktopError::InvalidRequest,
+        ProviderError::CredentialUnavailable => DesktopError::SecretUnavailable,
+        ProviderError::Internal => DesktopError::Internal,
+    }
+}
+
+fn random_process_token() -> Result<String, DesktopError> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).map_err(|_| DesktopError::Internal)?;
+    let mut token = String::with_capacity(32);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in bytes {
+        token.push(char::from(HEX[usize::from(byte >> 4)]));
+        token.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    Ok(token)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -361,6 +406,7 @@ mod tests {
         time::Duration,
     };
 
+    use credential_provider_core::CredentialTarget;
     use serde_json::{Map, Value, to_value};
     use vault_core::{EntryId, NewEntry, SecretString};
     use vault_session::VaultSession;
@@ -609,6 +655,177 @@ mod tests {
         let snapshot = service.snapshot().expect("unlocked snapshot should exist");
         assert!(!snapshot.groups.is_empty());
         assert!(!snapshot.entries.is_empty());
+    }
+
+    #[test]
+    fn browser_vault_session_identity_changes_on_reload_lock_and_new_unlock() {
+        let mut service = selected_service();
+        unlock(&mut service);
+        let first = service
+            .browser_session_id
+            .clone()
+            .unwrap_or_else(|| panic!("unlock must create browser session identity"));
+        assert_eq!(first.len(), 32);
+
+        service
+            .reload(SecretString::new(FIXTURE_PASSWORD.to_owned()))
+            .unwrap_or_else(|error| panic!("reload must succeed: {error:?}"));
+        let second = service
+            .browser_session_id
+            .clone()
+            .unwrap_or_else(|| panic!("reload must replace browser session identity"));
+        assert_ne!(second, first);
+
+        service
+            .lock()
+            .unwrap_or_else(|error| panic!("lock must succeed: {error:?}"));
+        assert!(service.browser_session_id.is_none());
+        let target = CredentialTarget::browser_origin("https://example.com")
+            .unwrap_or_else(|_| panic!("test origin must be valid"));
+        assert!(matches!(
+            service.browser_credential(&second, "stale-entry", &target),
+            Err(DesktopError::Locked)
+        ));
+
+        service
+            .select_path(fixture_path())
+            .unwrap_or_else(|error| panic!("fixture must be selectable: {error:?}"));
+        unlock(&mut service);
+        let third = service
+            .browser_session_id
+            .clone()
+            .unwrap_or_else(|| panic!("new unlock must create identity"));
+        assert_ne!(third, second);
+        assert!(matches!(
+            service.browser_credential(&second, "stale-entry", &target),
+            Err(DesktopError::SecretUnavailable)
+        ));
+    }
+
+    #[test]
+    fn browser_final_read_revalidates_session_entry_and_exact_origin() {
+        let mut service = selected_service();
+        unlock(&mut service);
+        let target = CredentialTarget::browser_origin("https://login.example.test")
+            .unwrap_or_else(|_| panic!("test origin must be valid"));
+        let session_id = service
+            .browser_session_id
+            .clone()
+            .unwrap_or_else(|| panic!("session identity missing"));
+        let entry_id = {
+            let session = service
+                .session
+                .as_mut()
+                .unwrap_or_else(|| panic!("session must be unlocked"));
+            let root_id = session
+                .projection()
+                .unwrap_or_else(|error| panic!("fixture must project: {error}"))
+                .root()
+                .id()
+                .clone();
+            session
+                .document_mut()
+                .create_entry(
+                    &root_id,
+                    NewEntry {
+                        title: "Browser synthetic",
+                        username: "browser-user",
+                        url: "https://login.example.test/account",
+                        password: Some(&SecretString::new("browser-password".to_owned())),
+                    },
+                )
+                .unwrap_or_else(|error| panic!("entry must be created: {error}"))
+        };
+        let listed = service
+            .browser_candidates(&target)
+            .unwrap_or_else(|error| panic!("candidates must succeed: {error:?}"));
+        assert!(
+            listed
+                .1
+                .iter()
+                .any(|candidate| candidate.entry_id() == entry_id.as_str())
+        );
+        let credential = service
+            .browser_credential(&session_id, entry_id.as_str(), &target)
+            .unwrap_or_else(|error| panic!("final read must succeed: {error:?}"));
+        assert_eq!(credential.password().expose_secret(), "browser-password");
+        assert!(matches!(
+            service.browser_credential(&"f".repeat(32), entry_id.as_str(), &target),
+            Err(DesktopError::SecretUnavailable)
+        ));
+        assert!(matches!(
+            service.browser_credential(&session_id, "missing-entry", &target),
+            Err(DesktopError::SecretUnavailable)
+        ));
+
+        service
+            .session
+            .as_mut()
+            .unwrap_or_else(|| panic!("session must remain unlocked"))
+            .document_mut()
+            .set_entry_url(&entry_id, "https://changed.example.test")
+            .unwrap_or_else(|error| panic!("URL mutation must succeed: {error}"));
+        assert!(matches!(
+            service.browser_credential(&session_id, entry_id.as_str(), &target),
+            Err(DesktopError::SecretUnavailable)
+        ));
+        service
+            .session
+            .as_mut()
+            .unwrap_or_else(|| panic!("session must remain unlocked"))
+            .document_mut()
+            .permanently_delete_entry(&entry_id)
+            .unwrap_or_else(|error| panic!("entry deletion must succeed: {error}"));
+        assert!(matches!(
+            service.browser_credential(&session_id, entry_id.as_str(), &target),
+            Err(DesktopError::SecretUnavailable)
+        ));
+    }
+
+    #[test]
+    fn app_state_browser_read_uses_the_shared_secret_operation_gate() {
+        let state = AppState::new(Arc::new(TestClipboard::default()));
+        let target = CredentialTarget::browser_origin("https://login.example.test")
+            .unwrap_or_else(|_| panic!("test origin must be valid"));
+        let (session_id, entry_id) = {
+            let mut service = state
+                .service
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *service = selected_service();
+            unlock(&mut service);
+            let session_id = service
+                .browser_session_id
+                .clone()
+                .unwrap_or_else(|| panic!("browser session identity missing"));
+            let session = service
+                .session
+                .as_mut()
+                .unwrap_or_else(|| panic!("session must be unlocked"));
+            let root_id = session
+                .projection()
+                .unwrap_or_else(|error| panic!("fixture must project: {error}"))
+                .root()
+                .id()
+                .clone();
+            let entry_id = session
+                .document_mut()
+                .create_entry(
+                    &root_id,
+                    NewEntry {
+                        title: "Browser gate",
+                        username: "gate-user",
+                        url: "https://login.example.test/account",
+                        password: Some(&SecretString::new("gate-password".to_owned())),
+                    },
+                )
+                .unwrap_or_else(|error| panic!("entry must be created: {error}"));
+            (session_id, entry_id)
+        };
+        let credential = state
+            .browser_credential(&session_id, entry_id.as_str(), &target)
+            .unwrap_or_else(|error| panic!("gated browser read must succeed: {error:?}"));
+        assert_eq!(credential.password().expose_secret(), "gate-password");
     }
 
     #[test]

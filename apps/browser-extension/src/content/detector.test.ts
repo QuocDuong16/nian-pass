@@ -1,4 +1,4 @@
-import { detectLoginForms } from "./detector";
+import { detectFillTarget, detectLoginForms } from "./detector";
 
 function setBody(markup: string): void {
   document.body.textContent = "";
@@ -59,5 +59,21 @@ describe("structural login detector", () => {
     expect(JSON.stringify(detectLoginForms(document))).not.toContain(
       "SECRET_MUST_NOT_BE_READ",
     );
+  });
+
+  test("offers only one unambiguous password and zero-or-one username target", () => {
+    setBody('<form><input type="email"><input type="password"></form>');
+    const target = detectFillTarget(document);
+    expect(target?.password.type).toBe("password");
+    expect(target?.username?.type).toBe("email");
+
+    setBody(
+      '<form><input type="text"><input type="email"><input type="password"></form>',
+    );
+    expect(detectFillTarget(document)).toBeNull();
+    setBody(
+      '<form><input type="text"><input type="password"><input type="password"></form>',
+    );
+    expect(detectFillTarget(document)).toBeNull();
   });
 });

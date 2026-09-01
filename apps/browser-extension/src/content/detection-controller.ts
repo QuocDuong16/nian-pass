@@ -1,5 +1,6 @@
 import {
   detectLoginForms,
+  detectFillTarget,
   detectionSignature,
   type DetectionResult,
 } from "./detector";
@@ -18,6 +19,7 @@ export class DetectionController {
     private readonly document: Document,
     private readonly documentNonce: string,
     private readonly report: DetectionReporter,
+    private readonly handleFor: (input: HTMLInputElement) => string,
     private readonly debounceMilliseconds = 40,
   ) {
     const view = document.defaultView;
@@ -62,18 +64,33 @@ export class DetectionController {
 
   #detectAndReport(): void {
     const result = detectLoginForms(this.document);
-    const signature = detectionSignature(result);
+    const fillInputs = detectFillTarget(this.document);
+    const fillTarget =
+      fillInputs === null
+        ? null
+        : {
+            usernameFieldHandle:
+              fillInputs.username === null
+                ? null
+                : this.handleFor(fillInputs.username),
+            passwordFieldHandle: this.handleFor(fillInputs.password),
+          };
+    const signature = `${detectionSignature(result)}:${fillTarget?.usernameFieldHandle ?? "none"}:${fillTarget?.passwordFieldHandle ?? "none"}`;
     if (signature === this.#lastSignature) return;
     this.#lastSignature = signature;
-    const message = this.#message(result);
+    const message = this.#message(result, fillTarget);
     void Promise.resolve(this.report(message)).catch(() => undefined);
   }
 
-  #message(result: DetectionResult): PageStateChanged {
+  #message(
+    result: DetectionResult,
+    fillTarget: PageStateChanged["fillTarget"],
+  ): PageStateChanged {
     return {
       protocolVersion: PROTOCOL_VERSION,
       type: "pageStateChanged",
       documentNonce: this.documentNonce,
+      fillTarget,
       ...result,
     };
   }

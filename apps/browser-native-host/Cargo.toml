@@ -1,0 +1,26 @@
+[package]
+name = "nian-pass-browser-host"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Native Messaging proxy between browsers and the running Nian Pass desktop"
+
+[[bin]]
+name = "nian-pass-browser-host"
+path = "src/main.rs"
+
+[dependencies]
+browser-native-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winreg = "=0.55.0"
+
+[dev-dependencies]
+interprocess.workspace = true
+
+[lints]
+workspace = true

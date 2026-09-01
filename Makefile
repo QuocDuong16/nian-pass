@@ -19,7 +19,8 @@ BROWSER_LCOV := apps/browser-extension/coverage/lcov.info
 DIFF_BASE_ARGS = $(if $(strip $(COVERAGE_DIFF_BASE)),--base "$(COVERAGE_DIFF_BASE)" --require-base,)
 
 CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync \
-	-p credential-provider-core -p ios-credential-ffi
+	-p credential-provider-core -p ios-credential-ffi -p browser-native-protocol \
+	-p nian-pass-browser-host
 
 .PHONY: tools-install tools-check fixture-check \
 	rust-format rust-lint rust-test rust-doc rust-deps-check rust-security-check \
@@ -32,6 +33,7 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	browser-install browser-format-check browser-lint browser-typecheck browser-test \
 	browser-test-coverage browser-coverage-check browser-coverage-diff browser-dead-code \
 	browser-build browser-artifact-check browser-audit browser-source-check browser-extension-check \
+	browser-native-protocol-check browser-native-host-check browser-integration-check \
 	architecture-check security-check docs-check scripts-install scripts-check mobile-source-check \
 	mobile-tools-check mobile-android-check mobile-ios-tools-check mobile-ios-source-check mobile-ios-check \
 	compat-check compat-check-required policy-check quick-check quality-check
@@ -265,9 +267,35 @@ browser-extension-check: browser-install
 	$(MAKE) browser-artifact-check
 	$(MAKE) browser-audit
 
+browser-native-protocol-check:
+	@echo "Check the shared browser/native protocol contract and framing..."
+	cargo test --locked -p browser-native-protocol
+	cargo clippy --locked -p browser-native-protocol --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p browser-native-protocol --all-features --no-deps
+	pnpm --filter @nian-pass/browser-extension exec vitest run src/native-contract.test.ts src/protocol.test.ts
+
+browser-native-host-check:
+	@echo "Check the real Native Messaging host and local IPC proxy..."
+	node scripts/check_browser_native_host.mjs
+	cargo test --locked -p nian-pass-browser-host
+	cargo clippy --locked -p nian-pass-browser-host --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p nian-pass-browser-host --all-features --no-deps
+
+browser-integration-check: browser-install
+	$(MAKE) browser-source-check
+	$(MAKE) browser-native-protocol-check
+	$(MAKE) browser-native-host-check
+	pnpm --filter @nian-pass/browser-extension exec vitest run \
+		src/background-native.test.ts src/browser-integration.test.ts src/popup.test.ts
+	cargo test --locked -p nian-pass-desktop browser_bridge
+	cargo test --locked -p nian-pass-desktop browser_vault_session_identity
+	cargo test --locked -p nian-pass-desktop browser_final_read
+
 windows-cross-check:
-	@echo "Cross-check persistence and sync crates for Windows..."
-	cargo check --locked --all-targets --target x86_64-pc-windows-gnu -p vault-session -p vault-sync
+	@echo "Cross-check persistence, browser host, IPC, installer, and desktop for Windows..."
+	cargo check --locked --all-targets --target x86_64-pc-windows-gnu \
+		-p vault-session -p vault-sync -p browser-native-protocol \
+		-p nian-pass-browser-host -p nian-pass-desktop
 
 mobile-source-check:
 	@echo "Check deterministic mobile foundation sources..."
@@ -357,6 +385,7 @@ quick-check:
 	$(MAKE) desktop-test
 	$(MAKE) browser-source-check
 	$(MAKE) browser-extension-check
+	$(MAKE) browser-integration-check
 	$(MAKE) security-check
 	$(MAKE) docs-check
 
@@ -370,6 +399,7 @@ quality-check:
 	$(MAKE) desktop-check
 	$(MAKE) browser-source-check
 	$(MAKE) browser-extension-check
+	$(MAKE) browser-integration-check
 	$(MAKE) security-check
 	$(MAKE) docs-check
 	$(MAKE) compat-check

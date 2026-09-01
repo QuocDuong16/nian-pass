@@ -1,4 +1,10 @@
 export const PROTOCOL_VERSION = 1 as const;
+export const MAX_CREDENTIAL_FIELD_LENGTH = 16_384;
+
+interface FillTarget {
+  usernameFieldHandle: string | null;
+  passwordFieldHandle: string;
+}
 
 export interface PageStateChanged {
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -8,14 +14,8 @@ export interface PageStateChanged {
   passwordFieldCount: number;
   usernameCandidateCount: number;
   formCount: number;
+  fillTarget: FillTarget | null;
 }
-
-interface GetSiteStatus {
-  protocolVersion: typeof PROTOCOL_VERSION;
-  type: "getSiteStatus";
-}
-
-export type PopupToBackground = GetSiteStatus;
 
 export interface DocumentHello {
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -33,24 +33,15 @@ export interface ApplyCredential {
   password: string;
 }
 
-export interface SiteStatus {
-  protocolVersion: typeof PROTOCOL_VERSION;
-  type: "siteStatus";
-  site: { host: string; origin: string; permissionPattern: string } | null;
-  permission: "enabled" | "disabled" | "unsupported";
-  detection: "detected" | "notDetected" | "waiting" | "unavailable";
-}
+export type RecordValue = Record<string, unknown>;
 
-const MAX_CREDENTIAL_FIELD_LENGTH = 65_536;
-
-type RecordValue = Record<string, unknown>;
-
-function recordWithKeys(
+export function recordWithKeys(
   value: unknown,
   keys: readonly string[],
 ): value is RecordValue {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
+  }
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return (
@@ -59,16 +50,26 @@ function recordWithKeys(
   );
 }
 
-function hasProtocol(value: RecordValue): boolean {
+export function hasProtocol(value: RecordValue): boolean {
   return value["protocolVersion"] === PROTOCOL_VERSION;
+}
+
+export function isOpaqueToken(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
 }
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isOpaqueToken(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+function isFillTarget(value: unknown): value is FillTarget | null {
+  if (value === null) return true;
+  return (
+    recordWithKeys(value, ["usernameFieldHandle", "passwordFieldHandle"]) &&
+    (value["usernameFieldHandle"] === null ||
+      isOpaqueToken(value["usernameFieldHandle"])) &&
+    isOpaqueToken(value["passwordFieldHandle"])
+  );
 }
 
 export function parsePageStateChanged(value: unknown): PageStateChanged | null {
@@ -80,36 +81,22 @@ export function parsePageStateChanged(value: unknown): PageStateChanged | null {
     "passwordFieldCount",
     "usernameCandidateCount",
     "formCount",
+    "fillTarget",
   ];
   if (
     !recordWithKeys(value, keys) ||
     !hasProtocol(value) ||
-    value["type"] !== "pageStateChanged"
-  ) {
-    return null;
-  }
-  if (
+    value["type"] !== "pageStateChanged" ||
     !isOpaqueToken(value["documentNonce"]) ||
     typeof value["hasLoginForm"] !== "boolean" ||
     !isCount(value["passwordFieldCount"]) ||
     !isCount(value["usernameCandidateCount"]) ||
-    !isCount(value["formCount"])
+    !isCount(value["formCount"]) ||
+    !isFillTarget(value["fillTarget"])
   ) {
     return null;
   }
   return value as unknown as PageStateChanged;
-}
-
-export function parsePopupMessage(value: unknown): PopupToBackground | null {
-  if (
-    !recordWithKeys(value, ["protocolVersion", "type"]) ||
-    !hasProtocol(value)
-  )
-    return null;
-  if (value["type"] === "getSiteStatus") {
-    return value as unknown as PopupToBackground;
-  }
-  return null;
 }
 
 export function parseApplyCredential(value: unknown): ApplyCredential | null {
@@ -122,15 +109,10 @@ export function parseApplyCredential(value: unknown): ApplyCredential | null {
     "username",
     "password",
   ];
-  if (
-    !recordWithKeys(value, keys) ||
-    !hasProtocol(value) ||
-    value["type"] !== "applyCredential"
-  ) {
-    return null;
-  }
+  if (!recordWithKeys(value, keys) || !hasProtocol(value)) return null;
   const usernameHandle = value["usernameFieldHandle"];
   if (
+    value["type"] !== "applyCredential" ||
     !isOpaqueToken(value["documentNonce"]) ||
     !(usernameHandle === null || isOpaqueToken(usernameHandle)) ||
     !isOpaqueToken(value["passwordFieldHandle"]) ||
@@ -144,45 +126,14 @@ export function parseApplyCredential(value: unknown): ApplyCredential | null {
   return value as unknown as ApplyCredential;
 }
 
-export function parseSiteStatus(value: unknown): SiteStatus | null {
-  const keys = ["protocolVersion", "type", "site", "permission", "detection"];
-  if (
-    !recordWithKeys(value, keys) ||
-    !hasProtocol(value) ||
-    value["type"] !== "siteStatus"
-  )
-    return null;
-  const site = value["site"];
-  const validSite =
-    site === null ||
-    (recordWithKeys(site, ["host", "origin", "permissionPattern"]) &&
-      typeof site["host"] === "string" &&
-      typeof site["origin"] === "string" &&
-      typeof site["permissionPattern"] === "string" &&
-      /^(?:http|https):\/\/(?:\[[0-9a-fA-F:]+\]|[^/*]+)\/\*$/.test(
-        site["permissionPattern"],
-      ));
-  const validPermission =
-    value["permission"] === "enabled" ||
-    value["permission"] === "disabled" ||
-    value["permission"] === "unsupported";
-  const validDetection =
-    value["detection"] === "detected" ||
-    value["detection"] === "notDetected" ||
-    value["detection"] === "waiting" ||
-    value["detection"] === "unavailable";
-  return validSite && validPermission && validDetection
-    ? (value as unknown as SiteStatus)
-    : null;
-}
-
 export function parseDocumentHello(value: unknown): DocumentHello | null {
   if (
     !recordWithKeys(value, ["protocolVersion", "type", "documentNonce"]) ||
     !hasProtocol(value) ||
     value["type"] !== "documentHello" ||
     !isOpaqueToken(value["documentNonce"])
-  )
+  ) {
     return null;
+  }
   return value as unknown as DocumentHello;
 }

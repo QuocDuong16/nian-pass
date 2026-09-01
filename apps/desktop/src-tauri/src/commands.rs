@@ -7,6 +7,7 @@ use crate::dto::{EntryDetailDto, SelectedVaultDto, VaultSnapshotDto};
 use crate::platform::RuntimeInfoDto;
 
 use crate::{
+    browser_bridge::BrowserBridgeState,
     command_support::{copy_entry, reveal_entry_value, with_service},
     dto::{ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, LockResultDto},
     errors::DesktopErrorDto,
@@ -16,6 +17,19 @@ use crate::{
     },
     state::{AppState, DesktopError},
 };
+
+#[tauri::command]
+pub fn resolve_browser_connection(
+    request_id: String,
+    allow: bool,
+    state: State<'_, BrowserBridgeState>,
+) -> Result<(), DesktopErrorDto> {
+    if state.resolve(&request_id, allow) {
+        Ok(())
+    } else {
+        Err(DesktopError::InvalidRequest.into())
+    }
+}
 
 #[tauri::command]
 pub fn runtime_info() -> RuntimeInfoDto {
@@ -325,11 +339,12 @@ mod tests {
         close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
         delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock,
         entry_detail, lock_vault, move_entry, move_group, reload_vault, rename_group,
-        reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
-        reveal_entry_url, reveal_entry_username, runtime_info, save_vault, set_entry_custom_field,
-        update_entry,
+        resolve_browser_connection, reveal_entry_custom_field, reveal_entry_notes,
+        reveal_entry_password, reveal_entry_title, reveal_entry_url, reveal_entry_username,
+        runtime_info, save_vault, set_entry_custom_field, update_entry,
     };
     use crate::{
+        browser_bridge::BrowserBridgeState,
         clipboard::ClipboardPort,
         dto::ClosePolicyDto,
         errors::DesktopErrorDto,
@@ -346,6 +361,17 @@ mod tests {
     fn runtime_info_command_exposes_only_the_host_platform() {
         let encoded = serde_json::to_value(runtime_info()).expect("runtime info should serialize");
         assert_eq!(encoded, json!({ "platform": "desktop" }));
+    }
+
+    #[test]
+    fn browser_connection_resolution_is_narrow_and_single_use() {
+        let request_id = "00112233445566778899aabbccddeeff";
+        let (bridge, receiver) = BrowserBridgeState::with_pending_request(request_id);
+        let app = mock_app();
+        app.manage(bridge);
+        assert!(resolve_browser_connection(request_id.to_owned(), true, app.state()).is_ok());
+        assert_eq!(receiver.try_recv(), Ok(true));
+        assert!(resolve_browser_connection(request_id.to_owned(), true, app.state()).is_err());
     }
 
     struct TestDir(PathBuf);

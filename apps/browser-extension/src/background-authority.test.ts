@@ -23,6 +23,12 @@ const pageState = (nonce: string, hasLoginForm = true) => ({
   passwordFieldCount: hasLoginForm ? 1 : 0,
   usernameCandidateCount: hasLoginForm ? 1 : 0,
   formCount: hasLoginForm ? 1 : 0,
+  fillTarget: hasLoginForm
+    ? {
+        usernameFieldHandle: "c".repeat(32),
+        passwordFieldHandle: "d".repeat(32),
+      }
+    : null,
 });
 
 describe("background authority", () => {
