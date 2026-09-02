@@ -73,6 +73,17 @@ KDBX or owns `VaultSession`. Current `DesktopVaultService`, random session
 identity, current `EntryId`, and Rust exact-origin matching remain the final
 secret authority. Connection approval does not imply an unlocked vault.
 
+Browser-bridge startup denial of service includes an unsafe runtime directory,
+a live endpoint conflict, and non-socket garbage at the expected endpoint.
+These conditions never weaken IPC checks or authorize unlinking a live owner:
+the bridge becomes unavailable for that process while the desktop vault remains
+usable. Browser integration can recover on the next explicit desktop start.
+Native-host registration also treats manifest/registry divergence, partial
+install or uninstall, and rollback failure as threats. Bounded prior-state
+capture and exact two-resource rollback restore the Nian Pass-owned state; an
+unverified rollback fails with transaction uncertainty and never reports
+success or erases unrelated HKCU values.
+
 Residual threats remain: M6.5 cannot protect against a fully compromised OS,
 root/Administrator, sufficiently privileged process-memory inspection, a
 malicious browser itself, native-host registration changed with equivalent

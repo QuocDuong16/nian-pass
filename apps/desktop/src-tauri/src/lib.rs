@@ -50,21 +50,27 @@ fn with_desktop_plugins<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
 
 #[cfg(desktop)]
 fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
-    install_app_state(app)?;
+    install_app_state(app);
     Ok(())
 }
 
 #[cfg(desktop)]
-fn install_app_state<R: Runtime>(
+fn install_app_state<R: Runtime>(app: &mut tauri::App<R>) {
+    #[cfg(not(test))]
+    install_app_state_with_bridge(app, BrowserBridgeState::start);
+    #[cfg(test)]
+    install_app_state_with_bridge(app, |_, _| BrowserBridgeState::unavailable());
+}
+
+#[cfg(desktop)]
+fn install_app_state_with_bridge<R: Runtime>(
     app: &mut tauri::App<R>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    create_bridge: impl FnOnce(tauri::AppHandle<R>, AppState) -> BrowserBridgeState,
+) {
     let state = AppState::new(Arc::new(TauriClipboard::new(app.handle().clone())));
     app.manage(state.clone());
-    #[cfg(not(test))]
-    app.manage(BrowserBridgeState::start(app.handle().clone(), state)?);
-    #[cfg(test)]
-    app.manage(BrowserBridgeState::without_listener());
-    Ok(())
+    let bridge = create_bridge(app.handle().clone(), state);
+    app.manage(bridge);
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -212,15 +218,49 @@ fn run_mobile() {
 
 #[cfg(test)]
 mod tests {
-    use tauri::test::{mock_app, mock_builder};
+    use std::path::Path;
 
-    use super::{setup_app, with_desktop_plugins};
+    use tauri::{
+        Manager as _,
+        test::{mock_app, mock_builder},
+    };
+    use vault_core::SecretString;
+
+    use super::{
+        AppState, BrowserBridgeState, install_app_state_with_bridge, setup_app,
+        with_desktop_plugins,
+    };
 
     #[test]
     fn desktop_plugins_and_state_compose_without_launching_a_window() {
         let _builder = with_desktop_plugins(mock_builder());
         let mut app = mock_app();
         assert!(setup_app(&mut app).is_ok());
+    }
+
+    #[test]
+    fn unavailable_browser_bridge_does_not_block_normal_vault_use() {
+        let mut app = mock_app();
+        install_app_state_with_bridge(&mut app, |_, _| BrowserBridgeState::unavailable());
+        assert!(!app.state::<BrowserBridgeState>().is_available());
+
+        let state = app.state::<AppState>();
+        let mut service = state
+            .service
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx");
+        service
+            .select_path(fixture)
+            .unwrap_or_else(|error| panic!("fixture must remain selectable: {error:?}"));
+        service
+            .unlock(SecretString::new("demopass".to_owned()))
+            .unwrap_or_else(|error| panic!("fixture must remain unlockable: {error:?}"));
+        let snapshot = service
+            .snapshot()
+            .unwrap_or_else(|error| panic!("snapshot must remain available: {error:?}"));
+        assert!(!snapshot.entries.is_empty());
     }
 
     #[test]

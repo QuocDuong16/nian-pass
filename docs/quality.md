@@ -81,6 +81,17 @@ browser configuration or HKCU. `windows-cross-check` compiles the named-pipe,
 HKCU installer, native host, and desktop bridge paths, but is compile evidence
 only and does not claim Windows runtime validation.
 
+M6.5 remediation regressions inject bridge startup failure and prove desktop
+setup still installs ordinary vault state, unlock/snapshot remains usable, and
+resolution against an unavailable bridge fails generically. Unix tests retain
+live-endpoint ownership while a second bridge degrades to unavailable; existing
+unsafe-runtime, non-socket, and dead-stale-socket checks remain intact. Windows
+installer tests use in-memory registry operations and temporary files to inject
+candidate write, manifest placement/removal, registry set/delete, and rollback
+failures. They cover exact install/uninstall rollback, partial-state
+convergence, idempotent absence, bounded prior manifests, and preservation of
+unrelated registration data without touching real HKCU.
+
 These deterministic gates build `dist/chromium` and `dist/firefox` but do not
 require or launch Chrome, Chromium, Edge, Firefox, X11, Wayland, or any GUI.
 Manual unpacked/temporary-extension smoke uses only a synthetic loopback page

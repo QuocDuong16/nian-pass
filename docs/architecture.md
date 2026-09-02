@@ -73,6 +73,21 @@ approval request. No usable UI, denial, timeout, disconnect, or restart revokes
 that stream. The frontend sees only an opaque request ID; candidate or credential
 data never crosses a Tauri event or React state.
 
+The local browser bridge is optional to desktop availability.
+`BrowserBridgeState` always exists as either `Available` or `Unavailable`: an
+unsafe or missing runtime directory, a live/non-socket endpoint conflict, or a
+secure bind failure disables browser integration for that desktop process but
+does not abort Tauri setup or ordinary vault use. Existing ownership and mode
+checks remain fail-closed, a live endpoint is never unlinked or stolen, and
+M6.5 performs no hidden listener retry; recovery is an explicit desktop restart.
+
+On Windows, install and uninstall treat the browser-specific manifest and the
+exact HKCU `NativeMessagingHosts\\io.nianpass.browser` default value as one
+transaction. The installer captures the prior bounded manifest bytes, key
+existence, and default value before mutation. Any failure restores both prior
+states; rollback failure reports transaction uncertainty rather than success,
+and unrelated registry values are not deleted.
+
 Unlock and session-replacing reload generate a random process-local
 `vaultSessionId`; Lock invalidates it. Candidate enumeration is secret-free.
 Final retrieval takes the existing secret-operation gate, verifies the current

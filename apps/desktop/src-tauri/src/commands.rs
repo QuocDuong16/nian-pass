@@ -374,6 +374,20 @@ mod tests {
         assert!(resolve_browser_connection(request_id.to_owned(), true, app.state()).is_err());
     }
 
+    #[test]
+    fn unavailable_browser_bridge_rejects_resolution_without_panicking() {
+        let app = mock_app();
+        app.manage(BrowserBridgeState::unavailable());
+        assert!(
+            resolve_browser_connection(
+                "00112233445566778899aabbccddeeff".to_owned(),
+                true,
+                app.state()
+            )
+            .is_err()
+        );
+    }
+
     struct TestDir(PathBuf);
 
     impl TestDir {

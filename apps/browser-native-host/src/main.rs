@@ -1,4 +1,6 @@
 mod installer;
+#[cfg(any(windows, test))]
+mod installer_transaction;
 mod proxy;
 
 use std::{

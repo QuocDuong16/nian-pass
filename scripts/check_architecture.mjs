@@ -278,6 +278,29 @@ export function runChecks(root, budget) {
     }
   }
 
+  const desktopSetupSource = readFileSync(
+    resolve(root, "apps/desktop/src-tauri/src/lib.rs"),
+    "utf8",
+  );
+  if (desktopSetupSource.includes("BrowserBridgeState")) {
+    checkPattern(
+      violations,
+      root,
+      resolve(root, "apps/desktop/src-tauri/src/lib.rs"),
+      desktopSetupSource,
+      /BrowserBridgeState::start\s*\([^)]*\)\s*\?/g,
+      "optional browser bridge startup must not abort desktop setup",
+    );
+    if (
+      !/install_app_state_with_bridge/.test(desktopSetupSource) ||
+      !/app\.manage\(bridge\)/.test(desktopSetupSource)
+    ) {
+      violations.push(
+        "apps/desktop/src-tauri/src/lib.rs: browser bridge startup must be handled locally and its availability state must always be managed",
+      );
+    }
+  }
+
   return violations;
 }
 

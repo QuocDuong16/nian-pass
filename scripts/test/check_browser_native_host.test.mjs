@@ -30,3 +30,27 @@ test("ratchet rejects vault authority and stdout diagnostics", (t) => {
   assert.match(violations, /KDBX and vault-session dependencies are forbidden/);
   assert.match(violations, /stdout diagnostics/);
 });
+
+test("ratchet rejects bypassing the Windows cross-resource transaction", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-native-host-transaction-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  cpSync(join(repositoryRoot, "apps"), join(root, "apps"), { recursive: true });
+  cpSync(join(repositoryRoot, "crates"), join(root, "crates"), {
+    recursive: true,
+  });
+  cpSync(join(repositoryRoot, "browser"), join(root, "browser"), {
+    recursive: true,
+  });
+  const installer = join(root, "apps/browser-native-host/src/installer.rs");
+  writeFileSync(
+    installer,
+    readFileSync(installer, "utf8").replace(
+      "crate::installer_transaction::install(",
+      "legacy_install(",
+    ),
+  );
+  assert.match(
+    runNativeHostChecks(root).join("\n"),
+    /install must use the manifest and HKCU transaction policy/,
+  );
+});

@@ -12,6 +12,14 @@ use browser_native_protocol::{
 };
 use serde::Serialize;
 
+#[cfg(any(windows, test))]
+use crate::installer_transaction::{ManifestState, ManifestStore};
+#[cfg(windows)]
+use crate::installer_transaction::{RegistrationState, RegistrationStore};
+
+#[cfg(any(windows, test))]
+const MAX_PRIOR_MANIFEST_BYTES: u64 = 64 * 1024;
+
 #[derive(Clone, Copy)]
 pub enum Command {
     Install,
@@ -189,23 +197,41 @@ fn windows_manifest_path(root: &Path, browser: Browser) -> PathBuf {
 
 fn install(browser: Browser, executable: &Path) -> Result<(), String> {
     let path = manifest_path(browser)?;
-    let bytes = manifest_json(browser, executable)?;
-    write_manifest_transactionally(&path, &bytes)?;
+    let mut bytes = manifest_json(browser, executable)?;
+    bytes.push(b'\n');
     #[cfg(windows)]
-    register_windows(browser, &path)?;
-    Ok(())
+    {
+        let registration_value = path
+            .to_str()
+            .ok_or_else(|| "manifest path is not UTF-8".to_owned())?
+            .to_owned();
+        let mut manifest = FileManifestStore::new(path);
+        let mut registration = WindowsRegistrationStore::new(registry_path(browser));
+        crate::installer_transaction::install(
+            &mut manifest,
+            &mut registration,
+            &bytes,
+            &registration_value,
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        write_manifest_transactionally(&path, &bytes)
+    }
 }
 
 fn uninstall(browser: Browser) -> Result<(), String> {
     let path = manifest_path(browser)?;
-    match fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(_) => return Err("could not remove native host manifest".to_owned()),
-    }
     #[cfg(windows)]
-    unregister_windows(browser)?;
-    Ok(())
+    {
+        let mut manifest = FileManifestStore::new(path);
+        let mut registration = WindowsRegistrationStore::new(registry_path(browser));
+        crate::installer_transaction::uninstall(&mut manifest, &mut registration)
+    }
+    #[cfg(not(windows))]
+    {
+        remove_manifest(&path)
+    }
 }
 
 fn doctor(browser: Browser, executable: &Path, output: &mut impl Write) -> Result<(), String> {
@@ -224,6 +250,12 @@ fn doctor(browser: Browser, executable: &Path, output: &mut impl Write) -> Resul
 }
 
 fn write_manifest_transactionally(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .map_err(|_| "candidate manifest is invalid")?;
+    write_file_transactionally(path, bytes)
+}
+
+fn write_file_transactionally(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "manifest path has no parent".to_owned())?;
@@ -239,15 +271,26 @@ fn write_manifest_transactionally(path: &Path, bytes: &[u8]) -> Result<(), Strin
     let mut file = options
         .open(&temporary)
         .map_err(|_| "could not create candidate manifest")?;
-    file.write_all(bytes)
-        .map_err(|_| "could not write candidate manifest")?;
-    file.write_all(b"\n")
-        .map_err(|_| "could not finish candidate manifest")?;
-    file.sync_all()
-        .map_err(|_| "could not sync candidate manifest")?;
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .map_err(|_| "candidate manifest is invalid")?;
-    place_manifest(&temporary, path)
+    let result = (|| {
+        file.write_all(bytes)
+            .map_err(|_| "could not write candidate manifest")?;
+        file.sync_all()
+            .map_err(|_| "could not sync candidate manifest")?;
+        drop(file);
+        place_manifest(&temporary, path)
+    })();
+    if result.is_err() {
+        let _cleanup = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn remove_manifest(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("could not remove native host manifest".to_owned()),
+    }
 }
 
 #[cfg(unix)]
@@ -283,37 +326,216 @@ fn registry_path(browser: Browser) -> String {
     format!(r"Software\{vendor}\NativeMessagingHosts\{HOST_NAME}")
 }
 
-#[cfg(windows)]
-fn register_windows(browser: Browser, manifest: &Path) -> Result<(), String> {
-    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+#[cfg(any(windows, test))]
+struct FileManifestStore {
+    path: PathBuf,
+}
 
-    let current_user = RegKey::predef(HKEY_CURRENT_USER);
-    let (key, _) = current_user
-        .create_subkey(registry_path(browser))
-        .map_err(|_| "could not create HKCU registration")?;
-    key.set_value("", &manifest.to_string_lossy().as_ref())
-        .map_err(|_| "could not write HKCU registration".to_owned())
+#[cfg(any(windows, test))]
+impl FileManifestStore {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+#[cfg(any(windows, test))]
+impl ManifestStore for FileManifestStore {
+    fn capture(&mut self) -> Result<ManifestState, ()> {
+        use std::io::Read as _;
+
+        let file = match fs::File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(ManifestState::Absent);
+            }
+            Err(_) => return Err(()),
+        };
+        let metadata = file.metadata().map_err(|_| ())?;
+        if !metadata.is_file() || metadata.len() > MAX_PRIOR_MANIFEST_BYTES {
+            return Err(());
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(MAX_PRIOR_MANIFEST_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| ())?;
+        if bytes.len() as u64 > MAX_PRIOR_MANIFEST_BYTES {
+            return Err(());
+        }
+        Ok(ManifestState::Present(bytes))
+    }
+
+    fn replace(&mut self, bytes: &[u8]) -> Result<(), ()> {
+        write_manifest_transactionally(&self.path, bytes).map_err(|_| ())
+    }
+
+    fn remove(&mut self) -> Result<(), ()> {
+        remove_manifest(&self.path).map_err(|_| ())
+    }
+
+    fn restore(&mut self, state: &ManifestState) -> Result<(), ()> {
+        match state {
+            ManifestState::Absent => remove_manifest(&self.path),
+            ManifestState::Present(bytes) => write_file_transactionally(&self.path, bytes),
+        }
+        .map_err(|_| ())
+    }
 }
 
 #[cfg(windows)]
-fn unregister_windows(browser: Browser) -> Result<(), String> {
-    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+struct WindowsRegistrationStore {
+    path: String,
+}
 
-    let current_user = RegKey::predef(HKEY_CURRENT_USER);
-    match current_user.delete_subkey(registry_path(browser)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(_) => Err("could not remove HKCU registration".to_owned()),
+#[cfg(windows)]
+impl WindowsRegistrationStore {
+    fn new(path: String) -> Self {
+        Self { path }
+    }
+
+    fn delete_empty_key(&self) -> Result<(), ()> {
+        use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        let key = match current_user.open_subkey(&self.path) {
+            Ok(key) => key,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(()),
+        };
+        let has_values = key.enum_values().next().is_some();
+        let has_subkeys = key.enum_keys().next().is_some();
+        drop(key);
+        if has_values || has_subkeys {
+            return Ok(());
+        }
+        match current_user.delete_subkey(&self.path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(()),
+        }
+    }
+}
+
+#[cfg(windows)]
+impl RegistrationStore for WindowsRegistrationStore {
+    fn capture(&mut self) -> Result<RegistrationState, ()> {
+        use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        let key = match current_user.open_subkey(&self.path) {
+            Ok(key) => key,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(RegistrationState {
+                    key_exists: false,
+                    default_value: None,
+                });
+            }
+            Err(_) => return Err(()),
+        };
+        let default_value = match key.get_value::<String, _>("") {
+            Ok(value) => Some(value),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(_) => return Err(()),
+        };
+        Ok(RegistrationState {
+            key_exists: true,
+            default_value,
+        })
+    }
+
+    fn set_default(&mut self, value: &str) -> Result<(), ()> {
+        use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        let (key, _) = current_user.create_subkey(&self.path).map_err(|_| ())?;
+        key.set_value("", &value).map_err(|_| ())
+    }
+
+    fn remove_default(&mut self) -> Result<(), ()> {
+        use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
+        let key = match current_user.open_subkey_with_flags(
+            &self.path,
+            winreg::enums::KEY_READ | winreg::enums::KEY_WRITE,
+        ) {
+            Ok(key) => key,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(()),
+        };
+        match key.delete_value("") {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(()),
+        }
+        drop(key);
+        self.delete_empty_key()
+    }
+
+    fn restore(&mut self, state: &RegistrationState) -> Result<(), ()> {
+        if state.key_exists {
+            if let Some(value) = &state.default_value {
+                self.set_default(value)?;
+            } else {
+                self.remove_default()?;
+                use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+                let current_user = RegKey::predef(HKEY_CURRENT_USER);
+                let _key = current_user.create_subkey(&self.path).map_err(|_| ())?;
+            }
+        } else {
+            self.remove_default()?;
+            self.delete_empty_key()?;
+        }
+        if self.capture()? == *state {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     use serde_json::Value;
 
-    use super::{Browser, manifest_json, parse_browsers, registry_path, windows_manifest_path};
+    use crate::installer_transaction::{ManifestState, ManifestStore};
+
+    use super::{
+        Browser, FileManifestStore, MAX_PRIOR_MANIFEST_BYTES, manifest_json, parse_browsers,
+        registry_path, windows_manifest_path, write_file_transactionally,
+    };
+
+    static NEXT_TEST_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let sequence = NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "nian-pass-browser-installer-{}-{sequence}",
+                std::process::id()
+            ));
+            fs::create_dir(&path)
+                .unwrap_or_else(|error| panic!("installer test directory must be unique: {error}"));
+            Self(path)
+        }
+
+        fn join(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _removed = fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn browser_identifier_is_exact_and_bounded() {
@@ -359,5 +581,60 @@ mod tests {
             assert!(path.is_absolute());
             assert!(path.to_string_lossy().contains("Nian Pass"));
         }
+    }
+
+    #[test]
+    fn manifest_store_captures_and_restores_exact_bytes() {
+        let directory = TestDirectory::new();
+        let path = directory.join("host.json");
+        let original = b"{\"original\":true}\r\n";
+        fs::write(&path, original).expect("synthetic original manifest must be writable");
+        let mut store = FileManifestStore::new(path.clone());
+        let captured = store
+            .capture()
+            .expect("bounded synthetic manifest must be captured");
+        assert_eq!(captured, ManifestState::Present(original.to_vec()));
+
+        store
+            .replace(b"{\"replacement\":true}\n")
+            .expect("replacement manifest must be placed");
+        store
+            .restore(&captured)
+            .expect("exact original manifest must be restored");
+        assert_eq!(fs::read(path).unwrap_or_default(), original);
+    }
+
+    #[test]
+    fn manifest_store_absence_remove_and_io_failures_are_bounded() {
+        let directory = TestDirectory::new();
+        let absent_path = directory.join("absent.json");
+        let mut absent = FileManifestStore::new(absent_path);
+        assert_eq!(absent.capture(), Ok(ManifestState::Absent));
+        assert!(absent.remove().is_ok());
+
+        let directory_path = directory.join("directory.json");
+        fs::create_dir(&directory_path).expect("synthetic manifest directory must be creatable");
+        let mut directory_store = FileManifestStore::new(directory_path.clone());
+        assert!(directory_store.remove().is_err());
+
+        let blocked_parent = directory.join("regular-parent");
+        fs::write(&blocked_parent, b"not a directory")
+            .expect("synthetic blocking parent must be writable");
+        let mut blocked = FileManifestStore::new(blocked_parent.join("host.json"));
+        assert!(blocked.capture().is_err());
+
+        assert!(write_file_transactionally(&directory_path, b"synthetic").is_err());
+        let temporary = directory_path.with_extension(format!("json.{}.tmp", std::process::id()));
+        assert!(!temporary.exists());
+    }
+
+    #[test]
+    fn manifest_store_rejects_oversized_prior_file_before_capture() {
+        let directory = TestDirectory::new();
+        let path = directory.join("host.json");
+        fs::write(&path, vec![b'x'; MAX_PRIOR_MANIFEST_BYTES as usize + 1])
+            .expect("synthetic oversized manifest must be writable");
+        let mut store = FileManifestStore::new(path);
+        assert!(store.capture().is_err());
     }
 }

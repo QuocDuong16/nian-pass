@@ -119,6 +119,18 @@ test("browser persistence is rejected", (t) => {
   assert.match(runChecks(root, budget()).join("\n"), /browser persistence/);
 });
 
+test("optional browser bridge startup cannot propagate through desktop setup", (t) => {
+  const root = fixture(t);
+  writeFileSync(
+    join(root, "apps/desktop/src-tauri/src/lib.rs"),
+    "fn setup() -> Result<(), Error> { BrowserBridgeState::start(app, state)?; Ok(()) }\n",
+  );
+  assert.match(
+    runChecks(root, budget()).join("\n"),
+    /optional browser bridge startup must not abort desktop setup/,
+  );
+});
+
 test("Tauri dependency in vault-core is rejected", (t) => {
   const root = fixture(t);
   supportPackage(root, "tauri");

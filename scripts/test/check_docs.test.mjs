@@ -42,6 +42,7 @@ function fixture(t) {
       "retrieveBeginGetCredentialRequest() and retrieveProviderGetCredentialRequest() rebuild authority after process restart. " +
       "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n" +
     "M6.5 browser and desktop credential boundary: background extension authority then Native Messaging stdio, user-local Unix socket or Windows named pipe, DesktopVaultService, and credential-provider-core. Browser host permission is not credential identity. " +
+    "BrowserBridgeState is always Available or Unavailable; secure bind failure does not abort desktop setup and recovery uses a desktop restart. Windows manifest and HKCU registration restore both states on rollback. " +
     "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
       "SystemClock.elapsedRealtime() feeds a monotonic generation and exact safe-UI acknowledgement. " +
       "Global processForeground and screen state are separate from per-Activity activityResumed and windowFocused. ProcessLifecycleOwner is not the immediate confidentiality boundary. MainActivity and CredentialActivity cannot authorize one another. " +
@@ -56,6 +57,7 @@ function fixture(t) {
     root,
     "docs/threat-model.md",
     "Compromised supply-chain dependencies. OS clipboard history may retain data. Web page / DOM is untrusted; content script is a low-trust adapter; background extension context is privileged; native host is transport-only. A same-user local IPC attacker requires desktop approval; residual threats include a fully compromised OS and root/Administrator. " +
+      "Browser bridge startup denial of service and live endpoint conflict leave the desktop vault remains usable. " +
       "A dirty timeout never performs discard without explicit user intent. " +
       "iOS is not initialized or built on Linux; validation requires macOS with Xcode. " +
       "A fake Android application, changed signing key, unverified web target, and replayed request token fail closed. " +
@@ -79,7 +81,8 @@ function fixture(t) {
       "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
       "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
       "M5.5 requires PowerManager.isInteractive and SystemClock.elapsedRealtime lifecycle source ratchets; same-process Lock/unlock timeout retention and new-root reset are tested; Android instrumentation only compiles headlessly.\n" +
-    "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension. browser-source-check then browser-extension-check then browser-native-protocol-check then browser-native-host-check then browser-integration-check do not require Chrome Chromium or Firefox GUI browsers.\n",
+      "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension. browser-source-check then browser-extension-check then browser-native-protocol-check then browser-native-host-check then browser-integration-check do not require Chrome Chromium or Firefox GUI browsers.\n" +
+      "Bridge startup failure leaves the vault usable; Windows installer rollback is tested with failure injection.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");

@@ -163,7 +163,6 @@ impl BrowserBridgeRuntime {
         })
     }
 }
-
 impl Drop for BrowserBridgeRuntime {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
@@ -172,37 +171,44 @@ impl Drop for BrowserBridgeRuntime {
         }
     }
 }
-
 pub struct BrowserBridgeState {
-    broker: Arc<ApprovalBroker>,
-    _runtime: Option<BrowserBridgeRuntime>,
+    availability: BrowserBridgeAvailability,
 }
-
+enum BrowserBridgeAvailability {
+    Available(Arc<ApprovalBroker>, BrowserBridgeRuntime),
+    Unavailable,
+}
 impl BrowserBridgeState {
-    pub fn start<R: Runtime>(app: AppHandle<R>, app_state: AppState) -> io::Result<Self> {
+    #[must_use]
+    pub fn start<R: Runtime>(app: AppHandle<R>, app_state: AppState) -> Self {
+        Self::start_with_runtime(app, app_state, BrowserBridgeRuntime::start)
+    }
+    fn start_with_runtime<R: Runtime>(
+        app: AppHandle<R>,
+        app_state: AppState,
+        start_runtime: impl FnOnce(AppState, Arc<ApprovalBroker>) -> io::Result<BrowserBridgeRuntime>,
+    ) -> Self {
         let notifier = Arc::new(TauriApprovalNotifier { app });
         let broker = Arc::new(ApprovalBroker::new(notifier, APPROVAL_TIMEOUT));
-        let runtime = BrowserBridgeRuntime::start(app_state, broker.clone())?;
-        Ok(Self {
-            broker,
-            _runtime: Some(runtime),
-        })
+        Self::from_runtime_result(broker.clone(), start_runtime(app_state, broker))
     }
-
     #[cfg(test)]
-    pub fn without_listener() -> Self {
-        struct Unavailable;
-        impl ApprovalNotifier for Unavailable {
-            fn notify(&self, _request_id: &str) -> bool {
-                false
-            }
-        }
+    #[must_use]
+    pub const fn unavailable() -> Self {
         Self {
-            broker: Arc::new(ApprovalBroker::new(Arc::new(Unavailable), APPROVAL_TIMEOUT)),
-            _runtime: None,
+            availability: BrowserBridgeAvailability::Unavailable,
         }
     }
-
+    fn from_runtime_result(
+        broker: Arc<ApprovalBroker>,
+        runtime: io::Result<BrowserBridgeRuntime>,
+    ) -> Self {
+        let availability = match runtime {
+            Ok(runtime) => BrowserBridgeAvailability::Available(broker, runtime),
+            Err(_) => BrowserBridgeAvailability::Unavailable,
+        };
+        Self { availability }
+    }
     #[cfg(test)]
     pub fn with_pending_request(request_id: &str) -> (Self, mpsc::Receiver<bool>) {
         struct Available;
@@ -218,17 +224,24 @@ impl BrowserBridgeState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(request_id.to_owned(), sender);
-        (
-            Self {
-                broker,
-                _runtime: None,
-            },
-            receiver,
-        )
+        let runtime = BrowserBridgeRuntime {
+            stop: Arc::new(AtomicBool::new(false)),
+            listener_thread: None,
+        };
+        (Self::from_runtime_result(broker, Ok(runtime)), receiver)
     }
 
     pub fn resolve(&self, request_id: &str, allow: bool) -> bool {
-        self.broker.resolve(request_id, allow)
+        match &self.availability {
+            BrowserBridgeAvailability::Available(broker, _r) => broker.resolve(request_id, allow),
+            BrowserBridgeAvailability::Unavailable => false,
+        }
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn is_available(&self) -> bool {
+        matches!(&self.availability, BrowserBridgeAvailability::Available(..))
     }
 }
 
@@ -432,14 +445,6 @@ mod tests {
     use std::os::unix::fs::DirBuilderExt;
 
     #[cfg(unix)]
-    use browser_native_protocol::{
-        BrowserRequest, BrowserResponse, bind_desktop_listener_in, connect_desktop_in,
-        read_response, write_message,
-    };
-    #[cfg(unix)]
-    use interprocess::local_socket::traits::Listener as _;
-
-    #[cfg(unix)]
     use super::handle_connection;
     use super::{ApprovalBroker, ApprovalNotifier, BrowserBridgeState, TauriApprovalNotifier};
     #[cfg(unix)]
@@ -450,6 +455,13 @@ mod tests {
     };
     #[cfg(unix)]
     use crate::{clipboard::ClipboardPort, mutations::CreateEntryRequestDto, state::AppState};
+    #[cfg(unix)]
+    use browser_native_protocol::{
+        BrowserRequest, BrowserResponse, bind_desktop_listener_in, connect_desktop_in,
+        read_response, write_message,
+    };
+    #[cfg(unix)]
+    use interprocess::local_socket::traits::Listener as _;
     #[cfg(unix)]
     use serde_json::json;
     #[cfg(unix)]
@@ -955,5 +967,47 @@ mod tests {
         ));
         drop(client);
         drop(runtime);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn injected_listener_failure_maps_to_unavailable_without_touching_runtime_paths() {
+        let app = tauri::test::mock_app();
+        let state = AppState::new(Arc::new(NullClipboard));
+        let bridge = BrowserBridgeState::start_with_runtime(app.handle().clone(), state, |_, _| {
+            Err(io::Error::other("synthetic listener failure"))
+        });
+        assert!(!bridge.is_available());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_listener_makes_second_bridge_unavailable_without_stealing_endpoint() {
+        let runtime_directory = TestDir::create();
+        let first = bind_desktop_listener_in(&runtime_directory.0)
+            .unwrap_or_else(|error| panic!("first listener must bind: {error}"));
+        let (sender, _receiver) = mpsc::channel();
+        let broker = Arc::new(ApprovalBroker::new(
+            Arc::new(CapturingNotifier {
+                requests: sender,
+                available: true,
+            }),
+            Duration::from_secs(1),
+        ));
+        let state = AppState::new(Arc::new(NullClipboard));
+        let runtime = bind_desktop_listener_in(&runtime_directory.0).and_then(|listener| {
+            BrowserBridgeRuntime::start_with_listener(listener, state, broker.clone())
+        });
+        let second = BrowserBridgeState::from_runtime_result(broker, runtime);
+        assert!(!second.is_available());
+
+        let client = connect_desktop_in(&runtime_directory.0)
+            .unwrap_or_else(|error| panic!("first listener must remain reachable: {error}"));
+        let accepted = first
+            .accept()
+            .unwrap_or_else(|error| panic!("first listener must retain ownership: {error}"));
+        drop(accepted);
+        drop(client);
+        drop(first);
     }
 }

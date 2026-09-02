@@ -24,6 +24,11 @@ export function runNativeHostChecks(root) {
   const hostRoot = resolve(root, "apps/browser-native-host");
   const protocolRoot = resolve(root, "crates/browser-native-protocol");
   const hostManifest = readFileSync(resolve(hostRoot, "Cargo.toml"), "utf8");
+  const installerSource = readFileSync(resolve(hostRoot, "src/installer.rs"), "utf8");
+  const transactionSource = readFileSync(
+    resolve(hostRoot, "src/installer_transaction.rs"),
+    "utf8",
+  );
   const protocolManifest = readFileSync(
     resolve(protocolRoot, "Cargo.toml"),
     "utf8",
@@ -121,6 +126,27 @@ export function runNativeHostChecks(root) {
     hostSources,
     /write_message\(&mut browser_output/,
     "native stdout must use strict framed responses",
+  );
+  requirePattern(
+    violations,
+    "Windows native host installer",
+    installerSource,
+    /installer_transaction::install\s*\(/,
+    "install must use the manifest and HKCU transaction policy",
+  );
+  requirePattern(
+    violations,
+    "Windows native host installer",
+    installerSource,
+    /installer_transaction::uninstall\s*\(/,
+    "uninstall must use the manifest and HKCU transaction policy",
+  );
+  requirePattern(
+    violations,
+    "Windows installer transaction",
+    transactionSource,
+    /old_manifest[\s\S]{0,500}old_registration[\s\S]{0,1000}rollback_both/,
+    "manifest and registry state must both be captured and rolled back",
   );
   return violations;
 }
