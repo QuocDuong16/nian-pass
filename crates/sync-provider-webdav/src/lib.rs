@@ -371,6 +371,28 @@ mod tests {
         server.await.expect("server task");
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn successful_put_requires_an_exact_and_available_readback() {
+        let candidate = b"encrypted-kdbx";
+        let (url, server) = scripted_server(vec![
+            response(201, &[], b""),
+            response(200, &[("ETag", "\"r2\"")], b"different-ciphertext"),
+        ])
+        .await;
+        assert!(matches!(
+            provider(&url).create_if_absent(candidate).await,
+            Err(ProviderError::RemoteChanged)
+        ));
+        server.await.expect("server task");
+
+        let (url, server) = scripted_server(vec![response(201, &[], b"")]).await;
+        assert!(matches!(
+            provider(&url).create_if_absent(candidate).await,
+            Err(ProviderError::WriteResultUncertain)
+        ));
+        server.await.expect("server task");
+    }
+
     fn provider(url: &str) -> WebDavProvider {
         WebDavProvider::new(
             WebDavConfig::new(url, "synthetic-user".to_owned()).expect("loopback URL"),

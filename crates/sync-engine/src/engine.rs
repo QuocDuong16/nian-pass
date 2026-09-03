@@ -1,18 +1,13 @@
-use std::sync::Mutex;
-
-use sync_provider_core::{
-    CiphertextDigest, ProviderError, RemoteObjectProvider, RemoteRead, RemoteRevision,
-};
-use uuid::Uuid;
+use sync_provider_core::{CiphertextDigest, ProviderError, RemoteObjectProvider, RemoteRead};
 use vault_core::SecretString;
 use vault_sync::MergeOutcome;
 
 use crate::{
-    ConflictChoice, ConflictDescriptor, ConflictOperation, LocalSnapshot, LocalVault, SyncError,
-    SyncStore,
+    ConflictChoice, ConflictOperation, LocalSnapshot, LocalVault, SyncError, SyncStore,
     codec::{open_document, serialize_verified},
     commit::{CommitPlan, CommitRemote},
     conflict::describe,
+    conflict_authority::ConflictAuthority,
     store::BaseState,
 };
 
@@ -37,7 +32,7 @@ pub enum SyncOutcome {
 /// One profile-scoped engine with at most one pending process-local conflict.
 pub struct SyncEngine {
     pub(crate) store: SyncStore,
-    pending_conflict: Mutex<Option<PendingConflict>>,
+    conflict_authority: ConflictAuthority,
 }
 
 impl SyncEngine {
@@ -46,7 +41,7 @@ impl SyncEngine {
     pub fn new(store: SyncStore) -> Self {
         Self {
             store,
-            pending_conflict: Mutex::new(None),
+            conflict_authority: ConflictAuthority::new(),
         }
     }
 
@@ -57,6 +52,7 @@ impl SyncEngine {
         local: &L,
         master_password: SecretString,
     ) -> Result<SyncOutcome, SyncError> {
+        self.conflict_authority.invalidate_pending_conflict()?;
         let local_snapshot = local.capture_clean()?;
         if self
             .recover_loaded(provider, local, &master_password, &local_snapshot)
@@ -91,14 +87,16 @@ impl SyncEngine {
                     self.store.write_base(&remote_bytes, remote_revision)?;
                     Ok(SyncOutcome::Done(SyncCompletion::EstablishedBase))
                 } else {
-                    self.install_conflict(
-                        local_snapshot,
-                        remote_bytes,
-                        remote_revision,
-                        None,
-                        true,
-                        Vec::new(),
-                    )
+                    self.conflict_authority
+                        .install(
+                            local_snapshot,
+                            remote_bytes,
+                            remote_revision,
+                            None,
+                            true,
+                            Vec::new(),
+                        )
+                        .map(SyncOutcome::Conflict)
                 }
             }
             (Some(_), RemoteRead::Missing) => Err(SyncError::RemoteChanged),
@@ -125,20 +123,9 @@ impl SyncEngine {
         local: &L,
         master_password: SecretString,
     ) -> Result<SyncOutcome, SyncError> {
-        let pending = {
-            let mut slot = self
-                .pending_conflict
-                .lock()
-                .map_err(|_| SyncError::Internal)?;
-            let Some(pending) = slot.as_ref() else {
-                return Err(SyncError::StaleConflict);
-            };
-            if pending.operation.id() != conflict_operation_id {
-                return Err(SyncError::StaleConflict);
-            }
-            slot.take().ok_or(SyncError::StaleConflict)?
-        };
+        let pending = self.conflict_authority.take(conflict_operation_id)?;
 
+        self.require_base_unchanged(pending.base_digest.as_ref())?;
         self.require_local_unchanged(local, &pending.local)?;
         let remote = match provider.read().await? {
             RemoteRead::Present(remote) if remote.revision() == &pending.remote_revision => remote,
@@ -245,14 +232,16 @@ impl SyncEngine {
             }
             MergeOutcome::Conflicted(conflicts) => {
                 let descriptors = conflicts.iter().map(describe).collect();
-                self.install_conflict(
-                    local_snapshot,
-                    remote_bytes,
-                    remote_revision,
-                    Some(base.digest),
-                    false,
-                    descriptors,
-                )
+                self.conflict_authority
+                    .install(
+                        local_snapshot,
+                        remote_bytes,
+                        remote_revision,
+                        Some(base.digest),
+                        false,
+                        descriptors,
+                    )
+                    .map(SyncOutcome::Conflict)
             }
         }
     }
@@ -355,42 +344,15 @@ impl SyncEngine {
         }
     }
 
-    fn install_conflict(
+    fn require_base_unchanged(
         &self,
-        local: LocalSnapshot,
-        remote_bytes: Vec<u8>,
-        remote_revision: RemoteRevision,
-        base_digest: Option<CiphertextDigest>,
-        initial_conflict: bool,
-        conflicts: Vec<ConflictDescriptor>,
-    ) -> Result<SyncOutcome, SyncError> {
-        let operation = ConflictOperation {
-            conflict_operation_id: Uuid::new_v4().hyphenated().to_string(),
-            initial_conflict,
-            conflicts,
-        };
-        let pending = PendingConflict {
-            operation: operation.clone(),
-            local,
-            remote_digest: CiphertextDigest::of(&remote_bytes),
-            remote_bytes,
-            remote_revision,
-            _base_digest: base_digest,
-        };
-        let mut slot = self
-            .pending_conflict
-            .lock()
-            .map_err(|_| SyncError::Internal)?;
-        *slot = Some(pending);
-        Ok(SyncOutcome::Conflict(operation))
+        expected_digest: Option<&CiphertextDigest>,
+    ) -> Result<(), SyncError> {
+        let current = self.store.load_base()?;
+        match (expected_digest, current) {
+            (None, None) => Ok(()),
+            (Some(expected), Some(base)) if expected == &base.digest => Ok(()),
+            _ => Err(SyncError::StaleConflict),
+        }
     }
-}
-
-struct PendingConflict {
-    operation: ConflictOperation,
-    local: LocalSnapshot,
-    remote_bytes: Vec<u8>,
-    remote_digest: CiphertextDigest,
-    remote_revision: RemoteRevision,
-    _base_digest: Option<CiphertextDigest>,
 }

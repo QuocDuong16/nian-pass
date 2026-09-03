@@ -7,8 +7,8 @@ use std::{
 
 use kdbx::KdbxDocument;
 use sync_engine::{
-    LocalCommitError, LocalSnapshot, LocalVault, ProfileId, SourceBinding, SyncCompletion,
-    SyncEngine, SyncError, SyncOutcome, SyncStore,
+    ConflictOperation, LocalCommitError, LocalSnapshot, LocalVault, ProfileId, SourceBinding,
+    StoreError, SyncCompletion, SyncEngine, SyncError, SyncOutcome, SyncStore, TargetBinding,
 };
 use sync_provider_core::{
     CiphertextDigest, ProviderError, RemoteObject, RemoteObjectProvider, RemoteRead, RemoteRevision,
@@ -85,6 +85,20 @@ impl FakeProvider {
         let mut state = self.state.lock().expect("remote lock");
         state.object = Some(ciphertext);
         state.revision += 1;
+    }
+
+    fn change_revision_only(&self) {
+        self.state.lock().expect("remote lock").revision += 1;
+    }
+
+    fn replace_without_revision_change(&self, ciphertext: Vec<u8>) {
+        self.state.lock().expect("remote lock").object = Some(ciphertext);
+    }
+
+    fn restore(&self, ciphertext: Vec<u8>, revision: u64) {
+        let mut state = self.state.lock().expect("remote lock");
+        state.object = Some(ciphertext);
+        state.revision = revision;
     }
 
     fn reject_next_write(&self) {
@@ -212,7 +226,7 @@ impl FakeLocal {
     fn externally_save(&self, ciphertext: Vec<u8>) {
         let mut state = self.state.lock().expect("local lock");
         state.ciphertext = ciphertext;
-        state.authority = "session-after-save".to_owned();
+        state.authority = format!("session-after-save-{}", uuid::Uuid::new_v4());
     }
 
     fn switch_source(&self) {
@@ -320,6 +334,11 @@ fn source(value: &str) -> SourceBinding {
         .expect("source should be valid")
 }
 
+fn target(value: &str) -> TargetBinding {
+    TargetBinding::from_sha256(CiphertextDigest::of(value.as_bytes()).as_str().to_owned())
+        .expect("target should be valid")
+}
+
 fn setup(
     local_bytes: Vec<u8>,
     remote_bytes: Option<Vec<u8>>,
@@ -332,8 +351,13 @@ fn setup(
 ) {
     let directory = TestDirectory::new();
     let profile = ProfileId::random();
-    let store =
-        SyncStore::open(&directory.0, profile, source("source-a")).expect("store should open");
+    let store = SyncStore::open(
+        &directory.0,
+        profile,
+        source("source-a"),
+        target("target-a"),
+    )
+    .expect("store should open");
     (
         directory,
         SyncEngine::new(store),
@@ -358,9 +382,10 @@ fn install_journal(
     let candidate_path = profile_directory.join(&candidate_file);
     fs::write(&candidate_path, candidate).expect("candidate should write");
     let journal = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "profile_id": profile.to_canonical_string(),
         "source": source("source-a").as_str(),
+        "target": target("target-a").as_str(),
         "operation_id": operation_id,
         "phase": phase,
         "expected_local_sha256": CiphertextDigest::of(expected_local).as_str(),
@@ -384,6 +409,30 @@ async fn sync(
     engine
         .sync(provider, local, SecretString::new(PASSWORD.to_owned()))
         .await
+}
+
+async fn create_semantic_conflict() -> (
+    TestDirectory,
+    SyncEngine,
+    Arc<FakeLocal>,
+    Arc<FakeProvider>,
+    ProfileId,
+    Vec<u8>,
+    ConflictOperation,
+) {
+    let base = fixture();
+    let (directory, engine, local, provider, profile) = setup(base.clone(), None);
+    sync(&engine, &provider, &local).await.expect("seed base");
+    local.externally_save(changed(&base, "local-title"));
+    let remote = changed(&base, "remote-title");
+    provider.externally_replace(remote.clone());
+    let conflict = match sync(&engine, &provider, &local).await.expect("conflict") {
+        SyncOutcome::Conflict(conflict) => conflict,
+        SyncOutcome::Done(_) => panic!("same-field divergence must conflict"),
+    };
+    (
+        directory, engine, local, provider, profile, remote, conflict,
+    )
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -542,6 +591,236 @@ async fn semantic_conflict_uses_single_use_revalidated_whole_vault_token() {
             .await,
         Err(SyncError::StaleConflict)
     ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn newer_sync_conflict_replaces_the_old_random_authority() {
+    let (_directory, engine, local, provider, _profile, _remote, first) =
+        create_semantic_conflict().await;
+    let second = match sync(&engine, &provider, &local)
+        .await
+        .expect("newer sync should produce the current conflict")
+    {
+        SyncOutcome::Conflict(conflict) => conflict,
+        SyncOutcome::Done(_) => panic!("divergence must still conflict"),
+    };
+    assert_ne!(first.id(), second.id());
+    assert!(uuid::Uuid::parse_str(first.id()).is_ok());
+    assert!(uuid::Uuid::parse_str(second.id()).is_ok());
+    assert!(matches!(
+        engine
+            .resolve(
+                first.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                SecretString::new(PASSWORD.to_owned()),
+            )
+            .await,
+        Err(SyncError::StaleConflict)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn even_a_failed_new_sync_attempt_invalidates_the_old_conflict() {
+    let (_directory, engine, local, provider, _profile, _remote, conflict) =
+        create_semantic_conflict().await;
+    provider.fail_next_read();
+    assert!(matches!(
+        sync(&engine, &provider, &local).await,
+        Err(SyncError::Provider(ProviderError::Transport))
+    ));
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                SecretString::new(PASSWORD.to_owned()),
+            )
+            .await,
+        Err(SyncError::StaleConflict)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn changed_base_invalidates_conflict_even_if_remote_identity_repeats() {
+    let (directory, engine, local, provider, profile, remote, conflict) =
+        create_semantic_conflict().await;
+    let conflict_revision = provider.current_revision();
+    let conflict_revision_number = provider.state.lock().expect("remote lock").revision;
+
+    let advancing_store = SyncStore::open(
+        &directory.0,
+        profile,
+        source("source-a"),
+        target("target-a"),
+    )
+    .expect("advancing store");
+    let advancing_engine = SyncEngine::new(advancing_store);
+    let advancing_local = FakeLocal::new(remote.clone());
+    assert!(matches!(
+        sync(&advancing_engine, &provider, &advancing_local)
+            .await
+            .expect("equal local and remote should advance BASE"),
+        SyncOutcome::Done(SyncCompletion::Equivalent)
+    ));
+
+    provider.externally_replace(changed(&remote, "temporary-remote"));
+    provider.restore(remote, conflict_revision_number);
+    assert!(provider.current_revision() == conflict_revision);
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                SecretString::new(PASSWORD.to_owned()),
+            )
+            .await,
+        Err(SyncError::StaleConflict)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn initial_conflict_is_stale_once_a_base_is_established() {
+    let local_bytes = fixture();
+    let remote_bytes = changed(&local_bytes, "remote-only");
+    let (directory, engine, local, provider, profile) =
+        setup(local_bytes, Some(remote_bytes.clone()));
+    let conflict = match sync(&engine, &provider, &local).await.expect("conflict") {
+        SyncOutcome::Conflict(conflict) => conflict,
+        SyncOutcome::Done(_) => panic!("initial divergence must conflict"),
+    };
+
+    let establishing_store = SyncStore::open(
+        &directory.0,
+        profile,
+        source("source-a"),
+        target("target-a"),
+    )
+    .expect("establishing store");
+    let establishing_engine = SyncEngine::new(establishing_store);
+    let establishing_local = FakeLocal::new(remote_bytes);
+    assert!(matches!(
+        sync(&establishing_engine, &provider, &establishing_local)
+            .await
+            .expect("BASE should establish"),
+        SyncOutcome::Done(SyncCompletion::EstablishedBase)
+    ));
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepLocal,
+                provider.as_ref(),
+                local.as_ref(),
+                SecretString::new(PASSWORD.to_owned()),
+            )
+            .await,
+        Err(SyncError::StaleConflict)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn conflict_resolution_revalidates_local_and_both_remote_authorities() {
+    let (_directory, engine, local, provider, _profile, _remote, conflict) =
+        create_semantic_conflict().await;
+    local.externally_save(local.bytes());
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                SecretString::new(PASSWORD.to_owned()),
+            )
+            .await,
+        Err(SyncError::LocalChanged)
+    ));
+
+    let (_directory, engine, local, provider, _profile, _remote, conflict) =
+        create_semantic_conflict().await;
+    provider.change_revision_only();
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                SecretString::new(PASSWORD.to_owned()),
+            )
+            .await,
+        Err(SyncError::RemoteChanged)
+    ));
+
+    let (_directory, engine, local, provider, _profile, remote, conflict) =
+        create_semantic_conflict().await;
+    provider.replace_without_revision_change(changed(&remote, "same-revision-rewrite"));
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                SecretString::new(PASSWORD.to_owned()),
+            )
+            .await,
+        Err(SyncError::RemoteChanged)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn base_and_journal_reject_a_different_remote_target_binding() {
+    let base = fixture();
+    let (directory, engine, local, provider, profile) = setup(base.clone(), None);
+    sync(&engine, &provider, &local).await.expect("seed BASE");
+    let wrong_target_engine = SyncEngine::new(
+        SyncStore::open(
+            &directory.0,
+            profile,
+            source("source-a"),
+            target("target-b"),
+        )
+        .expect("wrong-target store opens before metadata validation"),
+    );
+    let other_provider = FakeProvider::new(Some(base.clone()));
+    assert!(matches!(
+        sync(&wrong_target_engine, &other_provider, &local).await,
+        Err(SyncError::Store(StoreError::WrongTarget))
+    ));
+    assert_eq!(other_provider.write_count(), 0);
+
+    let candidate = changed(&base, "journal-candidate");
+    let expected_revision = provider.current_revision();
+    install_journal(
+        &directory,
+        profile,
+        "prepared",
+        &base,
+        Some(&expected_revision),
+        &candidate,
+        None,
+    );
+    let wrong_target_recovery = SyncEngine::new(
+        SyncStore::open(
+            &directory.0,
+            profile,
+            source("source-a"),
+            target("target-b"),
+        )
+        .expect("wrong-target recovery store"),
+    );
+    assert!(matches!(
+        sync(&wrong_target_recovery, &other_provider, &local).await,
+        Err(SyncError::Store(StoreError::WrongTarget))
+    ));
+    assert_eq!(other_provider.write_count(), 0);
 }
 
 #[tokio::test(flavor = "current_thread")]

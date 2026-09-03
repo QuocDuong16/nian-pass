@@ -474,6 +474,29 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn successful_put_requires_an_exact_and_available_readback() {
+        let candidate = b"encrypted-kdbx";
+        let (endpoint, server) = scripted_server(vec![
+            response(200, &[("ETag", "\"put-r1\"")], b""),
+            response(200, &[("ETag", "\"read-r2\"")], b"different-ciphertext"),
+        ])
+        .await;
+        assert!(matches!(
+            provider(&endpoint).create_if_absent(candidate).await,
+            Err(ProviderError::RemoteChanged)
+        ));
+        server.await.expect("server task");
+
+        let (endpoint, server) =
+            scripted_server(vec![response(200, &[("ETag", "\"put-r1\"")], b"")]).await;
+        assert!(matches!(
+            provider(&endpoint).create_if_absent(candidate).await,
+            Err(ProviderError::WriteResultUncertain)
+        ));
+        server.await.expect("server task");
+    }
+
     fn provider(endpoint: &str) -> S3Provider {
         let config = S3Config::new(
             Some(endpoint),

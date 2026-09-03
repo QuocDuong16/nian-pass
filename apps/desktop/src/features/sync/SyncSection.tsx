@@ -17,6 +17,10 @@ export function SyncSection(props: SyncSectionOptions) {
           value={sync.selectedId ?? ""}
           disabled={sync.busy}
           onChange={(event) => {
+            if (event.target.value === "") {
+              sync.startNewProfile();
+              return;
+            }
             const profile = sync.profiles.find(
               (candidate) => candidate.profileId === event.target.value,
             );

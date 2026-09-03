@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type {
-  ProviderCredentials,
-  SyncConflictOperation,
-  SyncProfileDto,
-  SyncProfileTarget,
-} from "../../lib/sync";
+import type { SyncConflictOperation, SyncProfileDto } from "../../lib/sync";
 import type { ConflictChoice } from "./SyncConflictPanel";
+import { projectSyncForm } from "./form-values";
 import { syncErrorMessage } from "./sync-errors";
 import type { ProviderKind, SyncSectionOptions } from "./types";
 
@@ -61,27 +57,21 @@ export function useSyncSection({
     () => profiles.find((profile) => profile.profileId === selectedId) ?? null,
     [profiles, selectedId],
   );
-  const target = (): SyncProfileTarget =>
-    provider === "webdav"
-      ? { provider, resourceUrl: resourceUrl.trim() }
-      : {
-          provider,
-          endpoint: endpoint.trim() === "" ? null : endpoint.trim(),
-          region: region.trim(),
-          bucket: bucket.trim(),
-          objectKey: objectKey.trim(),
-          pathStyle,
-        };
-  const credentials = (): ProviderCredentials =>
-    provider === "webdav"
-      ? { webdav: { username, password: webdavPassword } }
-      : {
-          s3: {
-            accessKeyId,
-            secretAccessKey,
-            ...(sessionToken === "" ? {} : { sessionToken }),
-          },
-        };
+  const { target, credentials, providerConfigComplete, credentialsComplete } =
+    projectSyncForm({
+      provider,
+      resourceUrl,
+      endpoint,
+      region,
+      bucket,
+      objectKey,
+      pathStyle,
+      username,
+      webdavPassword,
+      accessKeyId,
+      secretAccessKey,
+      sessionToken,
+    });
   const clearSecrets = () => {
     setWebdavPassword("");
     setSecretAccessKey("");
@@ -109,7 +99,7 @@ export function useSyncSection({
     run("Saving profile", async () => {
       const saved = await api.saveSyncProfile({
         ...(selectedId === null ? {} : { profileId: selectedId }),
-        target: target(),
+        target,
       });
       setProfiles((current) => [
         ...current.filter((profile) => profile.profileId !== saved.profileId),
@@ -124,7 +114,7 @@ export function useSyncSection({
       : run("Connecting", async () => {
           const result = await api.testSyncProvider(
             selected.profileId,
-            credentials(),
+            credentials,
           );
           setStatus(
             result.status === "present"
@@ -136,9 +126,11 @@ export function useSyncSection({
     selected === null
       ? undefined
       : run("Reading and comparing encrypted vaults", async () => {
+          setConflict(null);
+          setConfirmChoice(null);
           const result = await api.syncNow(
             selected.profileId,
-            credentials(),
+            credentials,
             masterPassword,
           );
           onSnapshot(result.snapshot);
@@ -158,7 +150,7 @@ export function useSyncSection({
             selected.profileId,
             conflict.conflictOperationId,
             choice,
-            credentials(),
+            credentials,
             masterPassword,
           );
           onSnapshot(result.snapshot);
@@ -184,14 +176,13 @@ export function useSyncSection({
     setStatus(profile.recoveryRequired ? "Sync recovery required." : "Idle");
   }
 
-  const providerConfigComplete =
-    provider === "webdav"
-      ? resourceUrl.trim() !== ""
-      : region.trim() !== "" && bucket.trim() !== "" && objectKey.trim() !== "";
-  const credentialsComplete =
-    provider === "webdav"
-      ? username.trim() !== "" && webdavPassword !== ""
-      : accessKeyId.trim() !== "" && secretAccessKey !== "";
+  function startNewProfile() {
+    setSelectedId(null);
+    setConflict(null);
+    setConfirmChoice(null);
+    setStatus("New profile. Saving creates a new remote relationship.");
+  }
+
   const syncUnavailable =
     disabled ||
     busy ||
@@ -240,6 +231,7 @@ export function useSyncSection({
     setConfirmChoice,
     setConflict,
     selectProfile,
+    startNewProfile,
     saveProfile,
     testConnection,
     syncNow,

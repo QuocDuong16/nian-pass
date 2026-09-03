@@ -21,6 +21,10 @@ export function runChecks(root) {
   const profileSource = readRustProduction(
     resolve(root, "apps/desktop/src-tauri/src/sync/profile.rs"),
   );
+  const engineSource = readRustProduction(resolve(root, "crates/sync-engine/src/engine.rs"));
+  const conflictAuthoritySource = readRustProduction(
+    resolve(root, "crates/sync-engine/src/conflict_authority.rs"),
+  );
   const storeSource = readRustProduction(resolve(root, "crates/sync-engine/src/store.rs"));
   const webdavSource = readRustProduction(
     resolve(root, "crates/sync-provider-webdav/src/lib.rs"),
@@ -32,6 +36,8 @@ export function runChecks(root) {
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml",
   );
+  const architecture = source(root, "docs/architecture.md");
+  const threatModel = source(root, "docs/threat-model.md");
 
   for (const [path, manifest] of [
     ["crates/vault-sync/Cargo.toml", vaultSyncManifest],
@@ -62,6 +68,40 @@ export function runChecks(root) {
   if (/\b(?:password|secretAccessKey|secret_access_key|sessionToken|session_token|masterPassword|master_password)\b/.test(`${profileSource}\n${storeSource}`)) {
     violations.push("persistent sync profile/BASE/journal structures contain a secret field name");
   }
+  if (
+    !/derive\(Clone, Eq, PartialEq, Serialize, Deserialize\)[\s\S]{0,160}enum SyncProfileTargetDto/.test(
+      profileSource,
+    ) ||
+    !/existing\.source_binding\s*!=\s*source_binding\s*\|\|\s*existing\.target\s*!=\s*target/.test(
+      profileSource,
+    ) ||
+    !/fn normalized\([\s\S]{0,2400}fn target_binding\(/.test(profileSource)
+  ) {
+    violations.push("existing profile IDs must retain one typed normalized remote target");
+  }
+  if (
+    !/pub struct TargetBinding\(/.test(storeSource) ||
+    !/struct SyncStore[\s\S]{0,240}target:\s*TargetBinding/.test(storeSource) ||
+    !/struct BaseMetadata[\s\S]{0,240}target:\s*TargetBinding/.test(storeSource) ||
+    !/struct JournalRecord[\s\S]{0,240}target:\s*TargetBinding/.test(storeSource) ||
+    !/target\s*!=\s*&self\.target[\s\S]{0,100}WrongTarget/.test(storeSource)
+  ) {
+    violations.push("BASE and journal must remain bound to the exact remote target");
+  }
+  if (
+    !/pub async fn sync[\s\S]{0,520}invalidate_pending_conflict\(\)\?;[\s\S]{0,160}capture_clean\(\)\?/.test(
+      engineSource,
+    )
+  ) {
+    violations.push("every explicit sync must invalidate stale conflict authority before work");
+  }
+  if (
+    !/require_base_unchanged\(pending\.base_digest\.as_ref\(\)\)\?/.test(engineSource) ||
+    !/base_digest:\s*Option<CiphertextDigest>/.test(conflictAuthoritySource) ||
+    /_base_digest/.test(`${engineSource}\n${conflictAuthoritySource}`)
+  ) {
+    violations.push("conflict resolution must enforce the exact BASE state that issued its token");
+  }
   if (!/Policy::none\(\)/.test(webdavSource)) {
     violations.push("WebDAV redirects must remain disabled");
   }
@@ -78,6 +118,21 @@ export function runChecks(root) {
   }
   if (!/with_max_attempts\(1\)/.test(s3Source)) {
     violations.push("S3 SDK retries must not blindly replay conditional PUT");
+  }
+  if (
+    !/profile_id[\s\S]{0,200}immutable[\s\S]{0,100}local-source \+ remote-target/i.test(
+      architecture,
+    ) ||
+    !/malicious or broken server[\s\S]{0,700}cannot always detect/i.test(architecture)
+  ) {
+    violations.push("architecture must document immutable targets and the ignored-CAS limit");
+  }
+  if (
+    !/malicious or broken provider[\s\S]{0,600}cannot always be detected/i.test(threatModel) ||
+    !/provider cooperates/i.test(threatModel) ||
+    !/no cryptographic remote[\s\S]{0,160}conditional-enforcement/i.test(threatModel)
+  ) {
+    violations.push("threat model must not claim malicious ignored-CAS detection");
   }
   return violations;
 }

@@ -35,6 +35,7 @@ pub struct SyncRuntime {
 
 struct EngineEntry {
     source_binding: String,
+    target_binding: String,
     engine: Arc<SyncEngine>,
 }
 
@@ -150,8 +151,11 @@ impl SyncRuntime {
 
     fn engine(&self, profile: &StoredProfile) -> Result<Arc<SyncEngine>, DesktopError> {
         let mut engines = self.engines.lock().map_err(|_| DesktopError::Internal)?;
+        let target = profile.target.target_binding()?;
         if let Some(entry) = engines.get(&profile.profile_id) {
-            if entry.source_binding == profile.source_binding {
+            if entry.source_binding == profile.source_binding
+                && entry.target_binding == target.as_str()
+            {
                 return Ok(entry.engine.clone());
             }
             return Err(DesktopError::InvalidRequest);
@@ -160,13 +164,14 @@ impl SyncRuntime {
             ProfileId::parse(&profile.profile_id).map_err(|_| DesktopError::InvalidRequest)?;
         let source = SourceBinding::from_sha256(profile.source_binding.clone())
             .map_err(|_| DesktopError::InvalidRequest)?;
-        let store = SyncStore::open(&self.application_data, profile_id, source)
+        let store = SyncStore::open(&self.application_data, profile_id, source, target.clone())
             .map_err(|_| DesktopError::SyncRecoveryRequired)?;
         let engine = Arc::new(SyncEngine::new(store));
         engines.insert(
             profile.profile_id.clone(),
             EngineEntry {
                 source_binding: profile.source_binding.clone(),
+                target_binding: target.as_str().to_owned(),
                 engine: engine.clone(),
             },
         );
@@ -283,7 +288,8 @@ pub fn recovery_status(
     let id = ProfileId::parse(&profile.profile_id).map_err(|_| DesktopError::InvalidRequest)?;
     let source = SourceBinding::from_sha256(profile.source_binding.clone())
         .map_err(|_| DesktopError::InvalidRequest)?;
-    SyncStore::open(application_data, id, source)
+    let target = profile.target.target_binding()?;
+    SyncStore::open(application_data, id, source, target)
         .and_then(|store| store.recovery_status())
         .map_err(|_| DesktopError::SyncRecoveryRequired)
 }

@@ -7,6 +7,7 @@
 mod codec;
 mod commit;
 mod conflict;
+mod conflict_authority;
 mod engine;
 mod error;
 mod local;
@@ -18,4 +19,4 @@ pub use conflict::{ConflictChoice, ConflictDescriptor, ConflictOperation};
 pub use engine::{SyncCompletion, SyncEngine, SyncOutcome};
 pub use error::SyncError;
 pub use local::{LocalCommitError, LocalSnapshot, LocalVault};
-pub use store::{ProfileId, RecoveryStatus, SourceBinding, StoreError, SyncStore};
+pub use store::{ProfileId, RecoveryStatus, SourceBinding, StoreError, SyncStore, TargetBinding};

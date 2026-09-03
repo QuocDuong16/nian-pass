@@ -50,6 +50,7 @@ function fixture(t) {
       "Security attention suppresses Save and reload dialogs; in-flight work continues and is reconciled rather than cancelled. " +
       "A dirty draft remains shielded and lifecycle never autosaves or discards it.\n" +
       "M7 BYO-cloud sync boundary receives encrypted remote KDBX bytes + opaque RemoteRevision through sync-provider-core, then sync-engine calls vault-sync::merge. A private journal precedes conditional remote CAS and persists BASE last. " +
+      "Each profile_id identifies one immutable local-source + remote-target relationship. A malicious or broken server can ignore conditional headers after a successful overwrite, and the client cannot always detect that violation. " +
       "UIDocumentPickerViewController uses NSFileCoordinator before an encrypted App Group mirror. " +
       "Host-only access group stores the bookmark; Keychain NEVER stores a master password. " +
       "np_ios_open_vault uses explicit FFI ownership and panic containment.\n",
@@ -67,7 +68,7 @@ function fixture(t) {
       "FLAG_SECURE cannot defeat root or a compromised OS; monotonic policy rejects wall-clock rollback. " +
       "Android process death can lose unsaved edits, but plaintext recovery persistence is forbidden.\n" +
       "The extension is a separate short-lived process. Mirror size and SHA-256 reject tampering before identity release.\n" +
-      "M7 models a malicious or compromised provider, stale revisions, and servers ignoring conditional headers. It rejects TLS downgrade, redirect credential leaks, AWS credential-chain surprise, and oversized objects. M7 makes no cryptographic remote rollback claim.\n",
+      "M7 models a malicious or broken provider, stale revisions, and servers ignoring conditional headers. It rejects TLS downgrade, redirect credential leaks, AWS credential-chain surprise, and oversized objects. M7 makes no cryptographic remote rollback or conditional-enforcement claim. A successful protocol violation cannot always be detected by read-back; CAS protects concurrency only when the provider cooperates.\n",
   );
   write(
     root,

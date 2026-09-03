@@ -191,7 +191,7 @@ test("creates a non-secret WebDAV profile and reports failures generically", asy
   });
 });
 
-test("edits every S3 field, tests read-only connectivity, and syncs", async () => {
+test("creates a new S3 target, tests read-only connectivity, and syncs", async () => {
   const s3Profile = {
     profileId: "8f01f858-d99c-43d6-b2c6-e5f77caf9212",
     target: {
@@ -234,6 +234,14 @@ test("edits every S3 field, tests read-only connectivity, and syncs", async () =
   expect(
     await screen.findByText("Sync recovery required."),
   ).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Saved sync profile"), {
+    target: { value: "" },
+  });
+  expect(
+    await screen.findByText(
+      "New profile. Saving creates a new remote relationship.",
+    ),
+  ).toBeInTheDocument();
   for (const [label, value] of [
     ["Endpoint (optional)", "http://127.0.0.1:9000"],
     ["Region", "test-region"],
@@ -251,7 +259,6 @@ test("edits every S3 field, tests read-only connectivity, and syncs", async () =
   );
   await waitFor(() => {
     expect(saveSyncProfile).toHaveBeenCalledWith({
-      profileId: s3Profile.profileId,
       target: {
         provider: "s3",
         endpoint: "http://127.0.0.1:9000",

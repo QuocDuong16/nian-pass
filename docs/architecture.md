@@ -34,8 +34,14 @@ validation, disabled redirects, bounded bodies, and `If-None-Match`/`If-Match`.
 `sync-provider-s3` owns the exact AWS S3 SDK, explicit in-memory credentials,
 optional endpoint/path-style configuration, SigV4, and the same CAS outcomes.
 Custom endpoints are potentially compatible, not trusted or certified: a
-missing or inconsistent revision, ignored precondition, weak ETag, or unsafe
-read-back fails closed.
+missing or inconsistent revision, explicit precondition rejection, weak ETag,
+or mismatching/uncertain read-back fails closed. Nian Pass sends exact
+conditional writes, maps explicit 409/412 responses to concurrency changes, and
+verifies successful writes by reading back the exact ciphertext. Compatible
+providers are expected to honor those conditions. A malicious or broken server
+can ignore a conditional header, overwrite anyway, return success, and serve the
+candidate on read-back; M7 cannot always detect that protocol violation after a
+successful overwrite.
 
 `crates/sync-engine` has no Tauri or concrete provider dependency. It owns the
 encrypted BASE repository, local/remote generation preconditions, semantic
@@ -44,14 +50,20 @@ journal. `crates/vault-sync` never talks to the network and remains the only
 entry/group/field merge authority. Providers cannot select winners and expose
 no unconditional write method.
 
-Each UUID-v4 profile is bound to a private SHA-256 source reference for one
-canonical desktop KDBX path. Non-secret target configuration may be stored;
-userinfo is forbidden and provider credentials never enter profile JSON. The
-BASE lives under private per-user application data and contains only exact
-encrypted KDBX ciphertext. Its metadata binds schema, profile, source,
-ciphertext SHA-256, and opaque remote revision. Unix directories are 0700 and
-BASE, journal, candidate, and metadata files are 0600. Digests are verified
-before any BASE or journal is trusted.
+Each UUID-v4 `profile_id` identifies one immutable local-source + remote-target
+sync relationship. The remote target is normalized and compared as a typed
+WebDAV or S3 identity; changing provider, WebDAV resource URL, S3 endpoint,
+region, bucket, object key, or addressing mode requires a new UUID-v4 profile.
+BASE and journal metadata carry a private SHA-256 target binding as well as the
+private canonical-source binding, so persisted state cannot be reinterpreted
+for another object even if profile metadata is changed outside the application.
+Non-secret target configuration may be stored; userinfo is forbidden and
+provider credentials never enter profile JSON. The BASE lives under private
+per-user application data and contains only exact encrypted KDBX ciphertext.
+Its metadata binds schema, profile, source, target, ciphertext SHA-256, and
+opaque remote revision. Unix directories are 0700 and BASE, journal, candidate,
+and metadata files are 0600. Digests are verified before any BASE or journal is
+trusted.
 
 ```text
 capture clean LOCAL source, ciphertext digest, and authority generation
@@ -95,7 +107,15 @@ FastForwardLocal, FastForwardRemote, Merged, and Conflicted outcomes come only
 from `vault_sync::merge`. Conflict DTOs contain structured kinds/counts and
 safe identities, never competing plaintext values. Keep Local and Keep Remote
 require a second explicit confirmation and consume one exact generation-bound
-token.
+token. Every newer explicit sync attempt first invalidates the previous pending
+conflict. Resolution consumes the token before execution and reloads BASE; the
+profile, source, BASE presence/digest, local ciphertext/session authority, and
+remote ciphertext/revision must all still match the state that issued it.
+
+Conditional writes protect cooperating-provider concurrency and accidental
+overwrite. Read-back proves which ciphertext the provider serves after the
+request, not that a malicious provider truly enforced `If-Match` or
+`If-None-Match`, and M7 provides no cryptographic remote history guarantee.
 
 ## M6.5 browser and desktop credential boundary
 

@@ -10,10 +10,14 @@ claim that Nian Pass is ready to protect production credentials.
 
 ## M7 cloud-sync threats and residual limits
 
-The compact M7 boundary is: a malicious or compromised provider may ignore
-conditional headers, so CAS failures and uncertain results fail closed; the S3
-client avoids AWS credential-chain surprise; M7 makes no cryptographic remote
-rollback claim.
+The compact M7 boundary is: Nian Pass sends exact conditional headers, maps
+explicit precondition failures to concurrency changes, re-reads uncertain
+writes, and verifies successful writes by exact ciphertext read-back. Compatible
+providers are expected to enforce CAS. A malicious or broken provider may ignore
+the condition, overwrite anyway, and then serve the candidate; that successful
+protocol violation cannot always be detected by the client. The S3 client avoids
+AWS credential-chain surprise, and M7 makes no cryptographic remote rollback or
+conditional-enforcement claim.
 
 M7 treats WebDAV/S3, the network, proxies, other sync clients, and local
 filesystem actors as untrusted. The cloud provider sees encrypted KDBX
@@ -33,7 +37,8 @@ Controls are fail-closed and layered:
 - Remote writes are only create-if-absent or replace-if-exact-opaque-revision.
   WebDAV accepts only strong ETags; an S3-compatible label grants no trust.
   Revision tokens are never interpreted as hashes, and SHA-256 ciphertext
-  identity is tracked separately.
+  identity is tracked separately. Explicit 409/412 responses are concurrency
+  changes; successful responses are followed by exact ciphertext read-back.
 - HTTPS is mandatory off loopback. Invalid-certificate and hostname bypasses
   do not exist. WebDAV redirects are disabled so Basic Authorization cannot
   cross origins.
@@ -45,7 +50,9 @@ Controls are fail-closed and layered:
   overwritten by stale network completion. No vault mutex spans HTTP.
 - BASE and journal ciphertext/digests are private and validated. Journal phases
   make a remote-success/local-pending crash explicit; BASE is updated last and
-  means the last proven common generation, not the last attempted upload.
+  means the last proven common generation, not the last attempted upload. Their
+  metadata binds both the local source and a normalized remote-target digest;
+  one profile ID cannot be retargeted to reuse that state.
 - Provider credentials and the master password are one-shot secret values.
   They are absent from profiles, BASE metadata, journal, browser state,
   Android, logs, errors, and startup behavior. The S3 client is constructed
@@ -53,16 +60,20 @@ Controls are fail-closed and layered:
   file, SSO, ECS, or EC2 IMDS providers.
 - Conflict reports expose kinds/counts and safe identities only. Destructive
   whole-vault resolution requires explicit confirmation plus a random,
-  single-use token bound to profile, BASE, local generation, and remote
-  revision.
+  process-local single-use token bound to profile, source, BASE presence/digest,
+  local ciphertext/session authority, and remote ciphertext/revision. A newer
+  explicit sync invalidates the older pending token before it does any work.
 
 A malicious provider can still withhold, delete, corrupt, fork, or replay an
-older valid KDBX generation, lie about freshness, and reveal access metadata.
-CAS plus local BASE protects against accidental and concurrent overwrite; BASE
-is not a globally trusted append-only log. M7 makes no cryptographic remote
-rollback-detection or availability claim. Detecting malicious rollback would
-require a separately reviewed trusted history/anti-rollback design, not M7.5
-being silently assumed.
+older valid KDBX generation, lie about freshness, ignore conditional headers,
+overwrite despite a stale condition, and reveal access metadata. If it returns
+success and then serves the uploaded candidate, read-back cannot prove whether
+the condition was enforced. CAS plus local BASE protects against accidental and
+concurrent overwrite when the provider cooperates; BASE is not a globally
+trusted append-only log. M7 makes no cryptographic remote rollback-detection,
+conditional-enforcement, or availability claim. Detecting malicious rollback
+would require a separately reviewed trusted history/anti-rollback design, not
+M7.5 being silently assumed.
 
 ## M6.5 browser trust hierarchy and threats
 
