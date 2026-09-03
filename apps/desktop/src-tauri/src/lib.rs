@@ -18,6 +18,8 @@ mod persistence;
 mod platform;
 #[cfg(any(desktop, test))]
 mod state;
+#[cfg(any(desktop, test))]
+mod sync;
 
 #[cfg(desktop)]
 use std::sync::Arc;
@@ -29,14 +31,18 @@ use clipboard::TauriClipboard;
 #[cfg(desktop)]
 use commands::{
     close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
-    delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock, entry_detail,
-    lock_vault, move_entry, move_group, reload_vault, rename_group, resolve_browser_connection,
-    reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
-    reveal_entry_url, reveal_entry_username, runtime_info, save_vault, select_vault,
-    set_entry_custom_field, unlock_vault, update_entry, vault_snapshot,
+    delete_entry, delete_entry_custom_field, delete_group, delete_sync_profile,
+    discard_changes_and_lock, entry_detail, lock_vault, move_entry, move_group, reload_vault,
+    rename_group, resolve_browser_connection, resolve_sync_conflict, reveal_entry_custom_field,
+    reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
+    reveal_entry_username, runtime_info, save_sync_profile, save_vault, select_vault,
+    set_entry_custom_field, sync_now, sync_profiles, test_sync_provider, unlock_vault,
+    update_entry, vault_snapshot,
 };
 #[cfg(desktop)]
 use state::AppState;
+#[cfg(desktop)]
+use sync::SyncRuntime;
 #[cfg(desktop)]
 use tauri::{Manager, Runtime};
 
@@ -51,6 +57,10 @@ fn with_desktop_plugins<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
 #[cfg(desktop)]
 fn setup_app<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
     install_app_state(app);
+    let application_data = app.path().app_data_dir()?;
+    let sync = SyncRuntime::new(application_data)
+        .map_err(|_| std::io::Error::other("could not initialize private sync state"))?;
+    app.manage(sync);
     Ok(())
 }
 
@@ -105,7 +115,13 @@ pub fn run() {
             close_policy,
             lock_vault,
             discard_changes_and_lock,
-            resolve_browser_connection
+            resolve_browser_connection,
+            sync_profiles,
+            save_sync_profile,
+            delete_sync_profile,
+            test_sync_provider,
+            sync_now,
+            resolve_sync_conflict
         ])
         .run(tauri::generate_context!())
         .expect("Nian Pass desktop runtime failed");

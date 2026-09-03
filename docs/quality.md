@@ -46,6 +46,42 @@ Forgejo's compatibility job uses `compat-check-required` so a missing external
 binary fails. Cargo always uses `--locked`; pnpm install always uses
 `--frozen-lockfile`.
 
+M7 adds `sync-source-check`, `sync-core-check`, `sync-provider-check`, and
+`sync-integration-check`. Quick feedback runs deterministic source, engine, and
+provider tests without containers. The full quality gate runs real KDBX
+BASE/LOCAL/REMOTE outcomes, journal recovery/failure injection, WebDAV
+loopback protocol tests, and deterministic signed S3 request/result tests; no
+AWS account, remote WebDAV account, live credentials, or internet service is
+required. Any future DIND object-server image must be immutable-pinned and may
+not weaken AWS conditional semantics to satisfy a compatible product.
+
+The concrete network dependencies are exactly `reqwest 0.13.4` with
+`rustls-no-provider`, `rustls 0.23.43` with Ring,
+`aws-sdk-s3 1.144.0`, `aws-smithy-http-client 1.4.0`, and `tokio 1.53.1`. The S3
+adapter deliberately does not depend on `aws-config`: it builds the official
+SDK service config with explicit credentials, so no default credential
+provider or hidden metadata request can start. The SDK HTTPS client is built
+explicitly with the Rustls Ring provider; this retains a Rustls-only transport
+and keeps Linux-to-Windows checks independent of AWS-LC's external C toolchain.
+Cargo-deny review adds only the permissive ISC, MIT-0, and
+CDLA-Permissive-2.0 licenses required by the reviewed Rustls/AWS dependency
+graph; no M7 advisory ignore or broad package exemption is added.
+
+Architecture checks keep `vault-sync` network-free,
+`sync-provider-core` free of concrete transports, `sync-engine` free of Tauri,
+desktop providers out of Android production dependencies, the browser native
+host independent from sync providers, and Android release INTERNET permission
+absent. Source checks reject blind provider methods, production remote HTTP,
+redirect following, persisted secret fields, and automatic S3 retry. Unix
+tests assert 0700 directories and 0600 BASE/journal/metadata files.
+
+`windows-cross-check` compiles the engine, both providers, desktop integration,
+and the narrow ACL-preserving `ReplaceFileW` adapter for
+`x86_64-pc-windows-gnu`. Cross-compilation is not Windows runtime evidence.
+Real WebDAV, AWS S3, S3-compatible, and Windows runtime smoke remain manual and
+must each be reported as RUN or NOT RUN. Ordinary CI stays Forgejo-owned; M7
+adds no GitHub Actions workflow and M8 still owns tag-only release engineering.
+
 M6.5 keeps `browser-source-check` and `browser-extension-check` and adds
 `browser-native-protocol-check`, `browser-native-host-check`, and
 `browser-integration-check` to normal `quick-check` and `quality-check`. The

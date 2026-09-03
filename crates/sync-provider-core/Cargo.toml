@@ -1,0 +1,15 @@
+[package]
+name = "sync-provider-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Provider-neutral conditional remote object contract for Nian Pass sync"
+
+[dependencies]
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

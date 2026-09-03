@@ -2,7 +2,6 @@ import type {
   ClosePolicyDto,
   CreatedEntryDto,
   CreatedGroupDto,
-  DesktopErrorCode,
   EntrySummaryDto,
   GroupDto,
   SelectedVaultDto,
@@ -48,32 +47,7 @@ function strings(value: unknown): string[] {
   return value.map(nonEmptyString);
 }
 
-export function parseDesktopErrorCode(value: unknown): DesktopErrorCode {
-  switch (value) {
-    case "already_unlocked":
-    case "locked":
-    case "no_vault_selected":
-    case "unlock_failed":
-    case "unsupported_vault":
-    case "entry_not_found":
-    case "group_not_found":
-    case "invalid_request":
-    case "invalid_move":
-    case "reserved_field":
-    case "secret_unavailable":
-    case "unsaved_changes":
-    case "save_failed":
-    case "save_authentication_failed":
-    case "save_uncertain":
-    case "external_change":
-    case "reload_failed":
-    case "clipboard_failed":
-    case "internal":
-      return value;
-    default:
-      return invalidContract();
-  }
-}
+export { parseDesktopErrorCode } from "./desktop-errors";
 
 export function parseSummaryText(value: unknown): SummaryTextDto {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

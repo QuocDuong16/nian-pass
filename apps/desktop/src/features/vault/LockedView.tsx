@@ -37,6 +37,15 @@ function unlockMessage(code: DesktopErrorCode): string {
     case "locked":
     case "no_vault_selected":
     case "internal":
+    case "operation_in_progress":
+    case "sync_failed":
+    case "sync_remote_changed":
+    case "sync_local_changed":
+    case "sync_local_changed_during_recovery":
+    case "sync_recovery_required":
+    case "sync_unsupported_provider":
+    case "sync_unsafe_provider":
+    case "sync_credentials_required":
       return "Nian Pass could not open the vault. Try again.";
   }
 }

@@ -9,6 +9,7 @@ import { EntryList } from "./EntryList";
 import { GroupActions } from "./GroupActions";
 import { GroupTree } from "./GroupTree";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
+import { SyncSection } from "../sync/SyncSection";
 
 interface UnlockedViewProps {
   api: DesktopApi;
@@ -49,6 +50,7 @@ export function UnlockedView({
   const [detailBusy, setDetailBusy] = useState(false);
   const [groupDraft, setGroupDraft] = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
   const groupsById = useMemo(
     () => new Map(snapshot.groups.map((group) => [group.id, group])),
     [snapshot.groups],
@@ -61,7 +63,7 @@ export function UnlockedView({
     groupsById.get(selectedGroupId) ?? groupsById.get(snapshot.rootGroupId);
 
   const hasDraft = creatingEntry || detailDraft || groupDraft;
-  const mutationPending = createBusy || detailBusy || groupBusy;
+  const mutationPending = createBusy || detailBusy || groupBusy || syncBusy;
 
   useSecurityFormTelemetry(
     hasDraft,
@@ -213,6 +215,12 @@ export function UnlockedView({
           />
         )}
       </div>
+      <SyncSection
+        api={api}
+        disabled={disabled || hasDraft || mutationPending || snapshot.dirty}
+        onBusyChange={setSyncBusy}
+        onSnapshot={onSnapshot}
+      />
       {creatingEntry && !disabled ? (
         <EntryCreateDialog
           api={api}

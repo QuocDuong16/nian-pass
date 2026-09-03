@@ -722,6 +722,54 @@ textarea {
   background: #fafbfa;
 }
 
+.sync-section {
+  margin: 24px;
+  border: 1px solid #d7dfd9;
+  border-radius: 14px;
+  padding: 22px;
+  background: #fbfcfb;
+}
+.sync-section h2,
+.sync-section h3 {
+  margin: 0;
+}
+.sync-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+.sync-wide {
+  grid-column: 1 / -1;
+}
+.checkbox-field {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  grid-template-columns: auto 1fr;
+}
+.sync-note,
+.sync-status,
+.sync-warning,
+.sync-conflict p {
+  color: #5c6c63;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.sync-status {
+  min-height: 20px;
+}
+.sync-warning {
+  color: #744f1f;
+}
+.sync-conflict {
+  margin-top: 18px;
+  border: 1px solid #e2c4b8;
+  border-radius: 10px;
+  padding: 18px;
+  background: #fff8f4;
+}
+
 @media (max-width: 900px) {
   .vault-layout {
     grid-template-columns: 180px minmax(240px, 0.85fr) minmax(300px, 1.15fr);

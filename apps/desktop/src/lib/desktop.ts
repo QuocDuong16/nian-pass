@@ -17,6 +17,7 @@ import type {
   VaultSnapshotDto,
 } from "../types/desktop";
 import type { RuntimeInfoDto } from "../types/runtime";
+import { createSyncApi, type SyncApi } from "./sync-api";
 import {
   parseClipboardReceipt,
   parseEntryDetail,
@@ -38,7 +39,7 @@ export interface RuntimeApi {
   getInfo: () => Promise<RuntimeInfoDto>;
 }
 
-export interface DesktopApi {
+export interface DesktopApi extends SyncApi {
   selectVault: () => Promise<SelectedVaultDto | null>;
   unlockVault: (password: string) => Promise<VaultSnapshotDto>;
   getVaultSnapshot: () => Promise<VaultSnapshotDto>;
@@ -184,6 +185,7 @@ export const desktopApi: DesktopApi = {
   lockVault: () => call("lock_vault", parseLockResult),
   discardChangesAndLock: () =>
     call("discard_changes_and_lock", parseLockResult),
+  ...createSyncApi(call),
 };
 
 export const runtimeApi: RuntimeApi = {

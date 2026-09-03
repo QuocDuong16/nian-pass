@@ -18,7 +18,7 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "## Current milestone\nM6.5 — Browser Native Messaging / Desktop Integration\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle DONE\nM6 Browser Extension Foundation DONE\nM6.5 Browser Native Messaging / Desktop Integration DONE\nM7 BYO-cloud Sync Providers NEXT\nBrowser integration uses Chromium/Firefox MV3 with explicit per-site access, Nian Pass Native Messaging host, exact-document fill, and never automatically submit. Read-only providers have editing and Save disabled. " +
+    "## Current milestone\nM7 — BYO-cloud Sync Providers\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle DONE\nM6 Browser Extension Foundation DONE\nM6.5 Browser Native Messaging / Desktop Integration DONE\nM7 BYO-cloud Sync Providers DONE\nM7.5 Self-hosted Sync Gateway NEXT\nDesktop explicit sync supports WebDAV and AWS S3. Sync is manual only and provider credentials are not persisted.\nBrowser integration uses Chromium/Firefox MV3 with explicit per-site access, Nian Pass Native Messaging host, exact-document fill, and never automatically submit. Read-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
@@ -41,14 +41,15 @@ function fixture(t) {
       "A populated origin failure is unavailable; isOriginPopulated() then getOrigin(privilegedAllowlist). " +
       "retrieveBeginGetCredentialRequest() and retrieveProviderGetCredentialRequest() rebuild authority after process restart. " +
       "The bookmark has a READ-only SAF flag; Lock verifies READ=yes and WRITE=no.\n" +
-    "M6.5 browser and desktop credential boundary: background extension authority then Native Messaging stdio, user-local Unix socket or Windows named pipe, DesktopVaultService, and credential-provider-core. Browser host permission is not credential identity. " +
-    "BrowserBridgeState is always Available or Unavailable; secure bind failure does not abort desktop setup and recovery uses a desktop restart. Windows manifest and HKCU registration restore both states on rollback. " +
-    "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
+      "M6.5 browser and desktop credential boundary: background extension authority then Native Messaging stdio, user-local Unix socket or Windows named pipe, DesktopVaultService, and credential-provider-core. Browser host permission is not credential identity. " +
+      "BrowserBridgeState is always Available or Unavailable; secure bind failure does not abort desktop setup and recovery uses a desktop restart. Windows manifest and HKCU registration restore both states on rollback. " +
+      "M5.5 uses FLAG_SECURE and setRecentsScreenshotEnabled(false) before the privacy curtain. " +
       "SystemClock.elapsedRealtime() feeds a monotonic generation and exact safe-UI acknowledgement. " +
       "Global processForeground and screen state are separate from per-Activity activityResumed and windowFocused. ProcessLifecycleOwner is not the immediate confidentiality boundary. MainActivity and CredentialActivity cannot authorize one another. " +
       "PowerManager.isInteractive precedes KeyguardManager.isDeviceLocked. " +
       "Security attention suppresses Save and reload dialogs; in-flight work continues and is reconciled rather than cancelled. " +
       "A dirty draft remains shielded and lifecycle never autosaves or discards it.\n" +
+      "M7 BYO-cloud sync boundary receives encrypted remote KDBX bytes + opaque RemoteRevision through sync-provider-core, then sync-engine calls vault-sync::merge. A private journal precedes conditional remote CAS and persists BASE last. " +
       "UIDocumentPickerViewController uses NSFileCoordinator before an encrypted App Group mirror. " +
       "Host-only access group stores the bookmark; Keychain NEVER stores a master password. " +
       "np_ios_open_vault uses explicit FFI ownership and panic containment.\n",
@@ -65,7 +66,8 @@ function fixture(t) {
       "setUserAuthenticationRequired(false) protects metadata with no master password.\n" +
       "FLAG_SECURE cannot defeat root or a compromised OS; monotonic policy rejects wall-clock rollback. " +
       "Android process death can lose unsaved edits, but plaintext recovery persistence is forbidden.\n" +
-      "The extension is a separate short-lived process. Mirror size and SHA-256 reject tampering before identity release.\n",
+      "The extension is a separate short-lived process. Mirror size and SHA-256 reject tampering before identity release.\n" +
+      "M7 models a malicious or compromised provider, stale revisions, and servers ignoring conditional headers. It rejects TLS downgrade, redirect credential leaks, AWS credential-chain surprise, and oversized objects. M7 makes no cryptographic remote rollback claim.\n",
   );
   write(
     root,
@@ -82,7 +84,8 @@ function fixture(t) {
       "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
       "M5.5 requires PowerManager.isInteractive and SystemClock.elapsedRealtime lifecycle source ratchets; same-process Lock/unlock timeout retention and new-root reset are tested; Android instrumentation only compiles headlessly.\n" +
       "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension. browser-source-check then browser-extension-check then browser-native-protocol-check then browser-native-host-check then browser-integration-check do not require Chrome Chromium or Firefox GUI browsers.\n" +
-      "Bridge startup failure leaves the vault usable; Windows installer rollback is tested with failure injection.\n",
+      "Bridge startup failure leaves the vault usable; Windows installer rollback is tested with failure injection.\n" +
+      "sync-source-check then sync-core-check then sync-provider-check then sync-integration-check cover M7.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");
@@ -98,7 +101,11 @@ function fixture(t) {
   );
   write(root, ".mise.toml", '[tools]\nrust = "1.98.0"\n');
   write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.98.0"\n');
-  write(root, "Makefile", "RUST_VERSION := $(shell awk -F'\\\"' '/^rust = / { print $$2 }' .mise.toml)\n");
+  write(
+    root,
+    "Makefile",
+    "RUST_VERSION := $(shell awk -F'\\\"' '/^rust = / { print $$2 }' .mise.toml)\n",
+  );
   return root;
 }
 

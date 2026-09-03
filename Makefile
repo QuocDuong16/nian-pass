@@ -20,7 +20,8 @@ DIFF_BASE_ARGS = $(if $(strip $(COVERAGE_DIFF_BASE)),--base "$(COVERAGE_DIFF_BAS
 
 CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync \
 	-p credential-provider-core -p ios-credential-ffi -p browser-native-protocol \
-	-p nian-pass-browser-host
+	-p nian-pass-browser-host -p sync-provider-core -p sync-engine \
+	-p sync-provider-webdav -p sync-provider-s3 -p windows-safe-replace
 
 .PHONY: tools-install tools-check fixture-check \
 	rust-format rust-lint rust-test rust-doc rust-deps-check rust-security-check \
@@ -36,7 +37,8 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	browser-native-protocol-check browser-native-host-check browser-integration-check \
 	architecture-check security-check docs-check scripts-install scripts-check mobile-source-check \
 	mobile-tools-check mobile-android-check mobile-ios-tools-check mobile-ios-source-check mobile-ios-check \
-	compat-check compat-check-required policy-check quick-check quality-check
+	compat-check compat-check-required policy-check quick-check quality-check \
+	sync-source-check sync-core-check sync-provider-check sync-integration-check
 
 tools-install:
 	@echo "Install pinned Rust quality tools locally..."
@@ -294,8 +296,31 @@ browser-integration-check: browser-install
 windows-cross-check:
 	@echo "Cross-check persistence, browser host, IPC, installer, and desktop for Windows..."
 	cargo check --locked --all-targets --target x86_64-pc-windows-gnu \
-		-p vault-session -p vault-sync -p browser-native-protocol \
+		-p vault-session -p vault-sync -p windows-safe-replace -p sync-provider-core -p sync-engine \
+		-p sync-provider-webdav -p sync-provider-s3 -p browser-native-protocol \
 		-p nian-pass-browser-host -p nian-pass-desktop
+
+sync-source-check:
+	@echo "Check M7 sync architecture and secret-persistence invariants..."
+	node scripts/check_sync.mjs
+
+sync-core-check: sync-source-check
+	@echo "Check provider-independent sync contract and engine..."
+	cargo test --locked -p sync-provider-core -p sync-engine
+	cargo clippy --locked -p sync-provider-core -p sync-engine --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p sync-provider-core -p sync-engine --all-features --no-deps
+
+sync-provider-check: sync-source-check
+	@echo "Check WebDAV and S3 conditional transports..."
+	cargo test --locked -p sync-provider-webdav -p sync-provider-s3
+	cargo clippy --locked -p sync-provider-webdav -p sync-provider-s3 --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p sync-provider-webdav -p sync-provider-s3 --all-features --no-deps
+
+sync-integration-check:
+	@echo "Run deterministic loopback provider and crash-recovery integration tests..."
+	cargo test --locked -p sync-engine --test sync
+	cargo test --locked -p sync-provider-webdav
+	cargo test --locked -p sync-provider-s3
 
 mobile-source-check:
 	@echo "Check deterministic mobile foundation sources..."
@@ -369,6 +394,7 @@ policy-check:
 	$(MAKE) mobile-source-check
 	$(MAKE) security-check
 	$(MAKE) docs-check
+	$(MAKE) sync-source-check
 
 quick-check:
 	$(MAKE) fixture-check
@@ -378,6 +404,8 @@ quick-check:
 	$(MAKE) rust-format
 	$(MAKE) rust-lint
 	$(MAKE) rust-test
+	$(MAKE) sync-core-check
+	$(MAKE) sync-provider-check
 	$(MAKE) desktop-format-check
 	$(MAKE) desktop-lint
 	$(MAKE) desktop-no-eslint-disable
@@ -396,6 +424,9 @@ quality-check:
 	$(MAKE) architecture-check
 	$(MAKE) mobile-source-check
 	$(MAKE) rust-check
+	$(MAKE) sync-core-check
+	$(MAKE) sync-provider-check
+	$(MAKE) sync-integration-check
 	$(MAKE) desktop-check
 	$(MAKE) browser-source-check
 	$(MAKE) browser-extension-check

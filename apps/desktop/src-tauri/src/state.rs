@@ -1,44 +1,24 @@
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-
-use vault_core::{EntryId, SecretString};
-use vault_session::{SessionError, VaultSession};
-
-use credential_provider_core::ProviderError;
-
-mod browser;
-
-use crate::{
-    clipboard::{
-        ClipboardClearStatus, ClipboardCopy, ClipboardFailure, ClipboardPort,
-        DesktopClipboardService,
-    },
-    dto::{ClosePolicyDto, EntryDetailDto, SelectedVaultDto, VaultSnapshotDto},
+use std::path::PathBuf;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 
-/// Stable public failures. No variant carries a path, parser detail, or secret.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DesktopError {
-    AlreadyUnlocked,
-    Locked,
-    NoVaultSelected,
-    UnlockFailed,
-    UnsupportedVault,
-    EntryNotFound,
-    GroupNotFound,
-    InvalidRequest,
-    InvalidMove,
-    ReservedField,
-    SecretUnavailable,
-    UnsavedChanges,
-    SaveFailed,
-    SaveAuthenticationFailed,
-    SaveUncertain,
-    ExternalChange,
-    ReloadFailed,
-    ClipboardFailed,
-    Internal,
-}
+use vault_core::{EntryId, SecretString};
+use vault_session::VaultSession;
+
+mod browser;
+mod error;
+mod sync_support;
+
+pub use error::DesktopError;
+pub(crate) use error::map_mutation_error;
+use error::{map_clipboard_error, map_open_error, map_provider_error, map_save_error};
+
+use crate::{
+    clipboard::{ClipboardClearStatus, ClipboardCopy, ClipboardPort, DesktopClipboardService},
+    dto::{ClosePolicyDto, EntryDetailDto, SelectedVaultDto, VaultSnapshotDto},
+};
 
 /// Rust-owned desktop state with at most one unlocked session.
 pub struct DesktopVaultService {
@@ -245,6 +225,7 @@ pub struct AppState {
     pub service: Arc<Mutex<DesktopVaultService>>,
     pub clipboard: Arc<DesktopClipboardService>,
     secret_operation_gate: Arc<Mutex<()>>,
+    vault_operation_active: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -254,7 +235,17 @@ impl AppState {
             service: Arc::new(Mutex::new(DesktopVaultService::new())),
             clipboard: Arc::new(DesktopClipboardService::new(clipboard)),
             secret_operation_gate: Arc::new(Mutex::new(())),
+            vault_operation_active: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn begin_vault_operation(&self) -> Result<VaultOperationLease, DesktopError> {
+        self.vault_operation_active
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| DesktopError::OperationInProgress)?;
+        Ok(VaultOperationLease {
+            active: self.vault_operation_active.clone(),
+        })
     }
 
     pub fn copy_entry_password(&self, entry_id: &str) -> Result<ClipboardCopy, DesktopError> {
@@ -291,6 +282,7 @@ impl AppState {
         &self,
         lock: fn(&mut DesktopVaultService) -> Result<(), DesktopError>,
     ) -> Result<ClipboardClearStatus, DesktopError> {
+        let _vault_operation = self.begin_vault_operation()?;
         let _operation = self
             .secret_operation_gate
             .lock()
@@ -321,63 +313,21 @@ impl AppState {
     }
 }
 
-pub(crate) fn map_mutation_error(error: SessionError) -> DesktopError {
-    if error.is_entry_not_found() {
-        DesktopError::EntryNotFound
-    } else if error.is_group_not_found() {
-        DesktopError::GroupNotFound
-    } else if error.is_invalid_group_operation() {
-        DesktopError::InvalidMove
-    } else if error.is_reserved_field() {
-        DesktopError::ReservedField
-    } else {
-        DesktopError::Internal
+pub struct VaultOperationLease {
+    active: Arc<AtomicBool>,
+}
+
+impl Drop for VaultOperationLease {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
     }
 }
 
-fn map_save_error(error: SessionError) -> DesktopError {
-    match error {
-        SessionError::ExternalModificationDetected
-        | SessionError::FinalExternalModificationDetected
-        | SessionError::UnsupportedPath
-        | SessionError::ReadSource(_) => DesktopError::ExternalChange,
-        SessionError::CredentialMismatch => DesktopError::SaveAuthenticationFailed,
-        SessionError::FinalVerificationFailed(_)
-        | SessionError::FinalReadFailed(_)
-        | SessionError::SavedButBackupUpdateFailed(_)
-        | SessionError::SavedButBackupDurabilityUncertain(_)
-        | SessionError::DurabilityUncertain(_) => DesktopError::SaveUncertain,
-        _ => DesktopError::SaveFailed,
-    }
-}
-
-fn display_file_name(path: &Path) -> Option<String> {
+fn display_file_name(path: &std::path::Path) -> Option<String> {
     path.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .map(str::to_owned)
-}
-
-fn map_open_error(error: SessionError) -> DesktopError {
-    if error.is_open_credential_rejected() {
-        DesktopError::UnlockFailed
-    } else if error.is_unsupported_open_target() {
-        DesktopError::UnsupportedVault
-    } else {
-        DesktopError::Internal
-    }
-}
-
-fn map_clipboard_error(_error: ClipboardFailure) -> DesktopError {
-    DesktopError::ClipboardFailed
-}
-
-fn map_provider_error(error: ProviderError) -> DesktopError {
-    match error {
-        ProviderError::InvalidTarget => DesktopError::InvalidRequest,
-        ProviderError::CredentialUnavailable => DesktopError::SecretUnavailable,
-        ProviderError::Internal => DesktopError::Internal,
-    }
 }
 
 fn random_process_token() -> Result<String, DesktopError> {
@@ -411,7 +361,9 @@ mod tests {
     use vault_core::{EntryId, NewEntry, SecretString};
     use vault_session::VaultSession;
 
-    use super::{AppState, DesktopError, DesktopVaultService, SessionError, map_save_error};
+    use vault_session::SessionError;
+
+    use super::{AppState, DesktopError, DesktopVaultService, map_save_error};
     use crate::clipboard::{ClipboardClearStatus, ClipboardPort};
 
     const FIXTURE_PASSWORD: &str = "demopass";

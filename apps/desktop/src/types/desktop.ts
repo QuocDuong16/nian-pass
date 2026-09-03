@@ -117,4 +117,13 @@ export type DesktopErrorCode =
   | "external_change"
   | "reload_failed"
   | "clipboard_failed"
-  | "internal";
+  | "internal"
+  | "operation_in_progress"
+  | "sync_failed"
+  | "sync_remote_changed"
+  | "sync_local_changed"
+  | "sync_local_changed_during_recovery"
+  | "sync_recovery_required"
+  | "sync_unsupported_provider"
+  | "sync_unsafe_provider"
+  | "sync_credentials_required";

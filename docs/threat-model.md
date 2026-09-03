@@ -8,6 +8,62 @@ retrieval flow, the M5.5 Android security lifecycle, and the M6.5 browser
 desktop bridge. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
+## M7 cloud-sync threats and residual limits
+
+The compact M7 boundary is: a malicious or compromised provider may ignore
+conditional headers, so CAS failures and uncertain results fail closed; the S3
+client avoids AWS credential-chain surprise; M7 makes no cryptographic remote
+rollback claim.
+
+M7 treats WebDAV/S3, the network, proxies, other sync clients, and local
+filesystem actors as untrusted. The cloud provider sees encrypted KDBX
+ciphertext, object size, request timing, and the private remote path/bucket/key.
+KDBX protects vault plaintext; it does not hide those metadata.
+
+The concrete threat set includes a malicious or compromised provider, stale
+remote revision, a server that ignores conditional headers, network failure
+after remote commit, concurrent Nian Pass clients, an external KeePassXC edit,
+local Save during sync, local source replacement, source switch, Lock, journal
+tampering, BASE corruption, oversized remote/error bodies, redirect credential
+leakage, TLS downgrade, provider-credential persistence leakage, AWS default
+credential-chain surprise, and semantic drift at an S3-compatible endpoint.
+
+Controls are fail-closed and layered:
+
+- Remote writes are only create-if-absent or replace-if-exact-opaque-revision.
+  WebDAV accepts only strong ETags; an S3-compatible label grants no trust.
+  Revision tokens are never interpreted as hashes, and SHA-256 ciphertext
+  identity is tracked separately.
+- HTTPS is mandatory off loopback. Invalid-certificate and hostname bypasses
+  do not exist. WebDAV redirects are disabled so Basic Authorization cannot
+  cross origins.
+- All reads, including error bodies, have hard size and time bounds. GET may
+  retry only a small bounded number; an uncertain PUT is never blindly retried
+  before a fresh remote proof.
+- One desktop operation authority and final source/session/fingerprint checks
+  prevent Save, external file edits, source switch, or Lock from being
+  overwritten by stale network completion. No vault mutex spans HTTP.
+- BASE and journal ciphertext/digests are private and validated. Journal phases
+  make a remote-success/local-pending crash explicit; BASE is updated last and
+  means the last proven common generation, not the last attempted upload.
+- Provider credentials and the master password are one-shot secret values.
+  They are absent from profiles, BASE metadata, journal, browser state,
+  Android, logs, errors, and startup behavior. The S3 client is constructed
+  directly from explicit credentials and never invokes environment, shared
+  file, SSO, ECS, or EC2 IMDS providers.
+- Conflict reports expose kinds/counts and safe identities only. Destructive
+  whole-vault resolution requires explicit confirmation plus a random,
+  single-use token bound to profile, BASE, local generation, and remote
+  revision.
+
+A malicious provider can still withhold, delete, corrupt, fork, or replay an
+older valid KDBX generation, lie about freshness, and reveal access metadata.
+CAS plus local BASE protects against accidental and concurrent overwrite; BASE
+is not a globally trusted append-only log. M7 makes no cryptographic remote
+rollback-detection or availability claim. Detecting malicious rollback would
+require a separately reviewed trusted history/anti-rollback design, not M7.5
+being silently assumed.
+
 ## M6.5 browser trust hierarchy and threats
 
 ```text

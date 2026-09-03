@@ -13,6 +13,9 @@ sha2.workspace = true
 thiserror.workspace = true
 vault-core.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-safe-replace.workspace = true
+
 [lib]
 path = "src/lib.rs"
 

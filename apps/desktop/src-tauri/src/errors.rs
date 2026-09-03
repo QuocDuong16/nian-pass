@@ -24,6 +24,15 @@ enum DesktopErrorCode {
     ReloadFailed,
     ClipboardFailed,
     Internal,
+    OperationInProgress,
+    SyncFailed,
+    SyncRemoteChanged,
+    SyncLocalChanged,
+    SyncLocalChangedDuringRecovery,
+    SyncRecoveryRequired,
+    SyncUnsupportedProvider,
+    SyncUnsafeProvider,
+    SyncCredentialsRequired,
 }
 
 /// Stable IPC error payload without dependency, path, or secret details.
@@ -54,6 +63,17 @@ impl From<DesktopError> for DesktopErrorDto {
             DesktopError::ReloadFailed => DesktopErrorCode::ReloadFailed,
             DesktopError::ClipboardFailed => DesktopErrorCode::ClipboardFailed,
             DesktopError::Internal => DesktopErrorCode::Internal,
+            DesktopError::OperationInProgress => DesktopErrorCode::OperationInProgress,
+            DesktopError::SyncFailed => DesktopErrorCode::SyncFailed,
+            DesktopError::SyncRemoteChanged => DesktopErrorCode::SyncRemoteChanged,
+            DesktopError::SyncLocalChanged => DesktopErrorCode::SyncLocalChanged,
+            DesktopError::SyncLocalChangedDuringRecovery => {
+                DesktopErrorCode::SyncLocalChangedDuringRecovery
+            }
+            DesktopError::SyncRecoveryRequired => DesktopErrorCode::SyncRecoveryRequired,
+            DesktopError::SyncUnsupportedProvider => DesktopErrorCode::SyncUnsupportedProvider,
+            DesktopError::SyncUnsafeProvider => DesktopErrorCode::SyncUnsafeProvider,
+            DesktopError::SyncCredentialsRequired => DesktopErrorCode::SyncCredentialsRequired,
         };
         Self { code }
     }

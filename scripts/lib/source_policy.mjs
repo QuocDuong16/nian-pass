@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
 export function walk(directory) {
@@ -29,13 +29,21 @@ export function rustProductionFiles(root) {
     "apps/cli/src",
     "apps/desktop/src-tauri/src",
     "crates/kdbx/src",
+    "crates/sync-engine/src",
+    "crates/sync-provider-core/src",
+    "crates/sync-provider-s3/src",
+    "crates/sync-provider-webdav/src",
     "crates/vault-core/src",
     "crates/vault-session/src",
     "crates/vault-sync/src",
+    "crates/windows-safe-replace/src",
   ];
-  return roots.flatMap((directory) =>
-    walk(resolve(root, directory)).filter((path) => path.endsWith(".rs")),
-  );
+  return roots.flatMap((directory) => {
+    const path = resolve(root, directory);
+    return existsSync(path)
+      ? walk(path).filter((candidate) => candidate.endsWith(".rs"))
+      : [];
+  });
 }
 
 function rustItemEnd(source, start) {

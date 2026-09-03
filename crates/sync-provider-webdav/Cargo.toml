@@ -1,0 +1,21 @@
+[package]
+name = "sync-provider-webdav"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Conflict-safe WebDAV transport for Nian Pass sync"
+
+[dependencies]
+futures-util.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+sync-provider-core.workspace = true
+url.workspace = true
+vault-core.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

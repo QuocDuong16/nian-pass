@@ -26,12 +26,19 @@ sha2.workspace = true
 tauri = { version = "=2.11.5", features = [] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+atomic-write-file.workspace = true
 browser-native-protocol.workspace = true
 getrandom.workspace = true
 interprocess.workspace = true
+serde_json.workspace = true
+sync-engine = { path = "../../../crates/sync-engine" }
+sync-provider-core.workspace = true
+sync-provider-s3 = { path = "../../../crates/sync-provider-s3" }
+sync-provider-webdav = { path = "../../../crates/sync-provider-webdav" }
 tauri-plugin-clipboard-manager = "=2.3.2"
 tauri-plugin-dialog = "=2.7.2"
 tokio = { version = "=1.53.1", features = ["time"] }
+uuid.workspace = true
 vault-core.workspace = true
 vault-session = { path = "../../../crates/vault-session" }
 zeroize.workspace = true

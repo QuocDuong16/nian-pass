@@ -3,6 +3,9 @@ use tauri::State;
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use vault_core::SecretString;
 
+mod sync;
+pub use self::sync::*;
+
 use crate::dto::{EntryDetailDto, SelectedVaultDto, VaultSnapshotDto};
 use crate::platform::RuntimeInfoDto;
 
@@ -37,10 +40,13 @@ pub fn runtime_info() -> RuntimeInfoDto {
 }
 
 #[tauri::command]
-pub async fn select_vault(
-    app: AppHandle,
+pub async fn select_vault<R: tauri::Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<Option<SelectedVaultDto>, DesktopErrorDto> {
+    let _operation = state
+        .begin_vault_operation()
+        .map_err(DesktopErrorDto::from)?;
     let dialog = app
         .dialog()
         .file()
@@ -337,11 +343,12 @@ mod tests {
 
     use super::{
         close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
-        delete_entry, delete_entry_custom_field, delete_group, discard_changes_and_lock,
-        entry_detail, lock_vault, move_entry, move_group, reload_vault, rename_group,
-        resolve_browser_connection, reveal_entry_custom_field, reveal_entry_notes,
-        reveal_entry_password, reveal_entry_title, reveal_entry_url, reveal_entry_username,
-        runtime_info, save_vault, set_entry_custom_field, update_entry,
+        delete_entry, delete_entry_custom_field, delete_group, delete_sync_profile,
+        discard_changes_and_lock, entry_detail, lock_vault, move_entry, move_group, reload_vault,
+        rename_group, resolve_browser_connection, resolve_sync_conflict, reveal_entry_custom_field,
+        reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
+        reveal_entry_username, runtime_info, save_sync_profile, save_vault, select_vault,
+        set_entry_custom_field, sync_now, sync_profiles, test_sync_provider, update_entry,
     };
     use crate::{
         browser_bridge::BrowserBridgeState,
@@ -353,6 +360,10 @@ mod tests {
             RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
         },
         state::{AppState, DesktopError},
+        sync::{
+            ProviderCredentialsDto, ResolveSyncConflictRequestDto, SaveSyncProfileRequestDto,
+            SyncRuntime,
+        },
     };
 
     static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -385,6 +396,23 @@ mod tests {
                 app.state()
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn vault_selection_obeys_the_shared_operation_gate_before_opening_a_dialog() {
+        let app = unlocked_app();
+        let state = app.state::<AppState>();
+        let _active_operation = state
+            .begin_vault_operation()
+            .expect("first operation should acquire the gate");
+        let result = tauri::async_runtime::block_on(select_vault(app.handle().clone(), state));
+        let Err(error) = result else {
+            panic!("a concurrent source switch must be rejected");
+        };
+        assert_eq!(
+            to_value(error).expect("stable error should serialize"),
+            json!({ "code": "operation_in_progress" })
         );
     }
 
@@ -580,6 +608,15 @@ mod tests {
             DesktopError::ReloadFailed,
             DesktopError::ClipboardFailed,
             DesktopError::Internal,
+            DesktopError::OperationInProgress,
+            DesktopError::SyncFailed,
+            DesktopError::SyncRemoteChanged,
+            DesktopError::SyncLocalChanged,
+            DesktopError::SyncLocalChangedDuringRecovery,
+            DesktopError::SyncRecoveryRequired,
+            DesktopError::SyncUnsupportedProvider,
+            DesktopError::SyncUnsafeProvider,
+            DesktopError::SyncCredentialsRequired,
         ];
         let serialized: Vec<Value> = errors
             .into_iter()
@@ -592,6 +629,71 @@ mod tests {
             contract["errorCodes"],
             to_value(serialized).expect("error code list should serialize")
         );
+    }
+
+    #[test]
+    fn sync_commands_keep_a_narrow_typed_surface_and_operation_gate() {
+        let (directory, _path, app) = writable_app();
+        app.manage(SyncRuntime::new(directory.0.clone()).expect("sync runtime"));
+        let state = app.state::<AppState>();
+        let runtime = app.state::<SyncRuntime>();
+        let Ok(saved) = save_sync_profile(
+            request::<SaveSyncProfileRequestDto>(json!({
+                "target": {
+                    "provider": "webdav",
+                    "resourceUrl": "https://dav.example.test/vault.kdbx"
+                }
+            })),
+            state.clone(),
+            runtime.clone(),
+        ) else {
+            panic!("save profile command should succeed");
+        };
+        let Ok(profiles) = sync_profiles(state.clone(), runtime.clone()) else {
+            panic!("profile command should succeed");
+        };
+        assert_eq!(profiles.len(), 1);
+
+        let empty_credentials = || {
+            request::<ProviderCredentialsDto>(json!({
+                "webdav": null,
+                "s3": null
+            }))
+        };
+        assert!(
+            tauri::async_runtime::block_on(test_sync_provider(
+                saved.profile_id.clone(),
+                empty_credentials(),
+                state.clone(),
+                runtime.clone(),
+            ))
+            .is_err()
+        );
+        assert!(
+            tauri::async_runtime::block_on(sync_now(
+                saved.profile_id.clone(),
+                empty_credentials(),
+                "SYNTHETIC_MASTER_PASSWORD".to_owned(),
+                state.clone(),
+                runtime.clone(),
+            ))
+            .is_err()
+        );
+        assert!(
+            tauri::async_runtime::block_on(resolve_sync_conflict(
+                request::<ResolveSyncConflictRequestDto>(json!({
+                    "profileId": saved.profile_id.clone(),
+                    "conflictOperationId": "00112233445566778899aabbccddeeff",
+                    "choice": "keepLocal",
+                    "credentials": { "webdav": null, "s3": null },
+                    "masterPassword": "SYNTHETIC_MASTER_PASSWORD"
+                })),
+                state.clone(),
+                runtime.clone(),
+            ))
+            .is_err()
+        );
+        assert!(delete_sync_profile(saved.profile_id, state, runtime).is_ok());
     }
 
     #[test]

@@ -29,8 +29,12 @@ async fn persist_with_credential(
         SecretString,
     ) -> Result<VaultSnapshotDto, DesktopError>,
 ) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    let operation_lease = state
+        .begin_vault_operation()
+        .map_err(DesktopErrorDto::from)?;
     let service = state.service.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _operation_lease = operation_lease;
         let credential = SecretString::new(password);
         let mut service = service.lock().map_err(|_| DesktopError::Internal)?;
         operation(&mut service, credential)

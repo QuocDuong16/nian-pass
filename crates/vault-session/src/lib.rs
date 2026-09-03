@@ -1,21 +1,19 @@
-//! Local unlocked vault sessions with verified, conflict-detecting persistence.
-//!
-//! This crate owns paths and filesystem transaction state. It never exposes
-//! `keepass-rs` types and never retains the master password.
+//! Local unlocked vault sessions with verified persistence. This crate owns
+//! filesystem transactions, seals `keepass-rs`, and never retains passwords.
 
 mod fingerprint;
 mod mutations;
 mod platform;
-
+mod sync_persistence;
+pub use fingerprint::FileFingerprint;
+use kdbx::{KdbxDocument, KdbxError};
 use std::{
     ffi::OsString,
     fs::{self, File, Metadata, OpenOptions},
     io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
-
-pub use fingerprint::FileFingerprint;
-use kdbx::{KdbxDocument, KdbxError};
+pub use sync_persistence::EncryptedVaultSnapshot;
 use thiserror::Error;
 use vault_core::{SecretString, Vault};
 
@@ -23,7 +21,6 @@ const SAVE_TEMP_PREFIX: &str = ".nian-pass-save-";
 const BACKUP_TEMP_PREFIX: &str = ".nian-pass-backup-";
 const TEMP_SUFFIX: &str = ".tmp";
 const TEMP_CREATE_ATTEMPTS: usize = 128;
-
 /// An unlocked local session whose canonical target cannot change.
 pub struct VaultSession {
     path: PathBuf,
@@ -281,6 +278,9 @@ pub enum SessionError {
     #[error("safe vault persistence is not supported on this platform")]
     UnsupportedPersistencePlatform,
 
+    /// Sync requires a clean Rust-owned session.
+    #[error("save before syncing")]
+    UnsavedChanges,
     /// The encrypted source file could not be read.
     #[error("could not read the vault file")]
     ReadSource(#[source] io::Error),

@@ -1,8 +1,11 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { dependencyLabel, loadWorkspacePackages } from "./lib/cargo_dependencies.mjs";
+import {
+  dependencyLabel,
+  loadWorkspacePackages,
+} from "./lib/cargo_dependencies.mjs";
 import {
   frontendProductionFiles,
   lineNumberAt,
@@ -36,18 +39,27 @@ export function runChecks(root, budget) {
       const maximum = exception?.maxLines ?? policy.defaultMaxLines;
       if (exception !== undefined) {
         usedExceptions.add(`${kind}:${name}`);
-        if (typeof exception.reason !== "string" || exception.reason.trim() === "") {
-          violations.push(`${name}: architecture exception is missing a reason`);
+        if (
+          typeof exception.reason !== "string" ||
+          exception.reason.trim() === ""
+        ) {
+          violations.push(
+            `${name}: architecture exception is missing a reason`,
+          );
         }
       }
       if (lines > maximum) {
-        violations.push(`${name}: ${lines} production lines exceeds its ${maximum}-line budget`);
+        violations.push(
+          `${name}: ${lines} production lines exceeds its ${maximum}-line budget`,
+        );
       }
     }
 
     for (const [name, exception] of Object.entries(policy.exceptions)) {
       if (!usedExceptions.has(`${kind}:${name}`)) {
-        violations.push(`${name}: stale or out-of-scope architecture exception`);
+        violations.push(
+          `${name}: stale or out-of-scope architecture exception`,
+        );
       }
       if (exception.maxLines <= policy.defaultMaxLines) {
         violations.push(
@@ -58,13 +70,17 @@ export function runChecks(root, budget) {
       if (usedExceptions.has(`${kind}:${name}`)) {
         const lines = sourceForFile(path).split(/\r?\n/).length;
         if (lines <= policy.defaultMaxLines) {
-          violations.push(`${name}: stale exception; the file now fits the default budget`);
+          violations.push(
+            `${name}: stale exception; the file now fits the default budget`,
+          );
         }
       }
     }
   }
 
-  checkBudgets("typescript", frontendFiles, (path) => readFileSync(path, "utf8"));
+  checkBudgets("typescript", frontendFiles, (path) =>
+    readFileSync(path, "utf8"),
+  );
   checkBudgets("rust", rustFiles, (path) =>
     withoutRustTestItems(readFileSync(path, "utf8")),
   );
@@ -72,7 +88,8 @@ export function runChecks(root, budget) {
   for (const path of frontendFiles) {
     const source = readFileSync(path, "utf8");
     const name = projectPath(root, path);
-    const ipcPattern = /(?:from\s+["']@tauri-apps\/api\/core["']|\binvoke\s*\()/g;
+    const ipcPattern =
+      /(?:from\s+["']@tauri-apps\/api\/core["']|\binvoke\s*\()/g;
     if (
       name !== "apps/desktop/src/lib/desktop.ts" &&
       name !== "apps/desktop/src/lib/mobile.ts" &&
@@ -102,6 +119,7 @@ export function runChecks(root, budget) {
     const name = projectPath(root, path);
     if (
       name !== "apps/desktop/src-tauri/src/commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/sync.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/autofill_commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/security_commands.rs" &&
@@ -136,30 +154,62 @@ export function runChecks(root, budget) {
         "browser-native-protocol",
         "credential-provider-core",
         "kdbx",
+        "sync-engine",
+        "sync-provider-core",
+        "sync-provider-s3",
+        "sync-provider-webdav",
         "vault-core",
         "vault-session",
       ]),
     ],
-    ["apps/browser-native-host/Cargo.toml", new Set(["browser-native-protocol"])],
+    [
+      "apps/browser-native-host/Cargo.toml",
+      new Set(["browser-native-protocol"]),
+    ],
     ["crates/browser-native-protocol/Cargo.toml", new Set()],
-    ["crates/credential-provider-core/Cargo.toml", new Set(["kdbx", "vault-core"])],
+    [
+      "crates/credential-provider-core/Cargo.toml",
+      new Set(["kdbx", "vault-core"]),
+    ],
     [
       "crates/ios-credential-ffi/Cargo.toml",
       new Set(["credential-provider-core", "kdbx", "vault-core"]),
     ],
     ["crates/kdbx/Cargo.toml", new Set(["vault-core"])],
+    [
+      "crates/sync-engine/Cargo.toml",
+      new Set(["kdbx", "sync-provider-core", "vault-core", "vault-sync"]),
+    ],
+    ["crates/sync-provider-core/Cargo.toml", new Set()],
+    [
+      "crates/sync-provider-s3/Cargo.toml",
+      new Set(["sync-provider-core", "vault-core"]),
+    ],
+    [
+      "crates/sync-provider-webdav/Cargo.toml",
+      new Set(["sync-provider-core", "vault-core"]),
+    ],
     ["crates/vault-core/Cargo.toml", new Set()],
-    ["crates/vault-session/Cargo.toml", new Set(["kdbx", "vault-core"])],
+    [
+      "crates/vault-session/Cargo.toml",
+      new Set(["kdbx", "vault-core", "windows-safe-replace"]),
+    ],
     ["crates/vault-sync/Cargo.toml", new Set(["kdbx", "vault-core"])],
+    ["crates/windows-safe-replace/Cargo.toml", new Set()],
   ];
   const workspaceCrates = new Set([
     "kdbx",
     "browser-native-protocol",
     "credential-provider-core",
     "ios-credential-ffi",
+    "sync-engine",
+    "sync-provider-core",
+    "sync-provider-s3",
+    "sync-provider-webdav",
     "vault-core",
     "vault-session",
     "vault-sync",
+    "windows-safe-replace",
     "nian-pass-desktop",
     "nian-pass-browser-host",
     "nian-pass-cli",
@@ -170,6 +220,13 @@ export function runChecks(root, budget) {
     resolve(root, "crates/ios-credential-ffi/Cargo.toml"),
     "utf8",
   );
+  const windowsReplaceManifestPath = resolve(
+    root,
+    "crates/windows-safe-replace/Cargo.toml",
+  );
+  const windowsReplaceManifest = existsSync(windowsReplaceManifestPath)
+    ? readFileSync(windowsReplaceManifestPath, "utf8")
+    : null;
   if (!/unsafe_code\s*=\s*"forbid"/.test(rootManifest)) {
     violations.push("Cargo.toml: workspace unsafe_code must remain forbid");
   }
@@ -177,20 +234,50 @@ export function runChecks(root, budget) {
     !/unsafe_code\s*=\s*"allow"/.test(ffiManifest) ||
     !/unsafe_op_in_unsafe_fn\s*=\s*"deny"/.test(ffiManifest)
   ) {
-    violations.push("ios-credential-ffi must isolate and deny implicit unsafe operations");
+    violations.push(
+      "ios-credential-ffi must isolate and deny implicit unsafe operations",
+    );
+  }
+  if (
+    windowsReplaceManifest !== null &&
+    (!/unsafe_code\s*=\s*"allow"/.test(windowsReplaceManifest) ||
+      !/unsafe_op_in_unsafe_fn\s*=\s*"deny"/.test(windowsReplaceManifest))
+  ) {
+    violations.push(
+      "windows-safe-replace must isolate and deny implicit unsafe operations",
+    );
   }
   for (const path of rustFiles) {
     const source = readRustProduction(path);
     const name = projectPath(root, path);
-    if (name === "crates/ios-credential-ffi/src/ffi.rs") continue;
+    if (
+      name === "crates/ios-credential-ffi/src/ffi.rs" ||
+      name === "crates/windows-safe-replace/src/lib.rs"
+    )
+      continue;
     checkPattern(
       violations,
       root,
       path,
       source,
       /\bunsafe\s*(?:\{|fn\b|extern\b)/g,
-      "unsafe Rust is confined to crates/ios-credential-ffi/src/ffi.rs",
+      "unsafe Rust is confined to reviewed native FFI boundary modules",
     );
+  }
+  const windowsReplaceSourcePath = resolve(
+    root,
+    "crates/windows-safe-replace/src/lib.rs",
+  );
+  if (existsSync(windowsReplaceSourcePath)) {
+    const windowsReplaceSource = readFileSync(windowsReplaceSourcePath, "utf8");
+    if (
+      !/ReplaceFileW/.test(windowsReplaceSource) ||
+      /REPLACEFILE_IGNORE_(?:ACL|MERGE)_ERRORS/.test(windowsReplaceSource)
+    ) {
+      violations.push(
+        "windows-safe-replace must use ReplaceFileW without ignore-ACL/merge flags",
+      );
+    }
   }
   const tauriForbidden = /^(?:tauri|tauri-plugin-)/;
   const syncNetworkDependencies = new Set([
@@ -209,19 +296,23 @@ export function runChecks(root, budget) {
   for (const [manifestPath, allowedInternal] of manifests) {
     const pkg = packagesByManifest.get(manifestPath);
     if (pkg === undefined) {
-      if (
-        manifestPath === "apps/browser-native-host/Cargo.toml" ||
-        manifestPath === "crates/browser-native-protocol/Cargo.toml"
-      ) {
+      if (!existsSync(resolve(root, manifestPath))) {
         continue;
       }
-      throw new Error(`Cargo dependency inspection omitted workspace manifest ${manifestPath}`);
+      throw new Error(
+        `Cargo dependency inspection omitted workspace manifest ${manifestPath}`,
+      );
     }
     for (const dependency of pkg.dependencies) {
       const actualPackage = dependency.packageName;
       const label = dependencyLabel(dependency);
-      if (workspaceCrates.has(actualPackage) && !allowedInternal.has(actualPackage)) {
-        violations.push(`${manifestPath}: forbidden workspace dependency on ${label}`);
+      if (
+        workspaceCrates.has(actualPackage) &&
+        !allowedInternal.has(actualPackage)
+      ) {
+        violations.push(
+          `${manifestPath}: forbidden workspace dependency on ${label}`,
+        );
       }
       if (
         manifestPath.startsWith("crates/") &&
@@ -232,17 +323,21 @@ export function runChecks(root, budget) {
           `${manifestPath}: forbidden dependency ${label}: keepass is confined to crates/kdbx`,
         );
       }
-      if (manifestPath.startsWith("crates/") && tauriForbidden.test(actualPackage)) {
+      if (
+        manifestPath.startsWith("crates/") &&
+        tauriForbidden.test(actualPackage)
+      ) {
         violations.push(
           `${manifestPath}: forbidden dependency ${label}: core crates must not depend on Tauri`,
         );
       }
       if (
-        manifestPath === "crates/vault-sync/Cargo.toml" &&
+        (manifestPath === "crates/vault-sync/Cargo.toml" ||
+          manifestPath === "crates/sync-provider-core/Cargo.toml") &&
         syncNetworkDependencies.has(actualPackage)
       ) {
         violations.push(
-          `${manifestPath}: vault-sync must remain transport-independent (${label})`,
+          `${manifestPath}: provider-independent sync contracts must remain transport-independent (${label})`,
         );
       }
     }
@@ -307,7 +402,10 @@ export function runChecks(root, budget) {
 function main() {
   try {
     const budget = JSON.parse(
-      readFileSync(resolve(repositoryRoot, "scripts/architecture-budget.json"), "utf8"),
+      readFileSync(
+        resolve(repositoryRoot, "scripts/architecture-budget.json"),
+        "utf8",
+      ),
     );
     const violations = runChecks(repositoryRoot, budget);
     if (violations.length === 0) {

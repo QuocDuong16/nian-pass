@@ -1,0 +1,24 @@
+[package]
+name = "sync-engine"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Provider-independent encrypted vault sync orchestration and recovery"
+
+[dependencies]
+atomic-write-file.workspace = true
+kdbx = { path = "../kdbx" }
+serde.workspace = true
+serde_json.workspace = true
+sync-provider-core.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+vault-core.workspace = true
+vault-sync = { path = "../vault-sync" }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

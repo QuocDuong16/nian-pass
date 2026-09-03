@@ -19,6 +19,35 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
+M7 — BYO-cloud Sync Providers
+
+Desktop explicit sync supports WebDAV and AWS S3 with manual only operation;
+provider credentials are not persisted.
+
+Windows and Linux desktop now provide explicit **Sync now** for one exact
+remote KDBX object through WebDAV or AWS S3 / compatible endpoints that prove
+safe conditional-write behavior. Providers return only encrypted bytes and an
+opaque revision; `sync-engine` combines the encrypted LOCAL generation, the
+last proven encrypted BASE, and the encrypted REMOTE generation, then delegates
+all semantic decisions to the existing network-free `vault-sync` crate.
+
+Remote creation is `If-None-Match: *`; replacement is bound to the exact strong
+WebDAV ETag or opaque S3 revision with `If-Match`. A race becomes
+`remoteChanged`, never a blind overwrite. Merged or explicitly authoritative
+generations use a private encrypted journal, remote-first CAS, verified safe
+local replacement, and an atomic BASE update last. BASE and candidate files are
+ordinary encrypted, KeePassXC-readable KDBX ciphertext—no wrapper encryption or
+plaintext vault representation is persisted.
+
+Sync is manual only and requires a clean saved vault, the real master password,
+and freshly entered provider credentials. WebDAV passwords, S3 secret keys and
+session tokens, and the master password are never persisted. Production
+endpoints require HTTPS; plaintext HTTP is accepted only on loopback for local
+tests. Direct Google Drive/Dropbox/OneDrive OAuth, Android cloud sync, Apple
+sync, background sync, and a Nian Pass sync service are not implemented.
+
+## Completed M6.5 milestone
+
 M6.5 — Browser Native Messaging / Desktop Integration
 
 Browser integration now provides Chromium/Firefox MV3 artifacts with explicit
@@ -100,8 +129,8 @@ not constitute current iOS or macOS support.
 
 Current product direction is a KDBX-native, offline-first, zero-knowledge
 password manager with no proprietary vault lock-in: Windows and Linux desktop,
-Android mobile, browser integration next, bring-your-own-cloud sync, and a
-self-hostable sync gateway later. Apple-specific runtime validation and native
+Android mobile, browser integration, desktop bring-your-own-cloud sync, and a
+self-hostable sync gateway next. Apple-specific runtime validation and native
 integration are future work; Tauri's theoretical macOS target support is not a
 claim that the macOS application has been validated or released.
 
@@ -118,13 +147,13 @@ M5.4 iOS Password AutoFill + Keychain           DEFERRED
 M5.5 Android Mobile Security / Lifecycle        DONE
 M6   Browser Extension Foundation               DONE
 M6.5 Browser Native Messaging / Desktop Integration DONE
-M7   BYO-cloud Sync Providers                   NEXT
-M7.5 Self-hosted Sync Gateway
+M7   BYO-cloud Sync Providers                   DONE
+M7.5 Self-hosted Sync Gateway                   NEXT
 M8   Security Hardening / Release Engineering
 M9+  Apple Platform Resume
 ```
 
-The next milestone is M7 BYO-cloud Sync Providers. M6.5 uses standard browser
+The next milestone is M7.5 Self-hosted Sync Gateway. M6.5 uses standard browser
 Native Messaging transport but does not implement or claim compatibility with
 the KeePassXC-Browser wire protocol. It requires neither `keepassxc-proxy` nor a
 KeePassXC executable. Chromium development uses the committed public Manifest
@@ -256,7 +285,8 @@ the Rust `VaultSession` remains unlocked behind the shield until an explicit
 Save/discard decision. Never disables only inactivity Lock; the privacy shield
 and manual Lock remain active. Endpoint malware remains out of scope.
 
-M3.5 remains complete as the underlying conflict-safe sync engine.
+M3.5 remains complete as the provider-independent semantic merge authority used
+by M7.
 
 The workspace now includes `vault-sync`, a synchronous provider-independent
 three-way semantic merge core. Callers supply an explicit last common BASE plus
@@ -275,10 +305,10 @@ Attachment-free history can be unioned deterministically; attachment-bearing
 history that would cross database generations fails closed. A synthesized
 candidate must pass the complete sync invariant validator before return.
 
-M3.5 has no provider, network transport, base cache, background task, UI, or
-automatic save behavior. A future application remains responsible for opening
-the encrypted generations, selecting the correct BASE, and installing a
-successful merged document through the safe persistence boundary.
+`vault-sync` still has no provider, network transport, base cache, background
+task, UI, or automatic save behavior. M7's separate `sync-engine` opens the
+encrypted generations, validates the exact BASE, invokes `vault_sync::merge`,
+and installs a successful generation through the safe persistence boundary.
 
 M3 remains complete: the workspace contains a local `VaultSession` that owns
 one canonical
@@ -316,8 +346,8 @@ recorded in the compatibility matrix.
 
 There is no CLI mutation command and no raw database escape hatch. Product-level
 recycle-bin behavior, notes editing, TOTP, attachment/icon UI, expiry editing,
-history restore, duplicate, bulk operations, search, UI, cloud providers,
-network sync, and server features remain out of scope.
+history restore, duplicate, bulk operations, search, Android network sync,
+direct cloud OAuth providers, and server/gateway features remain out of scope.
 KDBX 3.1 and 4.0 writing are deliberately rejected rather than upgraded or
 rewritten.
 

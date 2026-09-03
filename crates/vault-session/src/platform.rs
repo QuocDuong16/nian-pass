@@ -8,6 +8,8 @@ pub(crate) const SAVE_SUPPORTED: bool = true;
 #[cfg(windows)]
 pub(crate) const SAVE_SUPPORTED: bool = false;
 
+pub(crate) const SYNC_REPLACE_SUPPORTED: bool = true;
+
 /// Atomically replaces an existing destination with a same-filesystem file.
 ///
 /// Unix rename preserves an always-present destination namespace entry. M3
@@ -48,6 +50,18 @@ pub(crate) fn sync_parent(parent: &Path) -> io::Result<()> {
 #[cfg(windows)]
 pub(crate) fn sync_parent(_parent: &Path) -> io::Result<()> {
     Ok(())
+}
+
+/// Windows-only atomic replacement used by sync. `ReplaceFileW` receives a
+/// backup path, preserves the destination security state, and is never called
+/// with an ignore-ACL/merge flag.
+#[cfg(windows)]
+pub(crate) fn replace_existing_with_backup(
+    prepared: &Path,
+    destination: &Path,
+    backup: &Path,
+) -> io::Result<()> {
+    windows_safe_replace::replace_existing_with_backup(prepared, destination, backup)
 }
 
 #[cfg(not(any(unix, windows)))]

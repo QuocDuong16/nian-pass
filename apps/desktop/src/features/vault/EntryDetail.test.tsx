@@ -78,6 +78,12 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
     discardChangesAndLock: vi
       .fn()
       .mockResolvedValue({ clipboard: "not_owned" }),
+    syncProfiles: vi.fn().mockResolvedValue([]),
+    saveSyncProfile: vi.fn(),
+    deleteSyncProfile: vi.fn(),
+    testSyncProvider: vi.fn(),
+    syncNow: vi.fn(),
+    resolveSyncConflict: vi.fn(),
     ...overrides,
   };
 }

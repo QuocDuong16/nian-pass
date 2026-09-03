@@ -12,6 +12,91 @@ M4.Q adds no product behavior. It makes these boundaries executable through
 the root `Makefile`, tested architecture/security scripts, dependency policy,
 coverage ratchets, and Forgejo jobs that call the same targets used locally.
 
+## M7 BYO-cloud sync boundary
+
+M7 adds explicit, user-triggered network sync on Windows and Linux desktop. It
+does not add Android network authority, Apple behavior, a browser-extension
+transport, or a Nian Pass service. The dependency direction is fixed:
+
+```text
+WebDAV or S3 provider
+→ encrypted remote KDBX bytes + opaque RemoteRevision
+→ sync-engine transaction/orchestration
+→ vault-sync::merge(BASE, LOCAL, REMOTE)
+→ verified encrypted candidate
+→ safe local persistence
+```
+
+`crates/sync-provider-core` defines only bounded read, create-if-absent, and
+replace-if-exact-revision operations. It has no HTTP SDK or async runtime.
+`sync-provider-webdav` owns Rustls HTTP, Basic authentication, strong ETag
+validation, disabled redirects, bounded bodies, and `If-None-Match`/`If-Match`.
+`sync-provider-s3` owns the exact AWS S3 SDK, explicit in-memory credentials,
+optional endpoint/path-style configuration, SigV4, and the same CAS outcomes.
+Custom endpoints are potentially compatible, not trusted or certified: a
+missing or inconsistent revision, ignored precondition, weak ETag, or unsafe
+read-back fails closed.
+
+`crates/sync-engine` has no Tauri or concrete provider dependency. It owns the
+encrypted BASE repository, local/remote generation preconditions, semantic
+outcome dispatch, process-local single-use conflict tokens, and recovery
+journal. `crates/vault-sync` never talks to the network and remains the only
+entry/group/field merge authority. Providers cannot select winners and expose
+no unconditional write method.
+
+Each UUID-v4 profile is bound to a private SHA-256 source reference for one
+canonical desktop KDBX path. Non-secret target configuration may be stored;
+userinfo is forbidden and provider credentials never enter profile JSON. The
+BASE lives under private per-user application data and contains only exact
+encrypted KDBX ciphertext. Its metadata binds schema, profile, source,
+ciphertext SHA-256, and opaque remote revision. Unix directories are 0700 and
+BASE, journal, candidate, and metadata files are 0600. Digests are verified
+before any BASE or journal is trusted.
+
+```text
+capture clean LOCAL source, ciphertext digest, and authority generation
+→ load and verify encrypted BASE
+→ bounded REMOTE read + opaque revision
+→ open BASE/LOCAL/REMOTE with the one-shot real master password
+→ vault-sync semantic decision
+→ serialize and reopen a verified encrypted candidate when needed
+→ persist candidate and recovery journal
+→ conditional remote CAS
+→ record committed remote revision
+→ revalidate and safely replace local generation
+→ replace the in-memory VaultSession and browser vaultSessionId
+→ atomically install BASE last
+→ remove journal and drop credentials
+```
+
+One desktop operation lease serializes Sync, Save, Reload, Lock, and source
+selection, while the vault-service mutex is held only for snapshot capture or
+final local commit—never across network I/O. The final local operation checks
+the exact source, ciphertext fingerprint, clean marker, and session authority.
+A Save, external edit, source switch, or Lock therefore invalidates stale sync
+work. On Windows, M7 local application uses the narrow `ReplaceFileW` boundary
+with a backup name and zero ignore-ACL/merge flags, preserving the replaced
+file's DACL and metadata; ordinary M4 Save remains separately fail-closed until
+its complete Windows transaction is reviewed.
+
+Remote-first commit is not presented as atomic with the local filesystem. The
+journal records a random operation ID, phase, expected local digest, expected
+remote revision, encrypted candidate digest/path, and any confirmed committed
+revision. A timeout after PUT is uncertain: recovery reads remote before any
+retry, proves candidate/unchanged state from bytes plus revision, and either
+continues, replans, or reports uncertainty. If remote committed but local has
+changed, recovery preserves local and keeps the journal. BASE advances only
+after local and remote are proven converged.
+
+Initial sync creates a missing object conditionally or establishes BASE when
+LOCAL and REMOTE are semantically equal. Different generations without a BASE
+produce `InitialConflict`; they are never fake-merged. Normal Equivalent,
+FastForwardLocal, FastForwardRemote, Merged, and Conflicted outcomes come only
+from `vault_sync::merge`. Conflict DTOs contain structured kinds/counts and
+safe identities, never competing plaintext values. Keep Local and Keep Remote
+require a second explicit confirmation and consume one exact generation-bound
+token.
+
 ## M6.5 browser and desktop credential boundary
 
 M6.5 extends the accepted M6 browser extension without changing Android or the
