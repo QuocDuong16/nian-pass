@@ -244,7 +244,11 @@ in production source. Browser persistence, console output, dangerous DOM/code
 execution, direct Tauri invoke outside the adapter, and remote runtime assets
 are independently rejected by ESLint and/or repository guards. Prettier checks
 without mutation in quality/CI. Knip checks files, exports, dependencies, and
-missing dependencies. `pnpm audit --prod` is blocking and never auto-fixes.
+missing dependencies. The audit wrapper runs `pnpm audit --prod` in JSON mode.
+Each attempt is bounded to 90 seconds and it retries once after a recognized
+transient registry transport failure. A vulnerability report, unknown failure,
+or repeated registry failure remains blocking; registry errors are never
+ignored and audit never auto-fixes.
 
 M4.2 additionally forbids `navigator.clipboard`, including window/global aliases,
 and every JavaScript clipboard plugin dependency. Username/password copy must use

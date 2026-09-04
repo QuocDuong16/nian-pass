@@ -173,7 +173,7 @@ desktop-build:
 
 desktop-audit:
 	@echo "Check production frontend dependency vulnerabilities..."
-	pnpm audit --prod
+	node scripts/run_pnpm_audit.mjs
 
 desktop-contract-rust-check:
 	@echo "Check committed desktop contract against Rust serialization..."
@@ -252,7 +252,7 @@ browser-artifact-check:
 
 browser-audit:
 	@echo "Check browser extension production dependency vulnerabilities..."
-	pnpm audit --prod
+	node scripts/run_pnpm_audit.mjs
 
 browser-source-check:
 	@echo "Check browser extension source security invariants..."
