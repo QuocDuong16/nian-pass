@@ -134,8 +134,10 @@ Manual unpacked/temporary-extension smoke uses only a synthetic loopback page
 bound to `127.0.0.1` and is reported separately. Chromium Native Messaging,
 Firefox Native Messaging, Linux host install/IPC, and Windows Native Messaging
 smoke must each be reported as RUN or NOT RUN; they are not deterministic gates.
-The Forgejo Node frontend job runs this focused gate with the same resolved diff
-base as desktop changed-line coverage.
+The Forgejo Node frontend job runs the browser source and extension gates with
+the same resolved diff base as desktop changed-line coverage. The Rust/Tauri
+native job owns `browser-integration-check` because that mixed gate requires
+Cargo, native Tauri build prerequisites, Node.js, and the pinned pnpm toolchain.
 
 Routine CI remains in Forgejo Actions on the project's self-hosted Docker/DIND
 infrastructure. GitHub Actions is reserved for a future multi-platform

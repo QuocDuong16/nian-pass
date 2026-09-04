@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -98,7 +98,19 @@ function fixture(t) {
   write(
     root,
     ".forgejo/workflows/quality.yml",
-    "node:26.7.0\nrust:1.98.0-bookworm\nnpm install --global corepack@0.35.0\npnpm@11.22.0\n",
+    "jobs:\n" +
+      "  desktop-frontend:\n" +
+      "    container:\n" +
+      "      image: node:26.7.0-bookworm\n" +
+      "    steps:\n" +
+      "      - run: make browser-source-check browser-extension-check\n" +
+      "  desktop-native-check:\n" +
+      "    container:\n" +
+      "      image: rust:1.98.0-bookworm\n" +
+      "    steps:\n" +
+      "      - run: npm install --global corepack@0.35.0\n" +
+      "      - run: corepack install --global pnpm@11.22.0\n" +
+      "      - run: make browser-integration-check\n",
   );
   write(root, ".mise.toml", '[tools]\nrust = "1.98.0"\n');
   write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.98.0"\n');
@@ -131,12 +143,50 @@ test("missing explicit Corepack bootstrap is rejected", (t) => {
   write(
     root,
     ".forgejo/workflows/quality.yml",
-    "node:26.7.0\nrust:1.98.0-bookworm\npnpm@11.22.0\n",
+    "jobs:\n" +
+      "  desktop-frontend:\n" +
+      "    container:\n" +
+      "      image: node:26.7.0-bookworm\n" +
+      "  desktop-native-check:\n" +
+      "    container:\n" +
+      "      image: rust:1.98.0-bookworm\n" +
+      "    steps:\n" +
+      "      - run: corepack install --global pnpm@11.22.0\n" +
+      "      - run: make browser-integration-check\n",
   );
   assert.match(
     runChecks(root).join("\n"),
     /Corepack 0\.35\.0 must be installed explicitly/,
   );
+});
+
+test("browser integration cannot run in the Node-only frontend job", (t) => {
+  const root = fixture(t);
+  const workflow = readFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "utf8",
+  ).replace(
+    "make browser-source-check browser-extension-check",
+    "make browser-source-check browser-extension-check browser-integration-check",
+  );
+  write(root, ".forgejo/workflows/quality.yml", workflow);
+  assert.match(runChecks(root).join("\n"), /must not run in the Node-only/);
+});
+
+test("browser integration requires the native Rust job and pinned pnpm", (t) => {
+  const root = fixture(t);
+  const workflow = readFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "utf8",
+  )
+    .replace("      - run: npm install --global corepack@0.35.0\n", "")
+    .replace("      - run: corepack install --global pnpm@11.22.0\n", "")
+    .replace("      - run: make browser-integration-check\n", "");
+  write(root, ".forgejo/workflows/quality.yml", workflow);
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /must own browser-integration-check/);
+  assert.match(violations, /must install pinned Corepack 0\.35\.0/);
+  assert.match(violations, /must activate pinned pnpm 11\.22\.0/);
 });
 
 test("missing quality policy is reported", (t) => {

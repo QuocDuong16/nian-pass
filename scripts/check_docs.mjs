@@ -17,6 +17,16 @@ function requirePattern(violations, path, source, pattern, message) {
   if (!pattern.test(source)) violations.push(`${path}: ${message}`);
 }
 
+function workflowJob(source, jobName) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (start === -1) return undefined;
+  const end = lines.findIndex(
+    (line, index) => index > start && /^  [A-Za-z0-9_-]+:\s*$/.test(line),
+  );
+  return lines.slice(start, end === -1 ? undefined : end).join("\n");
+}
+
 export function runChecks(root) {
   const violations = [];
   const readme = readRequired(root, "README.md", violations);
@@ -173,6 +183,38 @@ export function runChecks(root) {
     violations.push("package.json: packageManager must pin an exact pnpm version");
   } else if (!workflow.includes(`pnpm@${pnpmVersion}`)) {
     violations.push(`.forgejo/workflows/quality.yml: pinned pnpm ${pnpmVersion} is not reused`);
+  }
+
+  const desktopFrontendJob = workflowJob(workflow, "desktop-frontend");
+  const desktopNativeJob = workflowJob(workflow, "desktop-native-check");
+  if (desktopFrontendJob === undefined) {
+    violations.push(".forgejo/workflows/quality.yml: desktop-frontend job is missing");
+  } else if (desktopFrontendJob.includes("browser-integration-check")) {
+    violations.push(
+      ".forgejo/workflows/quality.yml: browser-integration-check must not run in the Node-only desktop-frontend job",
+    );
+  }
+  if (desktopNativeJob === undefined) {
+    violations.push(".forgejo/workflows/quality.yml: desktop-native-check job is missing");
+  } else {
+    if (!desktopNativeJob.includes("browser-integration-check")) {
+      violations.push(
+        ".forgejo/workflows/quality.yml: desktop-native-check must own browser-integration-check",
+      );
+    }
+    if (
+      corepackVersion !== undefined &&
+      !desktopNativeJob.includes(`npm install --global corepack@${corepackVersion}`)
+    ) {
+      violations.push(
+        `.forgejo/workflows/quality.yml: desktop-native-check must install pinned Corepack ${corepackVersion}`,
+      );
+    }
+    if (pnpmVersion !== undefined && !desktopNativeJob.includes(`pnpm@${pnpmVersion}`)) {
+      violations.push(
+        `.forgejo/workflows/quality.yml: desktop-native-check must activate pinned pnpm ${pnpmVersion}`,
+      );
+    }
   }
 
   return violations;
