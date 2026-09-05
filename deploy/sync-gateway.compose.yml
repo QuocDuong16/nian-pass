@@ -5,17 +5,11 @@ services:
       dockerfile: apps/sync-gateway/Dockerfile
     restart: unless-stopped
     environment:
-      NIAN_PASS_GATEWAY_TOKEN_FILE: /run/secrets/gateway_token
-    secrets:
-      - gateway_token
+      NIAN_PASS_GATEWAY_TOKEN: ${NIAN_PASS_GATEWAY_TOKEN:?load deploy/gateway.env with --env-file}
     volumes:
       - gateway-data:/data
     ports:
-      - "127.0.0.1:8080:8080"
-
-secrets:
-  gateway_token:
-    file: ./gateway-token.txt
+      - "127.0.0.1:${NIAN_PASS_GATEWAY_PORT:-8080}:8080"
 
 volumes:
   gateway-data:

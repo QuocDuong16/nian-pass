@@ -36,6 +36,7 @@ test("protocol policy detects blind writes, weak auth, and missing bounds", () =
   assert.match(violations, /bounded/);
   assert.match(violations, /locking/);
   assert.match(violations, /constant-time/);
+  assert.match(violations, /share/);
   assert.match(violations, /HTTPS/);
   assert.match(violations, /TLS/);
 });

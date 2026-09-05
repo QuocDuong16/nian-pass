@@ -31,7 +31,7 @@ export function forbiddenRuntimeDependencies(pkg, forbidden) {
     .map((dependency) => dependency.packageName);
 }
 
-export function protocolSourceViolations({ server, storage, auth, provider }) {
+export function protocolSourceViolations({ server, storage, auth, provider, protocol = "" }) {
   const violations = [];
   if (
     !/IF_NONE_MATCH/.test(server) ||
@@ -64,6 +64,15 @@ export function protocolSourceViolations({ server, storage, auth, provider }) {
     violations.push("gateway bearer-token verification must remain digest-based and constant-time");
   }
   if (
+    !/MIN_GATEWAY_TOKEN_BYTES:\s*usize\s*=\s*32/.test(protocol) ||
+    !/MAX_GATEWAY_TOKEN_BYTES:\s*usize\s*=\s*512/.test(protocol) ||
+    !/is_ascii_graphic/.test(protocol) ||
+    !/valid_gateway_token/.test(auth) ||
+    !/valid_gateway_token/.test(provider)
+  ) {
+    violations.push("gateway client and server must share the bounded visible-ASCII token policy");
+  }
+  if (
     !/Policy::none/.test(provider) ||
     !/scheme\(\) == "https"/.test(provider) ||
     !/is_loopback/.test(provider)
@@ -83,6 +92,7 @@ export function runChecks(root) {
   );
   const serverPackage = packages.get("nian-pass-sync-gateway");
   const providerPackage = packages.get("sync-provider-gateway");
+  const protocolPackage = packages.get("sync-gateway-protocol");
   const enginePackage = packages.get("sync-engine");
   const providerCorePackage = packages.get("sync-provider-core");
   const vaultSyncPackage = packages.get("vault-sync");
@@ -104,6 +114,20 @@ export function runChecks(root) {
     serverForbidden,
   )) {
     violations.push(`nian-pass-sync-gateway: forbidden runtime dependency ${dependency}`);
+  }
+  if (
+    protocolPackage === undefined ||
+    protocolPackage.dependencies.some((dependency) => dependency.kind === "normal") ||
+    !serverPackage?.dependencies.some(
+      (dependency) =>
+        dependency.kind === "normal" && dependency.packageName === "sync-gateway-protocol",
+    ) ||
+    !providerPackage?.dependencies.some(
+      (dependency) =>
+        dependency.kind === "normal" && dependency.packageName === "sync-gateway-protocol",
+    )
+  ) {
+    violations.push("gateway token policy must remain in the dependency-free shared protocol crate");
   }
   const providerForbidden = new Set([
     "keepass",
@@ -157,8 +181,9 @@ export function runChecks(root) {
   const storage = rust(root, ["apps/sync-gateway/src/storage.rs"]);
   const auth = rust(root, ["apps/sync-gateway/src/auth.rs"]);
   const provider = rust(root, ["crates/sync-provider-gateway/src/lib.rs"]);
+  const protocol = rust(root, ["crates/sync-gateway-protocol/src/lib.rs"]);
   violations.push(
-    ...protocolSourceViolations({ server, storage, auth, provider }),
+    ...protocolSourceViolations({ server, storage, auth, provider, protocol }),
   );
   if (/\b(?:keepass|KdbxDocument|VaultSession|vault_sync)\b/.test(`${server}\n${storage}\n${auth}`)) {
     violations.push("gateway production source may not parse or depend on vault semantics");
@@ -210,10 +235,46 @@ export function runChecks(root) {
   const dockerfile = source(root, "apps/sync-gateway/Dockerfile");
   if (!/^FROM rust:1\.98\.0-bookworm@sha256:[0-9a-f]{64} AS builder$/m.test(dockerfile)
     || !/^FROM debian:bookworm-slim@sha256:[0-9a-f]{64}$/m.test(dockerfile)
-    || !/USER 10001:10001/.test(dockerfile)) {
+    || !/USER 10001:10001/.test(dockerfile)
+    || /USER\s+(?:root|0(?::0)?)/i.test(dockerfile)) {
     violations.push("Linux gateway container build is missing");
   }
+  if (/^(?:ARG|ENV)\s+.*(?:GATEWAY_TOKEN|gateway.token)/im.test(dockerfile)) {
+    violations.push("gateway token must never be baked into the container image");
+  }
+  const compose = source(root, "deploy/sync-gateway.compose.yml");
+  if (
+    !/NIAN_PASS_GATEWAY_TOKEN:\s*\$\{NIAN_PASS_GATEWAY_TOKEN:\?/.test(compose) ||
+    /NIAN_PASS_GATEWAY_TOKEN_FILE|gateway-token\.txt|^secrets:/m.test(compose)
+  ) {
+    violations.push("default Compose deployment must use the private environment-file token path");
+  }
+  const containerCheck = source(root, "scripts/check_gateway_container.sh");
+  const workflow = source(root, ".forgejo/workflows/quality.yml");
+  const makefile = source(root, "Makefile");
   const selfHosting = source(root, "docs/self-hosting.md");
+  if (
+    !/Gateway container check passed/.test(containerCheck) ||
+    !/10001:10001/.test(containerCheck) ||
+    !/gateway-container-check: gateway-source-check/.test(makefile) ||
+    !/run: make gateway-container-check/.test(workflow)
+  ) {
+    violations.push("gateway container runtime smoke must remain explicit and Forgejo-owned");
+  }
+  if (
+    /(?:--env|-e)\s+NIAN_PASS_GATEWAY_TOKEN=|--token(?:=|\s)/.test(
+      `${containerCheck}\n${selfHosting}`,
+    )
+  ) {
+    violations.push("gateway token must not be supplied in container command-line arguments");
+  }
+  const readme = source(root, "README.md");
+  if (
+    /M7\.5 Self-hosted Sync Gateway\s+DONE/.test(readme) &&
+    (!/gateway-container-check/.test(makefile) || !/gateway-container/.test(workflow))
+  ) {
+    violations.push("M7.5 cannot be DONE without the container runtime gate");
+  }
   if (
     !/reverse proxy/i.test(selfHosting) ||
     !/encrypted KDBX/i.test(selfHosting) ||

@@ -10,6 +10,7 @@ description = "Conflict-safe Nian Pass Sync Gateway client transport"
 futures-util.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
+sync-gateway-protocol.workspace = true
 sync-provider-core.workspace = true
 url.workspace = true
 uuid.workspace = true

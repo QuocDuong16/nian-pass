@@ -21,7 +21,7 @@ DIFF_BASE_ARGS = $(if $(strip $(COVERAGE_DIFF_BASE)),--base "$(COVERAGE_DIFF_BAS
 CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync \
 	-p credential-provider-core -p ios-credential-ffi -p browser-native-protocol \
 	-p nian-pass-browser-host -p sync-provider-core -p sync-engine \
-	-p sync-provider-webdav -p sync-provider-s3 -p sync-provider-gateway \
+	-p sync-gateway-protocol -p sync-provider-webdav -p sync-provider-s3 -p sync-provider-gateway \
 	-p nian-pass-sync-gateway -p windows-safe-replace
 
 .PHONY: tools-install tools-check fixture-check \
@@ -40,7 +40,8 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	mobile-tools-check mobile-android-check mobile-ios-tools-check mobile-ios-source-check mobile-ios-check \
 	compat-check compat-check-required policy-check quick-check quality-check \
 	sync-source-check sync-core-check sync-provider-check sync-integration-check \
-	gateway-source-check gateway-server-check gateway-provider-check gateway-integration-check
+	gateway-source-check gateway-server-check gateway-provider-check gateway-integration-check \
+	gateway-container-check
 
 tools-install:
 	@echo "Install pinned Rust quality tools locally..."
@@ -347,6 +348,10 @@ gateway-integration-check: gateway-source-check
 	cargo test --locked -p nian-pass-sync-gateway --test http
 	cargo test --locked -p sync-provider-gateway --test sync_integration
 	cargo test --locked -p nian-pass-desktop sync::
+
+gateway-container-check: gateway-source-check
+	@echo "Run the documented non-root gateway container lifecycle smoke..."
+	bash scripts/check_gateway_container.sh
 
 mobile-source-check:
 	@echo "Check deterministic mobile foundation sources..."

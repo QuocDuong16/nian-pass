@@ -204,6 +204,17 @@ jobs:
       - name: Run canonical Windows core cross-check
         run: make windows-cross-check
 
+  gateway-container:
+    runs-on: docker
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run documented non-root gateway container smoke
+        run: make gateway-container-check
+
   keepassxc-compat:
     runs-on: docker
     timeout-minutes: 30

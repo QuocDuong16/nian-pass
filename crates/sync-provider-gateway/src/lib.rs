@@ -8,6 +8,7 @@ use reqwest::{
     header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH},
     redirect::Policy,
 };
+use sync_gateway_protocol::valid_gateway_token;
 use sync_provider_core::{
     CONNECT_TIMEOUT, MAX_REMOTE_CIPHERTEXT_BYTES, ProviderError, READ_TIMEOUT, REQUEST_TIMEOUT,
     RemoteObject, RemoteObjectProvider, RemoteRead, RemoteRevision,
@@ -79,8 +80,7 @@ pub struct GatewayProvider {
 impl GatewayProvider {
     /// Builds a verified-TLS client with redirects disabled and bounded operations.
     pub fn new(config: GatewayConfig, token: SecretString) -> Result<Self, ProviderError> {
-        let token_len = token.expose_secret().len();
-        if token_len == 0 || token_len > 512 {
+        if !valid_gateway_token(token.expose_secret()) {
             return Err(ProviderError::AuthenticationFailed);
         }
         let _ = rustls::crypto::ring::default_provider().install_default();

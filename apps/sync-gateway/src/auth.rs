@@ -1,10 +1,8 @@
 use hyper::{HeaderMap, header::AUTHORIZATION};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq as _;
+use sync_gateway_protocol::valid_gateway_token;
 use thiserror::Error;
-
-pub const MAX_TOKEN_BYTES: usize = 512;
-const MIN_TOKEN_BYTES: usize = 32;
 
 /// One startup-configured authentication verifier that never retains plaintext.
 pub struct TokenVerifier {
@@ -13,7 +11,7 @@ pub struct TokenVerifier {
 
 impl TokenVerifier {
     pub fn new(token: &str) -> Result<Self, TokenConfigurationError> {
-        if !valid_token(token) {
+        if !valid_gateway_token(token) {
             return Err(TokenConfigurationError);
         }
         Ok(Self {
@@ -37,14 +35,9 @@ impl TokenVerifier {
         };
         let supplied = digest(token.as_bytes());
         scheme.eq_ignore_ascii_case("bearer")
-            && valid_token(token)
+            && valid_gateway_token(token)
             && supplied.ct_eq(&self.digest).into()
     }
-}
-
-fn valid_token(token: &str) -> bool {
-    (MIN_TOKEN_BYTES..=MAX_TOKEN_BYTES).contains(&token.len())
-        && token.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 fn digest(value: &[u8]) -> [u8; 32] {
@@ -81,6 +74,12 @@ mod tests {
         );
         assert!(!verifier.authenticates(&headers));
         assert!(TokenVerifier::new("").is_err());
-        assert!(TokenVerifier::new("short").is_err());
+        assert!(TokenVerifier::new(&"a".repeat(31)).is_err());
+        assert!(TokenVerifier::new(&"a".repeat(32)).is_ok());
+        assert!(TokenVerifier::new(&"a".repeat(512)).is_ok());
+        assert!(TokenVerifier::new(&"a".repeat(513)).is_err());
+        assert!(TokenVerifier::new(&format!("{}\n", "a".repeat(32))).is_err());
+        assert!(TokenVerifier::new(&format!("{}\t", "a".repeat(32))).is_err());
+        assert!(TokenVerifier::new(&format!("{} ", "a".repeat(32))).is_err());
     }
 }

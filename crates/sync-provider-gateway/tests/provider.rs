@@ -169,12 +169,26 @@ async fn precondition_auth_and_uncertain_writes_fail_closed_without_retry() {
 }
 
 #[test]
-fn https_is_required_away_from_loopback_and_tokens_are_bounded() {
+fn https_is_required_away_from_loopback_and_token_format_is_exact() {
     assert!(GatewayConfig::new("http://example.test", VAULT_ID).is_err());
     assert!(GatewayConfig::new("https://example.test", VAULT_ID).is_ok());
     let config = GatewayConfig::new("http://127.0.0.1:8080", VAULT_ID).expect("config");
-    assert!(GatewayProvider::new(config.clone(), SecretString::new(String::new())).is_err());
-    assert!(GatewayProvider::new(config, SecretString::new("x".repeat(513))).is_err());
+    for invalid in [
+        String::new(),
+        "x".repeat(31),
+        "x".repeat(513),
+        format!("{}\n", "x".repeat(32)),
+        format!("{}\t", "x".repeat(32)),
+        format!("{} ", "x".repeat(32)),
+    ] {
+        assert!(
+            GatewayProvider::new(config.clone(), SecretString::new(invalid)).is_err(),
+            "invalid token class must fail before network I/O"
+        );
+    }
+    for valid in ["x".repeat(32), TOKEN.to_owned(), "x".repeat(512)] {
+        assert!(GatewayProvider::new(config.clone(), SecretString::new(valid)).is_ok());
+    }
 }
 
 fn provider(base: &str) -> GatewayProvider {

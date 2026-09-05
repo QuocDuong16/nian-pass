@@ -167,7 +167,10 @@ export function runChecks(root, budget) {
       "apps/browser-native-host/Cargo.toml",
       new Set(["browser-native-protocol"]),
     ],
-    ["apps/sync-gateway/Cargo.toml", new Set(["sync-provider-core"])],
+    [
+      "apps/sync-gateway/Cargo.toml",
+      new Set(["sync-gateway-protocol", "sync-provider-core"]),
+    ],
     ["crates/browser-native-protocol/Cargo.toml", new Set()],
     [
       "crates/credential-provider-core/Cargo.toml",
@@ -182,6 +185,7 @@ export function runChecks(root, budget) {
       "crates/sync-engine/Cargo.toml",
       new Set(["kdbx", "sync-provider-core", "vault-core", "vault-sync"]),
     ],
+    ["crates/sync-gateway-protocol/Cargo.toml", new Set()],
     ["crates/sync-provider-core/Cargo.toml", new Set()],
     [
       "crates/sync-provider-gateway/Cargo.toml",
@@ -189,6 +193,7 @@ export function runChecks(root, budget) {
         "kdbx",
         "nian-pass-sync-gateway",
         "sync-engine",
+        "sync-gateway-protocol",
         "sync-provider-core",
         "vault-core",
       ]),
@@ -215,6 +220,7 @@ export function runChecks(root, budget) {
     "credential-provider-core",
     "ios-credential-ffi",
     "sync-engine",
+    "sync-gateway-protocol",
     "sync-provider-core",
     "sync-provider-gateway",
     "sync-provider-s3",

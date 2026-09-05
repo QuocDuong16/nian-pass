@@ -6,6 +6,6 @@ mod auth;
 mod server;
 mod storage;
 
-pub use auth::{MAX_TOKEN_BYTES, TokenConfigurationError, TokenVerifier};
+pub use auth::{TokenConfigurationError, TokenVerifier};
 pub use server::{GatewayState, serve};
 pub use storage::{Storage, StorageError};

@@ -2977,6 +2977,7 @@ dependencies = [
  "rustls",
  "sha2 0.11.0",
  "subtle",
+ "sync-gateway-protocol",
  "sync-provider-core",
  "thiserror 2.0.20",
  "tokio",
@@ -4491,6 +4492,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-gateway-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "sync-provider-core"
 version = "0.1.0"
 dependencies = [
@@ -4509,6 +4514,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "sync-engine",
+ "sync-gateway-protocol",
  "sync-provider-core",
  "tokio",
  "url",

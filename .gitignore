@@ -9,4 +9,4 @@
 /apps/browser-extension/coverage/
 /apps/browser-extension/node_modules/
 /apps/browser-extension/*.zip
-/deploy/gateway-token.txt
+/deploy/gateway.env

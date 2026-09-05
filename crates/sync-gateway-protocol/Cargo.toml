@@ -1,0 +1,10 @@
+[package]
+name = "sync-gateway-protocol"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Small wire-format invariants shared by the Nian Pass Sync Gateway and client"
+
+[lints]
+workspace = true

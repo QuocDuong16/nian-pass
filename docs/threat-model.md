@@ -114,17 +114,18 @@ The gateway narrows these threats as follows:
   IDs over time, or provide a billing quota. Reverse-proxy/network rate limits
   remain an operator control.
 - Create and replacement require `If-None-Match: *` or one exact strong
-  ciphertext-derived ETag. A per-vault lock serializes read-generation,
-  validation, durable file preparation, atomic installation, and visibility.
-  Different vault IDs have independent operation locks. One exclusive data-root
-  process lock rejects multi-process use; active-active and distributed locking
-  are explicitly unsupported.
-- A complete private temporary file is flushed and synced before CAS validation;
-  atomic rename exposes either the old or new complete generation, followed by
-  parent-directory sync. Interrupted bodies never become vault objects. These
-  claims assume ordinary local Linux filesystem rename, fsync, permissions, and
-  advisory-lock semantics; a hostile root or storage implementation can violate
-  them.
+  ciphertext-derived ETag. After the bounded body is written to a private unique
+  temporary file and flushed and synced, a per-vault lock serializes reading the
+  current generation, validating the condition, atomic installation, and
+  visibility. Different vault IDs prepare independent candidates and have
+  independent operation locks. One exclusive data-root process lock rejects
+  multi-process use; active-active and distributed locking are explicitly
+  unsupported.
+- Atomic rename exposes either the old or new complete generation, followed by
+  parent-directory sync. Interrupted bodies and prepared temporary candidates
+  never become vault objects. These claims assume ordinary local Linux
+  filesystem rename, fsync, permissions, and advisory-lock semantics; a hostile
+  root or storage implementation can violate them.
 - The client requires HTTPS off loopback, verifies certificates and hostnames,
   rejects redirects, bounds responses, treats revisions as opaque, verifies
   exact successful PUT read-back, and routes ambiguous PUT completion through

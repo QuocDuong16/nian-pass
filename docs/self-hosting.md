@@ -46,6 +46,8 @@ gateway never rewrites vaults in the background.
 ## Authentication token
 
 Configure one high-entropy token of 32 through 512 visible ASCII characters.
+Spaces, tabs, line breaks, other control characters, and non-ASCII characters
+are rejected by the shared server/client token-format policy.
 There is no default credential. Supply exactly one of:
 
 ```text
@@ -54,8 +56,9 @@ NIAN_PASS_GATEWAY_TOKEN_FILE
 --token-file PATH
 ```
 
-Prefer a secret file for service or container deployment. The gateway hashes
-the configured token in memory and compares request digests without a naive
+Use an appropriately owned secret file for a native service. Use the private
+environment-file workflow documented below for Compose or direct Docker. The
+gateway hashes the configured token in memory and compares request digests without a naive
 early-exit string comparison. It never returns or logs the token. Rotate a
 token by stopping the gateway, replacing the secret, and starting it again;
 desktop clients must then enter the new token for each explicit operation.
@@ -89,33 +92,42 @@ certificate-validation bypass.
 
 ## Container deployment
 
-Create a secret containing a random high-entropy token and keep it out of source
-control:
+The supported Compose path injects the token from a private environment file.
+This avoids the host-ownership ambiguity of bind-backed Compose secrets while
+keeping the final gateway process at UID/GID 10001. Create the ignored file with
+a random high-entropy token and keep it private:
 
 ```bash
-openssl rand -base64 48 > deploy/gateway-token.txt
-chmod 0600 deploy/gateway-token.txt
-docker compose -f deploy/sync-gateway.compose.yml up --build -d
+umask 077
+printf 'NIAN_PASS_GATEWAY_TOKEN=' > deploy/gateway.env
+openssl rand -base64 48 | tr -d '\n' >> deploy/gateway.env
+printf '\n' >> deploy/gateway.env
+chmod 0600 deploy/gateway.env
+docker compose --env-file deploy/gateway.env \
+  -f deploy/sync-gateway.compose.yml up --build -d
 ```
 
 The Compose example builds the multi-stage
 `apps/sync-gateway/Dockerfile`, runs as UID/GID 10001, persists only `/data` in a
-named volume, mounts the token through a Compose secret, and binds the HTTP port
-to loopback for an external reverse proxy. The final image contains the gateway
-binary and minimal Debian runtime only; it contains no credential or build
-toolchain.
+named volume, and binds the HTTP port to loopback for an external reverse proxy.
+The token is runtime configuration: it is not a bind-mounted file, command-line
+argument, image layer, or build input. The private host environment file is
+read by Compose, and the non-root process reads the resulting environment value.
+As with other container environment secrets, the Docker daemon and host root can
+inspect it; those principals already control the gateway process and ciphertext.
+The final image contains only the gateway binary and minimal Debian runtime.
 
-An equivalent direct run is:
+Direct `docker run` is an advanced equivalent. It uses the same private
+environment file and therefore does not depend on bind-mount UID mapping:
 
 ```bash
 docker build -f apps/sync-gateway/Dockerfile -t nian-pass-sync-gateway .
 docker volume create nian-pass-gateway-data
 docker run --rm --name nian-pass-sync-gateway \
   --user 10001:10001 \
+  --env-file "$PWD/deploy/gateway.env" \
   -p 127.0.0.1:8080:8080 \
   -v nian-pass-gateway-data:/data \
-  -v "$PWD/deploy/gateway-token.txt:/run/secrets/gateway_token:ro" \
-  -e NIAN_PASS_GATEWAY_TOKEN_FILE=/run/secrets/gateway_token \
   nian-pass-sync-gateway
 ```
 

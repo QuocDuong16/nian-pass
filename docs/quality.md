@@ -56,8 +56,9 @@ required. Any future DIND object-server image must be immutable-pinned and may
 not weaken AWS conditional semantics to satisfy a compatible product.
 
 M7.5 adds `gateway-source-check`, `gateway-server-check`,
-`gateway-provider-check`, and `gateway-integration-check`. They are part of
-normal quick and quality gates. The source gate structurally rejects server
+`gateway-provider-check`, `gateway-integration-check`, and
+`gateway-container-check`. The deterministic gates are part of normal quick and
+quality checks. The source gate structurally rejects server
 vault/KDBX/session/merge dependencies, provider-core transports, sync-engine
 gateway dependencies, blind PUTs, unbounded uploads, TLS bypass, token
 persistence, Android INTERNET authority, Apple gateway runtime code, and
@@ -82,6 +83,17 @@ conflict, Keep Local, Keep Remote, barrier-forced stale CAS, uncertain-result
 recovery, restart persistence, and two-client convergence. No JSON fake vault,
 internet access, account, Docker daemon, GUI browser, Android SDK, or Apple
 toolchain is required for these deterministic tests.
+
+`gateway-container-check` is the runtime authority for the documented Compose
+deployment. On a Docker-capable Linux runner it builds the pinned image, starts
+the service through the committed Compose file and private environment file,
+proves UID/GID 10001, authentication, exact-byte create/read, restart
+persistence, stale CAS, process-lock rejection, safe startup categories, and
+absence of token values from responses, diagnostics, logs, and image history.
+It fails rather than silently skipping when Docker or Compose is unavailable.
+The dedicated Forgejo Docker/DIND job owns this gate; environments without a
+Docker daemon report it separately as `NOT RUN` rather than treating source
+inspection as runtime evidence.
 
 The sync store suite also writes synthetic v1, current v2, future-schema, and
 malformed BASE/journal metadata. It requires explicit unsupported-state versus

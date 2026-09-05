@@ -9,6 +9,7 @@ members = [
     "crates/ios-credential-ffi",
     "crates/kdbx",
     "crates/sync-engine",
+    "crates/sync-gateway-protocol",
     "crates/sync-provider-core",
     "crates/sync-provider-gateway",
     "crates/sync-provider-s3",
@@ -50,6 +51,7 @@ tokio = { version = "=1.53.1", features = ["io-util", "macros", "net", "rt", "sy
 url = "=2.5.8"
 uuid = { version = "=1.24.1", features = ["serde", "v4"] }
 sync-provider-core = { path = "crates/sync-provider-core" }
+sync-gateway-protocol = { path = "crates/sync-gateway-protocol" }
 sync-provider-gateway = { path = "crates/sync-provider-gateway" }
 vault-core = { path = "crates/vault-core" }
 zeroize = "=1.9.0"

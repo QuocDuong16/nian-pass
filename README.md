@@ -19,7 +19,7 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M7.5 — Self-hosted Sync Gateway
+M7.5 — Self-hosted Sync Gateway — DONE
 
 Desktop explicit sync supports WebDAV, AWS S3, and the Nian Pass Sync Gateway
 with manual only operation; provider credentials are not persisted.
