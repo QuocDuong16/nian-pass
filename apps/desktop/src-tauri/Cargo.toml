@@ -33,6 +33,7 @@ interprocess.workspace = true
 serde_json.workspace = true
 sync-engine = { path = "../../../crates/sync-engine" }
 sync-provider-core.workspace = true
+sync-provider-gateway.workspace = true
 sync-provider-s3 = { path = "../../../crates/sync-provider-s3" }
 sync-provider-webdav = { path = "../../../crates/sync-provider-webdav" }
 tauri-plugin-clipboard-manager = "=2.3.2"

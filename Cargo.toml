@@ -3,12 +3,14 @@ members = [
     "apps/browser-native-host",
     "apps/cli",
     "apps/desktop/src-tauri",
+    "apps/sync-gateway",
     "crates/browser-native-protocol",
     "crates/credential-provider-core",
     "crates/ios-credential-ffi",
     "crates/kdbx",
     "crates/sync-engine",
     "crates/sync-provider-core",
+    "crates/sync-provider-gateway",
     "crates/sync-provider-s3",
     "crates/sync-provider-webdav",
     "crates/vault-core",
@@ -25,11 +27,15 @@ publish = false
 
 [workspace.dependencies]
 atomic-write-file = "=0.3.1"
+bytes = "=1.12.1"
 aws-sdk-s3 = { version = "=1.144.0", default-features = false, features = ["behavior-version-latest", "http-1x", "rt-tokio"] }
 aws-smithy-http-client = { version = "=1.4.0", default-features = false, features = ["rustls-ring"] }
 clap = { version = "=4.6.6", features = ["derive"] }
 chrono = "=0.4.45"
 futures-util = "=0.3.32"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.11.0", features = ["http1", "server"] }
+hyper-util = { version = "=0.1.20", features = ["tokio"] }
 keepass = { version = "=0.13.21", default-features = false, features = ["save_kdbx4"] }
 getrandom = "=0.4.3"
 rpassword = "=7.5.4"
@@ -38,11 +44,13 @@ rustls = { version = "=0.23.43", default-features = false, features = ["ring", "
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 sha2 = "=0.11.0"
+subtle = "=2.6.1"
 thiserror = "=2.0.20"
 tokio = { version = "=1.53.1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 url = "=2.5.8"
 uuid = { version = "=1.24.1", features = ["serde", "v4"] }
 sync-provider-core = { path = "crates/sync-provider-core" }
+sync-provider-gateway = { path = "crates/sync-provider-gateway" }
 vault-core = { path = "crates/vault-core" }
 zeroize = "=1.9.0"
 credential-provider-core = { path = "crates/credential-provider-core" }

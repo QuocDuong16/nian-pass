@@ -14,6 +14,9 @@ interface SyncFormValues {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken: string;
+  gatewayUrl: string;
+  gatewayVaultId: string;
+  gatewayToken: string;
 }
 
 export function projectSyncForm(values: SyncFormValues): {
@@ -37,6 +40,19 @@ export function projectSyncForm(values: SyncFormValues): {
       providerConfigComplete: values.resourceUrl.trim() !== "",
       credentialsComplete:
         values.username.trim() !== "" && values.webdavPassword !== "",
+    };
+  }
+  if (values.provider === "gateway") {
+    return {
+      target: {
+        provider: values.provider,
+        baseUrl: values.gatewayUrl.trim(),
+        vaultId: values.gatewayVaultId.trim(),
+      },
+      credentials: { gateway: { accessToken: values.gatewayToken } },
+      providerConfigComplete:
+        values.gatewayUrl.trim() !== "" && values.gatewayVaultId.trim() !== "",
+      credentialsComplete: values.gatewayToken !== "",
     };
   }
   return {

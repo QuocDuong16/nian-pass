@@ -8,6 +8,7 @@ import {
 
 export type SyncProfileTarget =
   | { provider: "webdav"; resourceUrl: string }
+  | { provider: "gateway"; baseUrl: string; vaultId: string }
   | {
       provider: "s3";
       endpoint: string | null;
@@ -31,6 +32,7 @@ export interface SaveSyncProfileRequest {
 
 export interface ProviderCredentials {
   webdav?: { username: string; password: string };
+  gateway?: { accessToken: string };
   s3?: {
     accessKeyId: string;
     secretAccessKey: string;
@@ -151,6 +153,14 @@ function parseTarget(value: unknown): SyncProfileTarget {
       bucket: nonEmptyString(object["bucket"]),
       objectKey: nonEmptyString(object["objectKey"]),
       pathStyle: object["pathStyle"],
+    };
+  }
+  if (provider === "gateway") {
+    const object = record(value, ["provider", "baseUrl", "vaultId"]);
+    return {
+      provider,
+      baseUrl: nonEmptyString(object["baseUrl"]),
+      vaultId: nonEmptyString(object["vaultId"]),
     };
   }
   return invalidContract();

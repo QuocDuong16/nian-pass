@@ -2134,6 +2134,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2156,6 +2162,7 @@ dependencies = [
  "http 1.5.0",
  "http-body 1.1.0",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -2943,6 +2950,7 @@ dependencies = [
  "sha2 0.11.0",
  "sync-engine",
  "sync-provider-core",
+ "sync-provider-gateway",
  "sync-provider-s3",
  "sync-provider-webdav",
  "tauri",
@@ -2953,6 +2961,26 @@ dependencies = [
  "uuid",
  "vault-core",
  "vault-session",
+ "zeroize",
+]
+
+[[package]]
+name = "nian-pass-sync-gateway"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "reqwest",
+ "rustls",
+ "sha2 0.11.0",
+ "subtle",
+ "sync-provider-core",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
  "zeroize",
 ]
 
@@ -4248,6 +4276,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
+]
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4459,6 +4497,23 @@ dependencies = [
  "serde",
  "sha2 0.11.0",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "sync-provider-gateway"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "kdbx",
+ "nian-pass-sync-gateway",
+ "reqwest",
+ "rustls",
+ "sync-engine",
+ "sync-provider-core",
+ "tokio",
+ "url",
+ "uuid",
+ "vault-core",
 ]
 
 [[package]]
@@ -4990,6 +5045,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

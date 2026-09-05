@@ -1,5 +1,5 @@
 interface ProviderFieldsProps {
-  provider: "webdav" | "s3";
+  provider: "webdav" | "s3" | "gateway";
   busy: boolean;
   resourceUrl: string;
   endpoint: string;
@@ -12,6 +12,9 @@ interface ProviderFieldsProps {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken: string;
+  gatewayUrl: string;
+  gatewayVaultId: string;
+  gatewayToken: string;
   onResourceUrl: (value: string) => void;
   onEndpoint: (value: string) => void;
   onRegion: (value: string) => void;
@@ -23,6 +26,9 @@ interface ProviderFieldsProps {
   onAccessKeyId: (value: string) => void;
   onSecretAccessKey: (value: string) => void;
   onSessionToken: (value: string) => void;
+  onGatewayUrl: (value: string) => void;
+  onGatewayVaultId: (value: string) => void;
+  onGatewayToken: (value: string) => void;
 }
 
 export function ProviderFields(props: ProviderFieldsProps) {
@@ -60,6 +66,46 @@ export function ProviderFields(props: ProviderFieldsProps) {
             disabled={props.busy}
             onChange={(event) => {
               props.onWebdavPassword(event.target.value);
+            }}
+          />
+        </label>
+      </>
+    );
+  }
+  if (props.provider === "gateway") {
+    return (
+      <>
+        <label className="form-field sync-wide">
+          Gateway URL
+          <input
+            type="url"
+            value={props.gatewayUrl}
+            disabled={props.busy}
+            onChange={(event) => {
+              props.onGatewayUrl(event.target.value);
+            }}
+          />
+        </label>
+        <label className="form-field sync-wide">
+          Vault ID
+          <input
+            value={props.gatewayVaultId}
+            autoComplete="off"
+            disabled={props.busy}
+            onChange={(event) => {
+              props.onGatewayVaultId(event.target.value);
+            }}
+          />
+        </label>
+        <label className="form-field sync-wide">
+          Access token
+          <input
+            type="password"
+            value={props.gatewayToken}
+            autoComplete="off"
+            disabled={props.busy}
+            onChange={(event) => {
+              props.onGatewayToken(event.target.value);
             }}
           />
         </label>

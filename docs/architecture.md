@@ -127,6 +127,81 @@ overwrite. Read-back proves which ciphertext the provider serves after the
 request, not that a malicious provider truly enforced `If-Match` or
 `If-None-Match`, and M7 provides no cryptographic remote history guarantee.
 
+## M7.5 self-hosted Sync Gateway boundary
+
+M7.5 adds a first-party Linux HTTP server without changing the accepted M7
+dependency direction or merge transaction:
+
+```text
+Windows/Linux desktop
+→ sync-provider-gateway client transport
+→ sync-provider-core conditional object contract
+→ sync-engine transaction and recovery
+→ vault-sync semantic merge
+→ verified local vault persistence
+```
+
+`crates/sync-provider-gateway` is a client transport only. It validates and
+normalizes one base URL plus one canonical UUID-v4 vault ID, requires HTTPS off
+loopback, disables redirects, sends a request-memory-only bearer token, maps
+HTTP 404/401/412 into the existing provider errors, and performs exact
+ciphertext read-back after every successful PUT. A send failure after PUT is
+`WriteResultUncertain`; it is never blindly retried and uses the existing M7
+recovery journal.
+
+`apps/sync-gateway` is independently one authenticated opaque-object server. It
+depends on the provider-neutral size constant but has no dependency on `kdbx`,
+`keepass`, `vault-core`, `vault-session`, `vault-sync`, `sync-engine`, Tauri, or
+any credential-provider code. It never receives a master password and cannot
+open or inspect KDBX. Its API is deliberately only:
+
+```text
+GET /healthz
+GET /v1/vaults/{uuid-v4}
+PUT /v1/vaults/{uuid-v4} with If-None-Match: *
+PUT /v1/vaults/{uuid-v4} with exact If-Match
+```
+
+There is no unconditional PUT, path API, directory listing, force flag, merge,
+or metadata endpoint. The response body is exact encrypted KDBX ciphertext.
+The strong ETag is quoted lowercase SHA-256 of those exact bytes, so no sidecar
+revision transaction can diverge from the stored object.
+
+The server accepts bounded HTTP/1 connections, 32 KiB parser buffers, a 256-byte
+request target, a 64 MiB body limit, a 15-second stalled-body timeout, a
+45-second operation bound, and four concurrent writes. Authentication is
+checked before vault-ID parsing; configured and presented tokens are hashed and
+their fixed-size digests use constant-time comparison. Production code has no
+request/body/Authorization logging path. `/healthz` is a fixed unauthenticated
+response with no configuration or storage state.
+
+Each upload is completely written to a private `0600` temporary file and synced
+before object state is inspected. A short-lived per-UUID lock covers current
+generation read, condition validation, atomic rename, and parent-directory
+sync. Locks for different UUIDs are independent apart from brief lock-map
+maintenance. The storage root and temporary directory are `0700`; object files
+are `0600`; symlinks and unexpected file types fail closed. The data root also
+holds an exclusive advisory process lock, deliberately preventing a second
+gateway process on the same ordinary Linux filesystem. Active-active replicas,
+shared-volume multi-process operation, and distributed filesystems with weaker
+rename/fsync/lock semantics are not supported.
+
+Desktop target identity now has a third typed variant: provider kind, canonical
+gateway base URL, and UUID-v4 vault ID. That identity feeds the same private
+`TargetBinding` stored in BASE and journal metadata. The profile DTO contains
+no access-token field, and an existing `profile_id` remains immutable over the
+exact local-source + remote-target relationship. A new gateway profile starts
+with a browser-cryptography-generated UUID-v4; another desktop can explicitly
+enter the same ID. The gateway remains an object transport, never a second
+merge authority.
+
+The gateway serves HTTP for placement behind a separately operated HTTPS
+reverse proxy. Desktop TLS certificate and hostname verification remain
+mandatory, with HTTP permitted only on loopback for tests/development. The
+container runs as a non-root UID with one `/data` volume and a mounted or
+environment-supplied token; it includes no certificate authority, account
+platform, background sync, Android networking, or Apple runtime work.
+
 ## M6.5 browser and desktop credential boundary
 
 M6.5 extends the accepted M6 browser extension without changing Android or the

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use sync_provider_core::{ProviderError, RemoteObjectProvider, RemoteRead, RemoteRevision};
+use sync_provider_gateway::{GatewayConfig, GatewayProvider};
 use sync_provider_s3::{S3Config, S3Credentials, S3Provider};
 use sync_provider_webdav::{WebDavConfig, WebDavProvider};
 use vault_core::SecretString;
@@ -11,6 +12,7 @@ use crate::{state::DesktopError, sync::profile::SyncProfileTargetDto};
 pub struct ProviderCredentialsDto {
     webdav: Option<WebDavCredentialsDto>,
     s3: Option<S3CredentialsDto>,
+    gateway: Option<GatewayCredentialsDto>,
 }
 
 #[derive(Deserialize)]
@@ -28,9 +30,16 @@ struct S3CredentialsDto {
     session_token: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GatewayCredentialsDto {
+    access_token: String,
+}
+
 pub enum DesktopProvider {
     Webdav(WebDavProvider),
     S3(S3Provider),
+    Gateway(GatewayProvider),
 }
 
 impl DesktopProvider {
@@ -79,6 +88,16 @@ impl DesktopProvider {
                 .map_err(|_| DesktopError::SyncCredentialsRequired)?;
                 Ok(Self::S3(S3Provider::new(config, credentials)))
             }
+            SyncProfileTargetDto::Gateway { base_url, vault_id } => {
+                let credentials = credentials
+                    .gateway
+                    .ok_or(DesktopError::SyncCredentialsRequired)?;
+                let config = GatewayConfig::new(base_url, vault_id)
+                    .map_err(|_| DesktopError::SyncUnsafeProvider)?;
+                GatewayProvider::new(config, SecretString::new(credentials.access_token))
+                    .map(Self::Gateway)
+                    .map_err(|_| DesktopError::SyncCredentialsRequired)
+            }
         }
     }
 }
@@ -88,6 +107,7 @@ impl RemoteObjectProvider for DesktopProvider {
         match self {
             Self::Webdav(provider) => provider.read().await,
             Self::S3(provider) => provider.read().await,
+            Self::Gateway(provider) => provider.read().await,
         }
     }
 
@@ -95,6 +115,7 @@ impl RemoteObjectProvider for DesktopProvider {
         match self {
             Self::Webdav(provider) => provider.create_if_absent(ciphertext).await,
             Self::S3(provider) => provider.create_if_absent(ciphertext).await,
+            Self::Gateway(provider) => provider.create_if_absent(ciphertext).await,
         }
     }
 
@@ -106,6 +127,7 @@ impl RemoteObjectProvider for DesktopProvider {
         match self {
             Self::Webdav(provider) => provider.replace_if_revision(expected, ciphertext).await,
             Self::S3(provider) => provider.replace_if_revision(expected, ciphertext).await,
+            Self::Gateway(provider) => provider.replace_if_revision(expected, ciphertext).await,
         }
     }
 }

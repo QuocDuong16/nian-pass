@@ -21,7 +21,8 @@ DIFF_BASE_ARGS = $(if $(strip $(COVERAGE_DIFF_BASE)),--base "$(COVERAGE_DIFF_BAS
 CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vault-sync \
 	-p credential-provider-core -p ios-credential-ffi -p browser-native-protocol \
 	-p nian-pass-browser-host -p sync-provider-core -p sync-engine \
-	-p sync-provider-webdav -p sync-provider-s3 -p windows-safe-replace
+	-p sync-provider-webdav -p sync-provider-s3 -p sync-provider-gateway \
+	-p nian-pass-sync-gateway -p windows-safe-replace
 
 .PHONY: tools-install tools-check fixture-check \
 	rust-format rust-lint rust-test rust-doc rust-deps-check rust-security-check \
@@ -38,7 +39,8 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	architecture-check security-check docs-check scripts-install scripts-check mobile-source-check \
 	mobile-tools-check mobile-android-check mobile-ios-tools-check mobile-ios-source-check mobile-ios-check \
 	compat-check compat-check-required policy-check quick-check quality-check \
-	sync-source-check sync-core-check sync-provider-check sync-integration-check
+	sync-source-check sync-core-check sync-provider-check sync-integration-check \
+	gateway-source-check gateway-server-check gateway-provider-check gateway-integration-check
 
 tools-install:
 	@echo "Install pinned Rust quality tools locally..."
@@ -94,7 +96,7 @@ rust-coverage:
 	mkdir -p target/coverage
 	PATH="$(TOOLS_BIN):$$PATH" cargo llvm-cov --locked --workspace --all-features \
 		--lcov --output-path "$(RUST_LCOV)" \
-		--ignore-filename-regex 'apps/desktop/src-tauri/(build.rs|src/main.rs)'
+		--ignore-filename-regex 'apps/(desktop/src-tauri/(build.rs|src/main.rs)|sync-gateway/src/main.rs)'
 
 rust-coverage-check:
 	@echo "Check Rust line coverage ratchet ($(RUST_COVERAGE_MIN)%)..."
@@ -298,6 +300,7 @@ windows-cross-check:
 	cargo check --locked --all-targets --target x86_64-pc-windows-gnu \
 		-p vault-session -p vault-sync -p windows-safe-replace -p sync-provider-core -p sync-engine \
 		-p sync-provider-webdav -p sync-provider-s3 -p browser-native-protocol \
+		-p sync-provider-gateway \
 		-p nian-pass-browser-host -p nian-pass-desktop
 
 sync-source-check:
@@ -311,16 +314,39 @@ sync-core-check: sync-source-check
 	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p sync-provider-core -p sync-engine --all-features --no-deps
 
 sync-provider-check: sync-source-check
-	@echo "Check WebDAV and S3 conditional transports..."
-	cargo test --locked -p sync-provider-webdav -p sync-provider-s3
-	cargo clippy --locked -p sync-provider-webdav -p sync-provider-s3 --all-targets --all-features -- -D warnings
-	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p sync-provider-webdav -p sync-provider-s3 --all-features --no-deps
+	@echo "Check WebDAV, S3, and gateway conditional transports..."
+	cargo test --locked -p sync-provider-webdav -p sync-provider-s3 -p sync-provider-gateway
+	cargo clippy --locked -p sync-provider-webdav -p sync-provider-s3 -p sync-provider-gateway --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p sync-provider-webdav -p sync-provider-s3 -p sync-provider-gateway --all-features --no-deps
 
 sync-integration-check:
 	@echo "Run deterministic loopback provider and crash-recovery integration tests..."
 	cargo test --locked -p sync-engine --test sync
 	cargo test --locked -p sync-provider-webdav
 	cargo test --locked -p sync-provider-s3
+	cargo test --locked -p sync-provider-gateway --test sync_integration
+
+gateway-source-check:
+	@echo "Check M7.5 gateway architecture and security invariants..."
+	node scripts/check_gateway.mjs
+
+gateway-server-check: gateway-source-check
+	@echo "Check the Linux self-hosted opaque-object gateway..."
+	cargo test --locked -p nian-pass-sync-gateway
+	cargo clippy --locked -p nian-pass-sync-gateway --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p nian-pass-sync-gateway --all-features --no-deps
+
+gateway-provider-check: gateway-source-check
+	@echo "Check the strict desktop gateway transport..."
+	cargo test --locked -p sync-provider-gateway
+	cargo clippy --locked -p sync-provider-gateway --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --locked -p sync-provider-gateway --all-features --no-deps
+
+gateway-integration-check: gateway-source-check
+	@echo "Run real gateway and encrypted KDBX sync-engine integration tests..."
+	cargo test --locked -p nian-pass-sync-gateway --test http
+	cargo test --locked -p sync-provider-gateway --test sync_integration
+	cargo test --locked -p nian-pass-desktop sync::
 
 mobile-source-check:
 	@echo "Check deterministic mobile foundation sources..."
@@ -395,6 +421,7 @@ policy-check:
 	$(MAKE) security-check
 	$(MAKE) docs-check
 	$(MAKE) sync-source-check
+	$(MAKE) gateway-source-check
 
 quick-check:
 	$(MAKE) fixture-check
@@ -406,6 +433,9 @@ quick-check:
 	$(MAKE) rust-test
 	$(MAKE) sync-core-check
 	$(MAKE) sync-provider-check
+	$(MAKE) gateway-server-check
+	$(MAKE) gateway-provider-check
+	$(MAKE) gateway-integration-check
 	$(MAKE) desktop-format-check
 	$(MAKE) desktop-lint
 	$(MAKE) desktop-no-eslint-disable
@@ -427,6 +457,9 @@ quality-check:
 	$(MAKE) sync-core-check
 	$(MAKE) sync-provider-check
 	$(MAKE) sync-integration-check
+	$(MAKE) gateway-server-check
+	$(MAKE) gateway-provider-check
+	$(MAKE) gateway-integration-check
 	$(MAKE) desktop-check
 	$(MAKE) browser-source-check
 	$(MAKE) browser-extension-check

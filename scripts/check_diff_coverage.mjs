@@ -131,6 +131,7 @@ function isExcluded(file) {
     file.endsWith(".d.ts") ||
     file.endsWith("build.rs") ||
     file.endsWith("_tests.rs") ||
+    file === "apps/sync-gateway/src/main.rs" ||
     /\.(?:test|spec)\.(?:ts|tsx|js|jsx)$/.test(file) ||
     /(?:^|\/)(?:vite|vitest|eslint|prettier)\.config\./.test(file)
   );

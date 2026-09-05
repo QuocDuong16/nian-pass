@@ -55,6 +55,34 @@ AWS account, remote WebDAV account, live credentials, or internet service is
 required. Any future DIND object-server image must be immutable-pinned and may
 not weaken AWS conditional semantics to satisfy a compatible product.
 
+M7.5 adds `gateway-source-check`, `gateway-server-check`,
+`gateway-provider-check`, and `gateway-integration-check`. They are part of
+normal quick and quality gates. The source gate structurally rejects server
+vault/KDBX/session/merge dependencies, provider-core transports, sync-engine
+gateway dependencies, blind PUTs, unbounded uploads, TLS bypass, token
+persistence, Android INTERNET authority, Apple gateway runtime code, and
+background/push sync. It also requires the Linux container and reviewed
+self-hosting boundaries.
+
+The server gate exercises missing/wrong/correct authentication, fixed health,
+missing reads, byte-exact conditional create, duplicate create, exact and stale
+replacement, missing preconditions, simultaneous same-generation replacement,
+ciphertext-derived ETags, malformed UUID/traversal, oversized bodies,
+permissions, symlink rejection, interrupted uploads, private temporary files,
+graceful connection shutdown, and restart persistence. The provider gate uses
+loopback servers to verify request headers, strong revisions, 401/404/412
+mapping, response bounds, HTTPS-off-loopback policy, redirect rejection,
+uncertain PUT classification, mandatory exact read-back, and mismatch failure.
+
+The real integration gate starts the actual Hyper gateway over a local
+filesystem and drives `SyncEngine` with the real gateway provider and checked-in
+encrypted KDBX 4.1 fixture. It covers first-client create, second-client BASE,
+both fast-forward directions, non-overlapping semantic merge, semantic
+conflict, Keep Local, Keep Remote, barrier-forced stale CAS, uncertain-result
+recovery, restart persistence, and two-client convergence. No JSON fake vault,
+internet access, account, Docker daemon, GUI browser, Android SDK, or Apple
+toolchain is required for these deterministic tests.
+
 The sync store suite also writes synthetic v1, current v2, future-schema, and
 malformed BASE/journal metadata. It requires explicit unsupported-state versus
 valid-recovery classification, rejects automatic target attachment, exercises
@@ -84,11 +112,12 @@ absent. Source checks reject blind provider methods, production remote HTTP,
 redirect following, persisted secret fields, and automatic S3 retry. Unix
 tests assert 0700 directories and 0600 BASE/journal/metadata files.
 
-`windows-cross-check` compiles the engine, both providers, desktop integration,
+`windows-cross-check` compiles the engine, all three providers, desktop integration,
 and the narrow ACL-preserving `ReplaceFileW` adapter for
 `x86_64-pc-windows-gnu`. Cross-compilation is not Windows runtime evidence.
-Real WebDAV, AWS S3, S3-compatible, and Windows runtime smoke remain manual and
-must each be reported as RUN or NOT RUN. Ordinary CI stays Forgejo-owned; M7
+Real WebDAV, AWS S3, S3-compatible, Windows desktop-to-gateway, Linux
+desktop-to-gateway, HTTPS reverse-proxy, and container runtime smoke remain
+manual and must each be reported as RUN or NOT RUN. Ordinary CI stays Forgejo-owned; M7
 adds no GitHub Actions workflow and M8 still owns tag-only release engineering.
 
 M6.5 keeps `browser-source-check` and `browser-extension-check` and adds

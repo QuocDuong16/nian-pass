@@ -31,6 +31,17 @@ const s3Profile = {
   recoveryStatus: "required",
 };
 
+const gatewayProfile = {
+  profileId: "00112233-4455-4677-8899-aabbccddeeff",
+  target: {
+    provider: "gateway",
+    baseUrl: "https://gateway.example.test/",
+    vaultId: "11112233-4455-4677-8899-aabbccddeeff",
+  },
+  available: true,
+  recoveryStatus: "none",
+};
+
 const snapshot = {
   dirty: false,
   rootGroupId: "root",
@@ -39,11 +50,10 @@ const snapshot = {
 };
 
 describe("sync contract parsing", () => {
-  test("accepts exact WebDAV and S3 profile shapes", () => {
-    expect(parseSyncProfiles([webdavProfile, s3Profile])).toEqual([
-      webdavProfile,
-      s3Profile,
-    ]);
+  test("accepts exact WebDAV, S3, and gateway profile shapes", () => {
+    expect(
+      parseSyncProfiles([webdavProfile, s3Profile, gatewayProfile]),
+    ).toEqual([webdavProfile, s3Profile, gatewayProfile]);
     expect(
       parseSyncProfile({
         ...s3Profile,

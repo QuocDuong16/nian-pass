@@ -1,0 +1,12 @@
+.git
+.bin
+node_modules
+target
+apps/desktop/node_modules
+apps/browser-extension/node_modules
+apps/desktop/dist
+apps/browser-extension/dist
+apps/desktop/coverage
+apps/desktop/src-tauri/gen
+apps/browser-extension/coverage
+deploy/gateway-token.txt

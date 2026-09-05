@@ -19,20 +19,21 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M7 — BYO-cloud Sync Providers
+M7.5 — Self-hosted Sync Gateway
 
-Desktop explicit sync supports WebDAV and AWS S3 with manual only operation;
-provider credentials are not persisted.
+Desktop explicit sync supports WebDAV, AWS S3, and the Nian Pass Sync Gateway
+with manual only operation; provider credentials are not persisted.
 
 Windows and Linux desktop now provide explicit **Sync now** for one exact
-remote KDBX object through WebDAV or AWS S3 / compatible endpoints that expose
-the required conditional-write and revision semantics. Providers return only
+remote KDBX object through WebDAV, AWS S3 / compatible endpoints, or a
+self-hosted Linux Nian Pass Sync Gateway. Providers return only
 encrypted bytes and an opaque revision; `sync-engine` combines the encrypted LOCAL generation, the
 last proven encrypted BASE, and the encrypted REMOTE generation, then delegates
 all semantic decisions to the existing network-free `vault-sync` crate.
 
 Remote creation is `If-None-Match: *`; replacement is bound to the exact strong
-WebDAV ETag or opaque S3 revision with `If-Match`. A race becomes
+WebDAV ETag, opaque S3 revision, or gateway ciphertext-derived strong ETag with
+`If-Match`. A race becomes
 `remoteChanged`, never a blind overwrite. Merged or explicitly authoritative
 generations use a private encrypted journal, remote-first CAS, verified safe
 local replacement, and an atomic BASE update last. BASE and candidate files are
@@ -48,10 +49,13 @@ rules.
 
 Sync is manual only and requires a clean saved vault, the real master password,
 and freshly entered provider credentials. WebDAV passwords, S3 secret keys and
-session tokens, and the master password are never persisted. Production
+session tokens, gateway access tokens, and the master password are never persisted. Production
 endpoints require HTTPS; plaintext HTTP is accepted only on loopback for local
-tests. Direct Google Drive/Dropbox/OneDrive OAuth, Android cloud sync, Apple
-sync, background sync, and a Nian Pass sync service are not implemented.
+tests. The gateway stores exact opaque encrypted KDBX bytes under validated
+UUID-v4 identifiers, uses conditional create/exact CAS replacement, and never
+parses vault contents. See [Self-hosting the Sync Gateway](docs/self-hosting.md).
+Direct Google Drive/Dropbox/OneDrive OAuth, Android cloud sync, Apple sync,
+background sync, accounts, sharing, and server-side merge are not implemented.
 
 ## Completed M6.5 milestone
 
@@ -155,12 +159,12 @@ M5.5 Android Mobile Security / Lifecycle        DONE
 M6   Browser Extension Foundation               DONE
 M6.5 Browser Native Messaging / Desktop Integration DONE
 M7   BYO-cloud Sync Providers                   DONE
-M7.5 Self-hosted Sync Gateway                   NEXT
-M8   Security Hardening / Release Engineering
+M7.5 Self-hosted Sync Gateway                   DONE
+M8   Security Hardening / Release Engineering  NEXT
 M9+  Apple Platform Resume
 ```
 
-The next milestone is M7.5 Self-hosted Sync Gateway. M6.5 uses standard browser
+The next milestone is M8 Security Hardening / Release Engineering. M6.5 uses standard browser
 Native Messaging transport but does not implement or claim compatibility with
 the KeePassXC-Browser wire protocol. It requires neither `keepassxc-proxy` nor a
 KeePassXC executable. Chromium development uses the committed public Manifest

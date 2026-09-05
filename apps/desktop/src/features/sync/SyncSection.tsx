@@ -30,7 +30,11 @@ export function SyncSection(props: SyncSectionOptions) {
           <option value="">New profile</option>
           {sync.profiles.map((profile) => (
             <option key={profile.profileId} value={profile.profileId}>
-              {profile.target.provider === "webdav" ? "WebDAV" : "S3"}
+              {profile.target.provider === "webdav"
+                ? "WebDAV"
+                : profile.target.provider === "s3"
+                  ? "S3"
+                  : "Nian Pass Gateway"}
               {profile.available ? "" : " (different vault)"}
             </option>
           ))}
@@ -43,12 +47,12 @@ export function SyncSection(props: SyncSectionOptions) {
             value={sync.provider}
             disabled={sync.busy}
             onChange={(event) => {
-              sync.setSelectedId(null);
-              sync.setProvider(event.target.value as ProviderKind);
+              sync.chooseProvider(event.target.value as ProviderKind);
             }}
           >
             <option value="webdav">WebDAV</option>
             <option value="s3">S3 / compatible</option>
+            <option value="gateway">Nian Pass Gateway</option>
           </select>
         </label>
         <ProviderFields
@@ -65,6 +69,9 @@ export function SyncSection(props: SyncSectionOptions) {
           accessKeyId={sync.accessKeyId}
           secretAccessKey={sync.secretAccessKey}
           sessionToken={sync.sessionToken}
+          gatewayUrl={sync.gatewayUrl}
+          gatewayVaultId={sync.gatewayVaultId}
+          gatewayToken={sync.gatewayToken}
           onResourceUrl={sync.setResourceUrl}
           onEndpoint={sync.setEndpoint}
           onRegion={sync.setRegion}
@@ -76,6 +83,9 @@ export function SyncSection(props: SyncSectionOptions) {
           onAccessKeyId={sync.setAccessKeyId}
           onSecretAccessKey={sync.setSecretAccessKey}
           onSessionToken={sync.setSessionToken}
+          onGatewayUrl={sync.setGatewayUrl}
+          onGatewayVaultId={sync.setGatewayVaultId}
+          onGatewayToken={sync.setGatewayToken}
         />
         <label className="form-field sync-wide">
           Vault master password

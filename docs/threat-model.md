@@ -84,6 +84,67 @@ conditional-enforcement, or availability claim. Detecting malicious rollback
 would require a separately reviewed trusted history/anti-rollback design, not
 M7.5 being silently assumed.
 
+## M7.5 self-hosted gateway threats and residual limits
+
+M7.5 treats the remote client, network, reverse proxy, gateway process,
+filesystem volume, host administrator, and bearer token as separate attack
+surfaces. The concrete threats are a stolen token, repeated token guesses, a
+malicious authenticated client, oversized or slow requests, header/path abuse,
+traversal, symlink substitution, partial upload, process interruption,
+concurrent PUT races, stale or malformed ETags, duplicate create, log leakage,
+reverse-proxy misconfiguration, storage tampering or exhaustion, ciphertext
+rollback/fork, copied gateway files, and denial of service.
+
+The gateway narrows these threats as follows:
+
+- One high-entropy token is loaded only from an explicit environment value or
+  secret file. Missing, empty, short, overlong, duplicated, or malformed bearer
+  values fail with a generic 401. The configured token is retained only as a
+  SHA-256 digest and compared to a presented digest in constant time. Tokens,
+  Authorization headers, ciphertext, request bodies, paths, and internal errors
+  are absent from production logs and API error bodies.
+- Only one validated canonical UUID-v4 can select one object. User input never
+  becomes a raw filesystem path. Directory browsing, arbitrary names, and
+  unconditional overwrite do not exist. Symlinks and non-regular objects fail
+  closed.
+- Request targets, HTTP parser buffers, object bodies, body stalls, operation
+  duration, connections, and concurrent writes are bounded. Authentication is
+  required for object reads and writes. This limits trivial abuse but does not
+  guarantee availability, stop a valid-token holder from cycling many vault
+  IDs over time, or provide a billing quota. Reverse-proxy/network rate limits
+  remain an operator control.
+- Create and replacement require `If-None-Match: *` or one exact strong
+  ciphertext-derived ETag. A per-vault lock serializes read-generation,
+  validation, durable file preparation, atomic installation, and visibility.
+  Different vault IDs have independent operation locks. One exclusive data-root
+  process lock rejects multi-process use; active-active and distributed locking
+  are explicitly unsupported.
+- A complete private temporary file is flushed and synced before CAS validation;
+  atomic rename exposes either the old or new complete generation, followed by
+  parent-directory sync. Interrupted bodies never become vault objects. These
+  claims assume ordinary local Linux filesystem rename, fsync, permissions, and
+  advisory-lock semantics; a hostile root or storage implementation can violate
+  them.
+- The client requires HTTPS off loopback, verifies certificates and hostnames,
+  rejects redirects, bounds responses, treats revisions as opaque, verifies
+  exact successful PUT read-back, and routes ambiguous PUT completion through
+  the existing M7 recovery engine. A reverse proxy must preserve conditional
+  and ETag headers and must not log Authorization or bodies.
+
+The gateway necessarily learns the UUID vault ID, encrypted object size,
+request timing, client network metadata, and access frequency. Its host and
+backups hold encrypted KDBX bytes. This is zero-knowledge with respect to KDBX
+plaintext, not cryptographic anonymity.
+
+A malicious gateway administrator or root can delete, withhold, corrupt, copy,
+rollback, or fork ciphertext, show different clients different generations,
+observe metadata, and deny service. M7.5 provides no cryptographic remote
+rollback or fork detection and no trusted history. They should not learn entry
+titles, usernames, passwords, notes, groups, XML, or other KDBX plaintext
+without the user's vault credential. Loss of every local copy plus gateway
+storage can still destroy the vault; an encrypted gateway backup is not a
+decryptable recovery credential.
+
 ## M6.5 browser trust hierarchy and threats
 
 ```text

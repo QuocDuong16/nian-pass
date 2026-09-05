@@ -15,12 +15,18 @@ export function useSyncFormState() {
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [sessionToken, setSessionToken] = useState("");
+  const [gatewayUrl, setGatewayUrl] = useState("");
+  const [gatewayVaultId, setGatewayVaultId] = useState<string>(() =>
+    globalThis.crypto.randomUUID(),
+  );
+  const [gatewayToken, setGatewayToken] = useState("");
   const [masterPassword, setMasterPassword] = useState("");
 
   const clearSecrets = () => {
     setWebdavPassword("");
     setSecretAccessKey("");
     setSessionToken("");
+    setGatewayToken("");
     setMasterPassword("");
   };
 
@@ -37,6 +43,9 @@ export function useSyncFormState() {
     accessKeyId,
     secretAccessKey,
     sessionToken,
+    gatewayUrl,
+    gatewayVaultId,
+    gatewayToken,
     masterPassword,
     setProvider,
     setResourceUrl,
@@ -50,6 +59,12 @@ export function useSyncFormState() {
     setAccessKeyId,
     setSecretAccessKey,
     setSessionToken,
+    setGatewayUrl,
+    setGatewayVaultId,
+    setGatewayToken,
+    resetGatewayVaultId: () => {
+      setGatewayVaultId(globalThis.crypto.randomUUID());
+    },
     setMasterPassword,
     clearSecrets,
   };

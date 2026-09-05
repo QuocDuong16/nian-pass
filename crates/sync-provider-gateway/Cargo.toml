@@ -1,0 +1,25 @@
+[package]
+name = "sync-provider-gateway"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Conflict-safe Nian Pass Sync Gateway client transport"
+
+[dependencies]
+futures-util.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+sync-provider-core.workspace = true
+url.workspace = true
+uuid.workspace = true
+vault-core.workspace = true
+
+[dev-dependencies]
+kdbx = { path = "../kdbx" }
+nian-pass-sync-gateway = { path = "../../apps/sync-gateway" }
+sync-engine = { path = "../sync-engine" }
+tokio.workspace = true
+
+[lints]
+workspace = true

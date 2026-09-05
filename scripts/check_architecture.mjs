@@ -156,6 +156,7 @@ export function runChecks(root, budget) {
         "kdbx",
         "sync-engine",
         "sync-provider-core",
+        "sync-provider-gateway",
         "sync-provider-s3",
         "sync-provider-webdav",
         "vault-core",
@@ -166,6 +167,7 @@ export function runChecks(root, budget) {
       "apps/browser-native-host/Cargo.toml",
       new Set(["browser-native-protocol"]),
     ],
+    ["apps/sync-gateway/Cargo.toml", new Set(["sync-provider-core"])],
     ["crates/browser-native-protocol/Cargo.toml", new Set()],
     [
       "crates/credential-provider-core/Cargo.toml",
@@ -181,6 +183,16 @@ export function runChecks(root, budget) {
       new Set(["kdbx", "sync-provider-core", "vault-core", "vault-sync"]),
     ],
     ["crates/sync-provider-core/Cargo.toml", new Set()],
+    [
+      "crates/sync-provider-gateway/Cargo.toml",
+      new Set([
+        "kdbx",
+        "nian-pass-sync-gateway",
+        "sync-engine",
+        "sync-provider-core",
+        "vault-core",
+      ]),
+    ],
     [
       "crates/sync-provider-s3/Cargo.toml",
       new Set(["sync-provider-core", "vault-core"]),
@@ -204,6 +216,7 @@ export function runChecks(root, budget) {
     "ios-credential-ffi",
     "sync-engine",
     "sync-provider-core",
+    "sync-provider-gateway",
     "sync-provider-s3",
     "sync-provider-webdav",
     "vault-core",
@@ -213,6 +226,7 @@ export function runChecks(root, budget) {
     "nian-pass-desktop",
     "nian-pass-browser-host",
     "nian-pass-cli",
+    "nian-pass-sync-gateway",
   ]);
 
   const rootManifest = readFileSync(resolve(root, "Cargo.toml"), "utf8");

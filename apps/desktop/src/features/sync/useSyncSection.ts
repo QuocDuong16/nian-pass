@@ -4,7 +4,7 @@ import type { SyncConflictOperation, SyncProfileDto } from "../../lib/sync";
 import type { ConflictChoice } from "./SyncConflictPanel";
 import { projectSyncForm } from "./form-values";
 import { syncErrorMessage } from "./sync-errors";
-import type { SyncSectionOptions } from "./types";
+import type { ProviderKind, SyncSectionOptions } from "./types";
 import { useSyncFormState } from "./useSyncFormState";
 
 export function useSyncSection({
@@ -24,6 +24,8 @@ export function useSyncSection({
     setProvider,
     setRegion,
     setResourceUrl,
+    setGatewayUrl,
+    setGatewayVaultId,
   } = form;
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Idle");
@@ -40,12 +42,15 @@ export function useSyncSection({
       setProvider(profile.target.provider);
       if (profile.target.provider === "webdav")
         setResourceUrl(profile.target.resourceUrl);
-      else {
+      else if (profile.target.provider === "s3") {
         setEndpoint(profile.target.endpoint ?? "");
         setRegion(profile.target.region);
         setBucket(profile.target.bucket);
         setObjectKey(profile.target.objectKey);
         setPathStyle(profile.target.pathStyle);
+      } else {
+        setGatewayUrl(profile.target.baseUrl);
+        setGatewayVaultId(profile.target.vaultId);
       }
       setConflict(null);
       setConfirmChoice(null);
@@ -66,6 +71,8 @@ export function useSyncSection({
       setProvider,
       setRegion,
       setResourceUrl,
+      setGatewayUrl,
+      setGatewayVaultId,
     ],
   );
 
@@ -192,15 +199,19 @@ export function useSyncSection({
             "Sync metadata reset. The local and remote vaults were not modified.",
           );
         });
-
   function startNewProfile() {
     setSelectedId(null);
     setConflict(null);
     setConfirmChoice(null);
     setConfirmReset(false);
     setStatus("New profile. Saving creates a new remote relationship.");
+    form.resetGatewayVaultId();
   }
-
+  function chooseProvider(provider: ProviderKind) {
+    setSelectedId(null);
+    setProvider(provider);
+    if (provider === "gateway") form.resetGatewayVaultId();
+  }
   const syncUnavailable =
     disabled ||
     busy ||
@@ -227,6 +238,7 @@ export function useSyncSection({
     setConfirmReset,
     setConflict,
     selectProfile,
+    chooseProvider,
     startNewProfile,
     saveProfile,
     testConnection,

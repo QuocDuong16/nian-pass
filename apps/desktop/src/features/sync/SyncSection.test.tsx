@@ -20,6 +20,17 @@ const profile = {
   recoveryStatus: "none",
 };
 
+const gatewayProfile = {
+  profileId: "a466947b-e428-401b-87a2-eb30c751803f",
+  target: {
+    provider: "gateway" as const,
+    baseUrl: "https://gateway.example.test",
+    vaultId: "7163588f-9568-46fe-a1bd-32f3d15fd15d",
+  },
+  available: true,
+  recoveryStatus: "none",
+};
+
 afterEach(() => {
   cleanup();
 });
@@ -296,6 +307,97 @@ test("creates a new S3 target, tests read-only connectivity, and syncs", async (
   await waitFor(() => {
     expect(syncNow).toHaveBeenCalledTimes(1);
   });
+});
+
+test("creates a UUID gateway target and clears the request-only token", async () => {
+  const saveSyncProfile = vi
+    .fn()
+    .mockImplementation((request: { target: unknown }) =>
+      Promise.resolve({
+        profileId: "a466947b-e428-401b-87a2-eb30c751803f",
+        target: request.target,
+        available: true,
+        recoveryStatus: "none",
+      }),
+    );
+  const testSyncProvider = vi.fn().mockResolvedValue({ status: "missing" });
+  const api = mutationApi({
+    syncProfiles: vi.fn().mockResolvedValue([]),
+    saveSyncProfile,
+    testSyncProvider,
+  });
+  render(
+    <SyncSection
+      api={api}
+      disabled={false}
+      onBusyChange={vi.fn()}
+      onSnapshot={vi.fn()}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText("Provider"), {
+    target: { value: "gateway" },
+  });
+  const vaultId = screen.getByLabelText<HTMLInputElement>("Vault ID").value;
+  expect(vaultId).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  const editedVaultId = "c3f8db0f-5f3a-4f94-a1c5-2133c14c5723";
+  fireEvent.change(screen.getByLabelText("Vault ID"), {
+    target: { value: editedVaultId },
+  });
+  fireEvent.change(screen.getByLabelText("Gateway URL"), {
+    target: { value: " https://gateway.example.test " },
+  });
+  fireEvent.change(screen.getByLabelText("Access token"), {
+    target: { value: "SECRET_GATEWAY_ACCESS_TOKEN" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save non-secret profile" }),
+  );
+  await waitFor(() => {
+    expect(saveSyncProfile).toHaveBeenCalledWith({
+      target: {
+        provider: "gateway",
+        baseUrl: "https://gateway.example.test",
+        vaultId: editedVaultId,
+      },
+    });
+  });
+  expect(screen.getByLabelText("Access token")).toHaveValue("");
+
+  fireEvent.change(screen.getByLabelText("Access token"), {
+    target: { value: "SECOND_GATEWAY_TOKEN" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  await screen.findByText("Connection succeeded; remote vault is missing.");
+  expect(testSyncProvider).toHaveBeenCalledWith(
+    "a466947b-e428-401b-87a2-eb30c751803f",
+    { gateway: { accessToken: "SECOND_GATEWAY_TOKEN" } },
+  );
+  expect(screen.getByLabelText("Access token")).toHaveValue("");
+});
+
+test("loads an existing gateway target without a token", async () => {
+  const api = mutationApi({
+    syncProfiles: vi.fn().mockResolvedValue([gatewayProfile]),
+  });
+  render(
+    <SyncSection
+      api={api}
+      disabled={false}
+      onBusyChange={vi.fn()}
+      onSnapshot={vi.fn()}
+    />,
+  );
+
+  expect(
+    await screen.findByDisplayValue(gatewayProfile.target.baseUrl),
+  ).toBeVisible();
+  expect(screen.getByLabelText("Vault ID")).toHaveValue(
+    gatewayProfile.target.vaultId,
+  );
+  expect(screen.getByLabelText("Access token")).toHaveValue("");
 });
 
 test("requires explicit confirmation before resetting unsupported sync metadata", async () => {

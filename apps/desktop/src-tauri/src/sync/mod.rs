@@ -779,7 +779,74 @@ mod tests {
     }
 
     #[test]
-    fn desktop_mapping_is_stable_and_s3_uses_explicit_credentials() {
+    fn gateway_token_never_enters_profile_base_or_journal_files() {
+        std::thread::Builder::new()
+            .name("desktop-gateway-secret-persistence".to_owned())
+            .spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("test runtime");
+                runtime.block_on(async {
+                    let directory = TestDirectory::new();
+                    let state = unlocked_state(&directory);
+                    let sync_runtime = SyncRuntime::new(directory.0.clone()).expect("sync runtime");
+                    let (resource_url, _remote, server) = webdav_server().await;
+                    let base_url = resource_url
+                        .strip_suffix("vault.kdbx")
+                        .expect("test base URL");
+                    let saved = sync_runtime
+                        .save_profile(
+                            &state,
+                            decode(json!({
+                                "target": {
+                                    "provider": "gateway",
+                                    "baseUrl": base_url,
+                                    "vaultId": "00112233-4455-4677-8899-aabbccddeeff"
+                                }
+                            })),
+                        )
+                        .expect("gateway profile");
+                    let token = "SECRET_GATEWAY_TOKEN_MUST_NOT_PERSIST";
+                    sync_runtime
+                        .sync_now(
+                            &state,
+                            &saved.profile_id,
+                            decode(json!({ "gateway": { "accessToken": token } })),
+                            PASSWORD.to_owned(),
+                        )
+                        .await
+                        .expect("gateway sync");
+                    let profile = fs::read_to_string(
+                        directory
+                            .0
+                            .join("sync-profiles")
+                            .join(format!("{}.json", saved.profile_id)),
+                    )
+                    .expect("profile bytes");
+                    let sync_root = directory.0.join("sync").join(&saved.profile_id);
+                    assert!(!profile.contains(token));
+                    for entry in fs::read_dir(sync_root).expect("sync files") {
+                        let path = entry.expect("sync file").path();
+                        if path.is_file() {
+                            assert!(
+                                !fs::read(path)
+                                    .expect("state bytes")
+                                    .windows(token.len())
+                                    .any(|window| window == token.as_bytes())
+                            );
+                        }
+                    }
+                    server.abort();
+                });
+            })
+            .expect("test thread")
+            .join()
+            .expect("gateway persistence test");
+    }
+
+    #[test]
+    fn desktop_mapping_is_stable_and_providers_use_explicit_credentials() {
         for completion in [
             SyncCompletion::CreatedRemote,
             SyncCompletion::EstablishedBase,
@@ -849,6 +916,19 @@ mod tests {
         )
         .expect("explicit S3 provider");
         assert!(matches!(provider, DesktopProvider::S3(_)));
+        let gateway = DesktopProvider::new(
+            &SyncProfileTargetDto::Gateway {
+                base_url: "http://127.0.0.1:8080/".to_owned(),
+                vault_id: "00112233-4455-4677-8899-aabbccddeeff".to_owned(),
+            },
+            decode(json!({
+                "gateway": {
+                    "accessToken": "SECRET_GATEWAY_ACCESS_TOKEN_SYNTHETIC"
+                }
+            })),
+        )
+        .expect("explicit gateway provider");
+        assert!(matches!(gateway, DesktopProvider::Gateway(_)));
         let choice: sync_engine::ConflictChoice = ConflictChoiceDto::KeepLocal.into();
         assert!(matches!(choice, sync_engine::ConflictChoice::KeepLocal));
     }

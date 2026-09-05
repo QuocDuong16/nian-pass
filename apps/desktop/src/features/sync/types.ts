@@ -1,7 +1,7 @@
 import type { DesktopApi } from "../../lib/desktop";
 import type { VaultSnapshotDto } from "../../types/desktop";
 
-export type ProviderKind = "webdav" | "s3";
+export type ProviderKind = "webdav" | "s3" | "gateway";
 
 export interface SyncSectionOptions {
   api: DesktopApi;

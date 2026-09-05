@@ -1,0 +1,28 @@
+[package]
+name = "nian-pass-sync-gateway"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Zero-knowledge self-hosted encrypted vault synchronization gateway"
+
+[dependencies]
+bytes.workspace = true
+clap.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+sync-provider-core.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+rustls.workspace = true
+
+[lints]
+workspace = true

@@ -8,6 +8,7 @@ use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use sync_engine::{ProfileId, RecoveryStatus, SourceBinding, SyncStore, TargetBinding};
 use sync_provider_core::CiphertextDigest;
+use sync_provider_gateway::GatewayConfig;
 use sync_provider_s3::S3Config;
 use sync_provider_webdav::WebDavConfig;
 
@@ -30,6 +31,12 @@ pub enum SyncProfileTargetDto {
         object_key: String,
         #[serde(rename = "pathStyle")]
         path_style: bool,
+    },
+    Gateway {
+        #[serde(rename = "baseUrl")]
+        base_url: String,
+        #[serde(rename = "vaultId")]
+        vault_id: String,
     },
 }
 
@@ -66,6 +73,14 @@ impl SyncProfileTargetDto {
                     path_style: config.path_style(),
                 })
             }
+            Self::Gateway { base_url, vault_id } => {
+                let config = GatewayConfig::new(base_url, vault_id)
+                    .map_err(|_| DesktopError::SyncUnsafeProvider)?;
+                Ok(Self::Gateway {
+                    base_url: config.base_url().as_str().to_owned(),
+                    vault_id: config.vault_id().hyphenated().to_string(),
+                })
+            }
         }
     }
 
@@ -96,6 +111,11 @@ impl SyncProfileTargetDto {
                 append_identity_field(&mut identity, bucket.as_bytes());
                 append_identity_field(&mut identity, object_key.as_bytes());
                 identity.push(u8::from(path_style));
+            }
+            Self::Gateway { base_url, vault_id } => {
+                identity.extend_from_slice(b"gateway-target-v1");
+                append_identity_field(&mut identity, base_url.as_bytes());
+                append_identity_field(&mut identity, vault_id.as_bytes());
             }
         }
         TargetBinding::from_sha256(CiphertextDigest::of(&identity).as_str().to_owned())
@@ -381,6 +401,13 @@ mod tests {
         }
     }
 
+    fn gateway(base_url: &str, vault_id: &str) -> SyncProfileTargetDto {
+        SyncProfileTargetDto::Gateway {
+            base_url: base_url.to_owned(),
+            vault_id: vault_id.to_owned(),
+        }
+    }
+
     fn save_new(
         repository: &ProfileRepository,
         directory: &TestDirectory,
@@ -536,6 +563,55 @@ mod tests {
                 Err(DesktopError::InvalidRequest)
             ));
         }
+    }
+
+    #[test]
+    fn gateway_profile_is_secret_free_normalized_and_immutable() {
+        let directory = TestDirectory::new();
+        let repository = ProfileRepository::open(&directory.0).expect("repository");
+        let vault_id = "00112233-4455-4677-8899-aabbccddeeff";
+        let saved = save_new(
+            &repository,
+            &directory,
+            gateway("https://GATEWAY.example.test/base", vault_id),
+        );
+        let profile_path = directory
+            .0
+            .join("sync-profiles")
+            .join(format!("{}.json", saved.profile_id));
+        let encoded = fs::read_to_string(profile_path).expect("profile");
+        assert!(encoded.contains("https://gateway.example.test/base/"));
+        assert!(encoded.contains(vault_id));
+        assert!(!encoded.contains("accessToken"));
+        assert!(!encoded.contains("SECRET_GATEWAY_TOKEN"));
+        update(
+            &repository,
+            &directory,
+            &saved.profile_id,
+            gateway("https://gateway.example.test/base/", vault_id),
+        )
+        .expect("canonical target");
+        assert!(matches!(
+            update(
+                &repository,
+                &directory,
+                &saved.profile_id,
+                gateway("https://gateway.example.test/other/", vault_id),
+            ),
+            Err(DesktopError::InvalidRequest)
+        ));
+        assert!(matches!(
+            update(
+                &repository,
+                &directory,
+                &saved.profile_id,
+                gateway(
+                    "https://gateway.example.test/base/",
+                    "11112233-4455-4677-8899-aabbccddeeff"
+                ),
+            ),
+            Err(DesktopError::InvalidRequest)
+        ));
     }
 
     #[test]

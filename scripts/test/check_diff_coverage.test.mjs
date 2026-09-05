@@ -56,6 +56,7 @@ test("arguments require a bounded threshold and source extensions", () => {
 
 test("Rust path modules dedicated to tests are excluded from production coverage", () => {
   assert.equal(isExcluded("crates/ffi/src/ffi_tests.rs"), true);
+  assert.equal(isExcluded("apps/sync-gateway/src/main.rs"), true);
   assert.equal(isExcluded("crates/ffi/src/ffi.rs"), false);
 });
 
