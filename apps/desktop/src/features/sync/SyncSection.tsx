@@ -107,7 +107,10 @@ export function SyncSection(props: SyncSectionOptions) {
           type="button"
           className="secondary-button"
           disabled={
-            sync.busy || sync.selected === null || !sync.credentialsComplete
+            sync.busy ||
+            sync.selected === null ||
+            sync.selected.recoveryStatus === "unsupported" ||
+            !sync.credentialsComplete
           }
           onClick={() => void sync.testConnection()}
         >
@@ -128,6 +131,52 @@ export function SyncSection(props: SyncSectionOptions) {
         <p className="sync-warning">
           Save or finish the current draft before syncing.
         </p>
+      ) : null}
+      {sync.selected?.recoveryStatus === "unsupported" ? (
+        <div className="sync-warning" role="alert">
+          <p>
+            This sync metadata was created by an older or incompatible Nian Pass
+            build. It cannot be safely resumed because its remote target
+            identity was not recorded.
+          </p>
+          <p>
+            Resetting removes only Nian Pass sync metadata. It does not modify
+            the local vault or remote vault. The next sync will re-establish the
+            relationship and may require an initial conflict decision.
+          </p>
+          {sync.confirmReset ? (
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={sync.busy}
+                onClick={() => {
+                  sync.setConfirmReset(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={sync.busy}
+                onClick={() => void sync.resetSyncState()}
+              >
+                Confirm reset sync state
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={sync.busy || props.disabled}
+              onClick={() => {
+                sync.setConfirmReset(true);
+              }}
+            >
+              Reset sync state
+            </button>
+          )}
+        </div>
       ) : null}
       {sync.error === null ? null : (
         <p className="detail-error" role="alert">

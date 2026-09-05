@@ -17,7 +17,7 @@ const profile = {
     resourceUrl: "https://dav.example.test/vault.kdbx",
   },
   available: true,
-  recoveryRequired: false,
+  recoveryStatus: "none",
 };
 
 afterEach(() => {
@@ -203,7 +203,7 @@ test("creates a new S3 target, tests read-only connectivity, and syncs", async (
       pathStyle: false,
     },
     available: true,
-    recoveryRequired: true,
+    recoveryStatus: "required",
   };
   const saveSyncProfile = vi.fn().mockResolvedValue(s3Profile);
   const testSyncProvider = vi.fn().mockResolvedValue({ status: "present" });
@@ -296,6 +296,46 @@ test("creates a new S3 target, tests read-only connectivity, and syncs", async (
   await waitFor(() => {
     expect(syncNow).toHaveBeenCalledTimes(1);
   });
+});
+
+test("requires explicit confirmation before resetting unsupported sync metadata", async () => {
+  const unsupported = { ...profile, recoveryStatus: "unsupported" as const };
+  const resetSyncState = vi.fn().mockResolvedValue(undefined);
+  const api = mutationApi({
+    syncProfiles: vi.fn().mockResolvedValue([unsupported]),
+    resetSyncState,
+  });
+  render(
+    <SyncSection
+      api={api}
+      disabled={false}
+      onBusyChange={vi.fn()}
+      onSnapshot={vi.fn()}
+    />,
+  );
+
+  expect(
+    await screen.findByText(/remote target identity was not recorded/i),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Reset sync state" }));
+  expect(resetSyncState).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(
+    screen.queryByRole("button", { name: "Confirm reset sync state" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset sync state" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Confirm reset sync state" }),
+  );
+  await waitFor(() => {
+    expect(resetSyncState).toHaveBeenCalledWith(profile.profileId);
+  });
+  expect(
+    await screen.findByText(
+      "Sync metadata reset. The local and remote vaults were not modified.",
+    ),
+  ).toBeInTheDocument();
 });
 
 test("can back out of and cancel an initial remote-authoritative choice", async () => {

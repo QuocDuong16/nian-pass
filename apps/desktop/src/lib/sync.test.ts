@@ -14,7 +14,7 @@ const webdavProfile = {
     resourceUrl: "https://dav.example.test/vault.kdbx",
   },
   available: true,
-  recoveryRequired: false,
+  recoveryStatus: "none",
 };
 
 const s3Profile = {
@@ -28,7 +28,7 @@ const s3Profile = {
     pathStyle: false,
   },
   available: false,
-  recoveryRequired: true,
+  recoveryStatus: "required",
 };
 
 const snapshot = {
@@ -50,6 +50,9 @@ describe("sync contract parsing", () => {
         target: { ...s3Profile.target, endpoint: "https://s3.example.test" },
       }),
     ).toMatchObject({ target: { endpoint: "https://s3.example.test" } });
+    expect(
+      parseSyncProfile({ ...webdavProfile, recoveryStatus: "unsupported" }),
+    ).toMatchObject({ recoveryStatus: "unsupported" });
   });
 
   test("accepts done, conflict, and provider-read responses", () => {
@@ -89,6 +92,9 @@ describe("sync contract parsing", () => {
     expect(() => parseSyncProfiles({})).toThrow(/invalid desktop contract/);
     expect(() =>
       parseSyncProfile({ ...webdavProfile, available: "yes" }),
+    ).toThrow(/invalid desktop contract/);
+    expect(() =>
+      parseSyncProfile({ ...webdavProfile, recoveryStatus: "legacy" }),
     ).toThrow(/invalid desktop contract/);
     expect(() =>
       parseSyncProfile({ ...webdavProfile, target: { provider: "unknown" } }),

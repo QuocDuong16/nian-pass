@@ -16,6 +16,7 @@ export interface SyncApi {
   syncProfiles: () => Promise<SyncProfileDto[]>;
   saveSyncProfile: (request: SaveSyncProfileRequest) => Promise<SyncProfileDto>;
   deleteSyncProfile: (profileId: string) => Promise<void>;
+  resetSyncState: (profileId: string) => Promise<void>;
   testSyncProvider: (
     profileId: string,
     credentials: ProviderCredentials,
@@ -47,6 +48,8 @@ export function createSyncApi(call: Call): SyncApi {
       call("save_sync_profile", parseSyncProfile, { request }),
     deleteSyncProfile: (profileId) =>
       call("delete_sync_profile", () => undefined, { profileId }),
+    resetSyncState: (profileId) =>
+      call("reset_sync_state", () => undefined, { profileId }),
     testSyncProvider: (profileId, credentials) =>
       call("test_sync_provider", parseTestProviderResult, {
         profileId,

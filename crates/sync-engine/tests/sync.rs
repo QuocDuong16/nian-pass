@@ -37,6 +37,7 @@ struct FakeRemoteState {
     object: Option<Vec<u8>>,
     revision: u64,
     write_count: usize,
+    read_count: usize,
     reject_next_write: bool,
     fail_next_write_before_mutation: bool,
     fail_next_read: bool,
@@ -55,6 +56,7 @@ impl FakeProvider {
                 object,
                 revision: 1,
                 write_count: 0,
+                read_count: 0,
                 reject_next_write: false,
                 fail_next_write_before_mutation: false,
                 fail_next_read: false,
@@ -79,6 +81,10 @@ impl FakeProvider {
 
     fn write_count(&self) -> usize {
         self.state.lock().expect("remote lock").write_count
+    }
+
+    fn read_count(&self) -> usize {
+        self.state.lock().expect("remote lock").read_count
     }
 
     fn externally_replace(&self, ciphertext: Vec<u8>) {
@@ -170,6 +176,7 @@ impl FakeProvider {
 impl RemoteObjectProvider for FakeProvider {
     async fn read(&self) -> Result<RemoteRead, ProviderError> {
         let mut state = self.state.lock().map_err(|_| ProviderError::Transport)?;
+        state.read_count += 1;
         if std::mem::take(&mut state.fail_next_read) {
             return Err(ProviderError::Transport);
         }
@@ -367,6 +374,29 @@ fn setup(
     )
 }
 
+fn profile_directory(directory: &TestDirectory, profile: ProfileId) -> PathBuf {
+    directory.0.join("sync").join(profile.to_canonical_string())
+}
+
+fn open_store(directory: &TestDirectory, profile: ProfileId) -> SyncStore {
+    SyncStore::open(
+        &directory.0,
+        profile,
+        source("source-a"),
+        target("target-a"),
+    )
+    .expect("store should open")
+}
+
+fn write_schema_only(directory: &Path, filename: &str, schema_version: u32) {
+    fs::write(
+        directory.join(filename),
+        serde_json::to_vec(&serde_json::json!({ "schema_version": schema_version }))
+            .expect("metadata should serialize"),
+    )
+    .expect("metadata should write");
+}
+
 fn install_journal(
     directory: &TestDirectory,
     profile: ProfileId,
@@ -399,6 +429,165 @@ fn install_journal(
         serde_json::to_vec(&journal).expect("journal should serialize"),
     )
     .expect("journal should write");
+}
+
+#[test]
+fn recovery_status_distinguishes_current_unsupported_and_corrupt_state() {
+    let directory = TestDirectory::new();
+    let profile = ProfileId::random();
+    let store = open_store(&directory, profile);
+    assert_eq!(
+        store.recovery_status().expect("empty status"),
+        sync_engine::RecoveryStatus::None
+    );
+
+    let bytes = fixture();
+    install_journal(&directory, profile, "prepared", &bytes, None, &bytes, None);
+    assert_eq!(
+        store.recovery_status().expect("current journal status"),
+        sync_engine::RecoveryStatus::Required
+    );
+
+    let profile_dir = profile_directory(&directory, profile);
+    fs::remove_file(profile_dir.join("journal.json")).expect("remove current journal");
+    write_schema_only(&profile_dir, "journal.json", 1);
+    assert_eq!(
+        store.recovery_status().expect("legacy journal status"),
+        sync_engine::RecoveryStatus::Unsupported
+    );
+
+    write_schema_only(&profile_dir, "journal.json", 99);
+    assert_eq!(
+        store.recovery_status().expect("future journal status"),
+        sync_engine::RecoveryStatus::Unsupported
+    );
+
+    fs::write(profile_dir.join("journal.json"), b"not-json").expect("malformed journal");
+    assert!(matches!(
+        store.recovery_status(),
+        Err(StoreError::CorruptJournal)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unsupported_base_is_never_loaded_or_silently_upgraded() {
+    for schema_version in [1, 99] {
+        let bytes = fixture();
+        let (directory, engine, local, provider, profile) =
+            setup(bytes.clone(), Some(bytes.clone()));
+        write_schema_only(
+            &profile_directory(&directory, profile),
+            "base.json",
+            schema_version,
+        );
+        assert!(matches!(
+            sync(&engine, &provider, &local).await,
+            Err(SyncError::Store(StoreError::UnsupportedSchema))
+        ));
+        assert_eq!(provider.read_count(), 0);
+        assert_eq!(provider.write_count(), 0);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn explicit_reset_removes_only_sync_state_and_reestablishes_normally() {
+    let bytes = fixture();
+    let directory = TestDirectory::new();
+    let profile = ProfileId::random();
+    let store = open_store(&directory, profile);
+    let profile_dir = profile_directory(&directory, profile);
+    let base_file = format!("base-{}.kdbx", uuid::Uuid::new_v4());
+    let candidate_file = format!("candidate-{}.kdbx", uuid::Uuid::new_v4());
+    fs::write(profile_dir.join(&base_file), &bytes).expect("legacy base");
+    fs::write(profile_dir.join(&candidate_file), &bytes).expect("legacy candidate");
+    write_schema_only(&profile_dir, "base.json", 1);
+    write_schema_only(&profile_dir, "journal.json", 1);
+    let local = FakeLocal::new(bytes.clone());
+    let provider = FakeProvider::new(Some(bytes.clone()));
+
+    store.reset_state().expect("explicit reset should succeed");
+    store.reset_state().expect("reset should be idempotent");
+    assert!(!profile_dir.join("base.json").exists());
+    assert!(!profile_dir.join("journal.json").exists());
+    assert!(!profile_dir.join(base_file).exists());
+    assert!(!profile_dir.join(candidate_file).exists());
+    assert_eq!(local.bytes(), bytes);
+    assert_eq!(provider.bytes(), Some(bytes.clone()));
+    assert_eq!(provider.read_count(), 0);
+    assert_eq!(provider.write_count(), 0);
+    assert_eq!(
+        store.recovery_status().expect("reset status"),
+        sync_engine::RecoveryStatus::None
+    );
+
+    let engine = SyncEngine::new(store);
+    assert!(matches!(
+        sync(&engine, &provider, &local)
+            .await
+            .expect("equal initial sync"),
+        SyncOutcome::Done(SyncCompletion::EstablishedBase)
+    ));
+    assert!(profile_dir.join("base.json").is_file());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn post_reset_difference_uses_initial_conflict_rules() {
+    let base = fixture();
+    let local_bytes = changed(&base, "local-after-reset");
+    let remote_bytes = changed(&base, "remote-after-reset");
+    let directory = TestDirectory::new();
+    let profile = ProfileId::random();
+    let store = open_store(&directory, profile);
+    write_schema_only(&profile_directory(&directory, profile), "base.json", 1);
+    store.reset_state().expect("legacy state reset");
+    let engine = SyncEngine::new(store);
+    let local = FakeLocal::new(local_bytes);
+    let provider = FakeProvider::new(Some(remote_bytes));
+    let SyncOutcome::Conflict(conflict) = sync(&engine, &provider, &local)
+        .await
+        .expect("initial sync should classify conflict")
+    else {
+        panic!("different generations without BASE must conflict");
+    };
+    assert!(conflict.is_initial());
+    assert_eq!(provider.write_count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn reset_rejects_symlink_state_without_following_it() {
+    use std::os::unix::fs::symlink;
+
+    let directory = TestDirectory::new();
+    let profile = ProfileId::random();
+    let store = open_store(&directory, profile);
+    let outside = directory.0.join("outside.kdbx");
+    fs::write(&outside, b"preserve me").expect("outside file");
+    symlink(
+        &outside,
+        profile_directory(&directory, profile).join("base.json"),
+    )
+    .expect("metadata symlink");
+    assert!(matches!(
+        store.recovery_status(),
+        Err(StoreError::CorruptBase)
+    ));
+    assert!(matches!(
+        store.reset_state(),
+        Err(StoreError::InvalidMetadata)
+    ));
+    assert_eq!(fs::read(outside).expect("outside remains"), b"preserve me");
+}
+
+#[test]
+fn recovery_status_reports_metadata_io_failures() {
+    let directory = TestDirectory::new();
+    let profile = ProfileId::random();
+    let store = open_store(&directory, profile);
+    let profile_dir = profile_directory(&directory, profile);
+    fs::remove_dir(&profile_dir).expect("remove profile directory");
+    fs::write(&profile_dir, b"not a directory").expect("replace directory with file");
+    assert!(matches!(store.recovery_status(), Err(StoreError::Io(_))));
 }
 
 async fn sync(

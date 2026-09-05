@@ -57,6 +57,16 @@ region, bucket, object key, or addressing mode requires a new UUID-v4 profile.
 BASE and journal metadata carry a private SHA-256 target binding as well as the
 private canonical-source binding, so persisted state cannot be reinterpreted
 for another object even if profile metadata is changed outside the application.
+Sync persistence schema v2 introduced this exact target binding. Older
+target-unbound BASE or journal metadata is classified as unsupported and is not
+attached to the profile's current target or otherwise migrated. A confirmed,
+offline reset removes only the known private BASE/journal metadata and encrypted
+state payloads for that exact profile, leaves profile configuration and both
+vault objects intact, invalidates the cached engine, and causes the next sync to
+use ordinary no-BASE initial-sync rules. Future schema versions are likewise
+unsupported rather than downgraded; malformed current metadata is classified as
+corrupt. Startup status inspection is bounded, symlink-safe, and performs no
+network I/O.
 Non-secret target configuration may be stored; userinfo is forbidden and
 provider credentials never enter profile JSON. The BASE lives under private
 per-user application data and contains only exact encrypted KDBX ciphertext.

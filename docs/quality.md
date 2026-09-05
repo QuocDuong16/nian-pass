@@ -55,6 +55,15 @@ AWS account, remote WebDAV account, live credentials, or internet service is
 required. Any future DIND object-server image must be immutable-pinned and may
 not weaken AWS conditional semantics to satisfy a compatible product.
 
+The sync store suite also writes synthetic v1, current v2, future-schema, and
+malformed BASE/journal metadata. It requires explicit unsupported-state versus
+valid-recovery classification, rejects automatic target attachment, exercises
+symlink-safe metadata-only reset, verifies local/remote bytes are untouched, and
+checks that the next operation follows normal no-BASE initial-sync behavior. Desktop
+contract tests require explicit reset confirmation and cached-engine
+invalidation. These are deterministic tests; they do not claim live provider or
+Windows runtime validation.
+
 The concrete network dependencies are exactly `reqwest 0.13.4` with
 `rustls-no-provider`, `rustls 0.23.43` with Ring,
 `aws-sdk-s3 1.144.0`, `aws-smithy-http-client 1.4.0`, and `tokio 1.53.1`. The S3

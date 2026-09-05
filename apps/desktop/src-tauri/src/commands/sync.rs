@@ -42,6 +42,18 @@ pub fn delete_sync_profile(
 }
 
 #[tauri::command]
+pub fn reset_sync_state(
+    profile_id: String,
+    state: State<'_, AppState>,
+    runtime: State<'_, SyncRuntime>,
+) -> Result<(), DesktopErrorDto> {
+    let _operation = state
+        .begin_vault_operation()
+        .map_err(DesktopErrorDto::from)?;
+    runtime.reset_state(&state, &profile_id).map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn test_sync_provider(
     profile_id: String,
     credentials: ProviderCredentialsDto,

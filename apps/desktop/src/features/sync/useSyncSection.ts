@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { SyncConflictOperation, SyncProfileDto } from "../../lib/sync";
 import type { ConflictChoice } from "./SyncConflictPanel";
 import { projectSyncForm } from "./form-values";
 import { syncErrorMessage } from "./sync-errors";
-import type { ProviderKind, SyncSectionOptions } from "./types";
+import type { SyncSectionOptions } from "./types";
+import { useSyncFormState } from "./useSyncFormState";
 
 export function useSyncSection({
   api,
@@ -14,25 +15,58 @@ export function useSyncSection({
 }: SyncSectionOptions) {
   const [profiles, setProfiles] = useState<SyncProfileDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [provider, setProvider] = useState<ProviderKind>("webdav");
-  const [resourceUrl, setResourceUrl] = useState("");
-  const [endpoint, setEndpoint] = useState("");
-  const [region, setRegion] = useState("us-east-1");
-  const [bucket, setBucket] = useState("");
-  const [objectKey, setObjectKey] = useState("");
-  const [pathStyle, setPathStyle] = useState(false);
-  const [username, setUsername] = useState("");
-  const [webdavPassword, setWebdavPassword] = useState("");
-  const [accessKeyId, setAccessKeyId] = useState("");
-  const [secretAccessKey, setSecretAccessKey] = useState("");
-  const [sessionToken, setSessionToken] = useState("");
-  const [masterPassword, setMasterPassword] = useState("");
+  const form = useSyncFormState();
+  const {
+    setBucket,
+    setEndpoint,
+    setObjectKey,
+    setPathStyle,
+    setProvider,
+    setRegion,
+    setResourceUrl,
+  } = form;
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Idle");
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<SyncConflictOperation | null>(null);
   const [confirmChoice, setConfirmChoice] = useState<ConflictChoice | null>(
     null,
+  );
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const selectProfile = useCallback(
+    (profile: SyncProfileDto) => {
+      setSelectedId(profile.profileId);
+      setProvider(profile.target.provider);
+      if (profile.target.provider === "webdav")
+        setResourceUrl(profile.target.resourceUrl);
+      else {
+        setEndpoint(profile.target.endpoint ?? "");
+        setRegion(profile.target.region);
+        setBucket(profile.target.bucket);
+        setObjectKey(profile.target.objectKey);
+        setPathStyle(profile.target.pathStyle);
+      }
+      setConflict(null);
+      setConfirmChoice(null);
+      setConfirmReset(false);
+      setStatus(
+        profile.recoveryStatus === "required"
+          ? "Sync recovery required."
+          : profile.recoveryStatus === "unsupported"
+            ? "Older or unsupported sync metadata must be reset explicitly."
+            : "Idle",
+      );
+    },
+    [
+      setBucket,
+      setEndpoint,
+      setObjectKey,
+      setPathStyle,
+      setProvider,
+      setRegion,
+      setResourceUrl,
+    ],
   );
 
   useEffect(() => {
@@ -51,33 +85,14 @@ export function useSyncSection({
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, selectProfile]);
 
   const selected = useMemo(
     () => profiles.find((profile) => profile.profileId === selectedId) ?? null,
     [profiles, selectedId],
   );
   const { target, credentials, providerConfigComplete, credentialsComplete } =
-    projectSyncForm({
-      provider,
-      resourceUrl,
-      endpoint,
-      region,
-      bucket,
-      objectKey,
-      pathStyle,
-      username,
-      webdavPassword,
-      accessKeyId,
-      secretAccessKey,
-      sessionToken,
-    });
-  const clearSecrets = () => {
-    setWebdavPassword("");
-    setSecretAccessKey("");
-    setSessionToken("");
-    setMasterPassword("");
-  };
+    projectSyncForm(form);
   const run = async (label: string, operation: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -90,7 +105,7 @@ export function useSyncSection({
       setError(syncErrorMessage(reason));
       setStatus("Failed");
     } finally {
-      clearSecrets();
+      form.clearSecrets();
       setBusy(false);
       onBusyChange(false);
     }
@@ -131,7 +146,7 @@ export function useSyncSection({
           const result = await api.syncNow(
             selected.profileId,
             credentials,
-            masterPassword,
+            form.masterPassword,
           );
           onSnapshot(result.snapshot);
           setConflict(result.conflict);
@@ -151,35 +166,38 @@ export function useSyncSection({
             conflict.conflictOperationId,
             choice,
             credentials,
-            masterPassword,
+            form.masterPassword,
           );
           onSnapshot(result.snapshot);
           setConflict(null);
           setConfirmChoice(null);
           setStatus("Synchronization complete.");
         });
-
-  function selectProfile(profile: SyncProfileDto) {
-    setSelectedId(profile.profileId);
-    setProvider(profile.target.provider);
-    if (profile.target.provider === "webdav")
-      setResourceUrl(profile.target.resourceUrl);
-    else {
-      setEndpoint(profile.target.endpoint ?? "");
-      setRegion(profile.target.region);
-      setBucket(profile.target.bucket);
-      setObjectKey(profile.target.objectKey);
-      setPathStyle(profile.target.pathStyle);
-    }
-    setConflict(null);
-    setConfirmChoice(null);
-    setStatus(profile.recoveryRequired ? "Sync recovery required." : "Idle");
-  }
+  const resetSyncState = () =>
+    selected === null
+      ? undefined
+      : run("Resetting Nian Pass sync metadata", async () => {
+          await api.resetSyncState(selected.profileId);
+          setProfiles((current) =>
+            current.map((profile) =>
+              profile.profileId === selected.profileId
+                ? { ...profile, recoveryStatus: "none" }
+                : profile,
+            ),
+          );
+          setConflict(null);
+          setConfirmChoice(null);
+          setConfirmReset(false);
+          setStatus(
+            "Sync metadata reset. The local and remote vaults were not modified.",
+          );
+        });
 
   function startNewProfile() {
     setSelectedId(null);
     setConflict(null);
     setConfirmChoice(null);
+    setConfirmReset(false);
     setStatus("New profile. Saving creates a new remote relationship.");
   }
 
@@ -187,48 +205,26 @@ export function useSyncSection({
     disabled ||
     busy ||
     selected === null ||
+    selected.recoveryStatus === "unsupported" ||
     !credentialsComplete ||
-    masterPassword === "";
+    form.masterPassword === "";
   return {
     profiles,
     selectedId,
-    provider,
-    resourceUrl,
-    endpoint,
-    region,
-    bucket,
-    objectKey,
-    pathStyle,
-    username,
-    webdavPassword,
-    accessKeyId,
-    secretAccessKey,
-    sessionToken,
-    masterPassword,
+    ...form,
     busy,
     status,
     error,
     conflict,
     confirmChoice,
+    confirmReset,
     selected,
     providerConfigComplete,
     credentialsComplete,
     syncUnavailable,
-    setProvider,
     setSelectedId,
-    setResourceUrl,
-    setEndpoint,
-    setRegion,
-    setBucket,
-    setObjectKey,
-    setPathStyle,
-    setUsername,
-    setWebdavPassword,
-    setAccessKeyId,
-    setSecretAccessKey,
-    setSessionToken,
-    setMasterPassword,
     setConfirmChoice,
+    setConfirmReset,
     setConflict,
     selectProfile,
     startNewProfile,
@@ -236,5 +232,6 @@ export function useSyncSection({
     testConnection,
     syncNow,
     resolveConflict,
+    resetSyncState,
   };
 }

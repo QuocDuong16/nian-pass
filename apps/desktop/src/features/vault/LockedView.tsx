@@ -43,6 +43,8 @@ function unlockMessage(code: DesktopErrorCode): string {
     case "sync_local_changed":
     case "sync_local_changed_during_recovery":
     case "sync_recovery_required":
+    case "sync_state_unsupported":
+    case "sync_state_corrupt":
     case "sync_unsupported_provider":
     case "sync_unsafe_provider":
     case "sync_credentials_required":

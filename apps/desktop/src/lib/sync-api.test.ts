@@ -16,7 +16,7 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
         resourceUrl: "https://dav.test/vault.kdbx",
       },
       available: true,
-      recoveryRequired: false,
+      recoveryStatus: "none",
     },
     test_sync_provider: { status: "missing" },
     sync_now: {
@@ -56,6 +56,7 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
     target: { provider: "webdav", resourceUrl: "https://dav.test/vault.kdbx" },
   });
   await api.deleteSyncProfile("profile-id");
+  await api.resetSyncState("profile-id");
   await api.testSyncProvider("profile-id", credentials);
   await api.syncNow("profile-id", credentials, "master");
   await api.resolveSyncConflict(
@@ -70,6 +71,7 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
     "sync_profiles",
     "save_sync_profile",
     "delete_sync_profile",
+    "reset_sync_state",
     "test_sync_provider",
     "sync_now",
     "resolve_sync_conflict",

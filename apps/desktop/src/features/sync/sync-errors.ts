@@ -17,11 +17,17 @@ export function syncErrorMessage(reason: unknown): string {
   if (reason.code === "sync_recovery_required") {
     return "Sync recovery required. Re-enter credentials to continue.";
   }
+  if (reason.code === "sync_state_unsupported") {
+    return "Older or unsupported sync metadata must be reset explicitly.";
+  }
+  if (reason.code === "sync_state_corrupt") {
+    return "Sync metadata is corrupt. Nian Pass did not use it.";
+  }
   if (
     reason.code === "sync_unsupported_provider" ||
     reason.code === "sync_unsafe_provider"
   ) {
-    return "This provider cannot prove safe conditional-write behavior.";
+    return "This provider does not expose compatible conditional-write and revision semantics.";
   }
   if (reason.code === "sync_credentials_required") {
     return "Provider credentials and the vault master password are required.";

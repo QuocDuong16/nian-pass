@@ -24,6 +24,15 @@ filesystem actors as untrusted. The cloud provider sees encrypted KDBX
 ciphertext, object size, request timing, and the private remote path/bucket/key.
 KDBX protects vault plaintext; it does not hide those metadata.
 
+Schema-v1 sync state from pre-M7 development builds did not record a stable
+remote-target binding. Nian Pass therefore never upgrades it by attaching the
+currently configured WebDAV/S3 target, matching an ETag, or comparing current
+ciphertext. It is reported as unsupported and requires a confirmed metadata-only
+reset. This may abandon an uncertain historical transaction, so the UI warns
+that the next sync must re-establish LOCAL/REMOTE ancestry and may produce an
+initial conflict. A future schema is also unsupported, while malformed metadata
+is corruption; neither is reinterpreted by an older binary.
+
 The concrete threat set includes a malicious or compromised provider, stale
 remote revision, a server that ignores conditional headers, network failure
 after remote commit, concurrent Nian Pass clients, an external KeePassXC edit,

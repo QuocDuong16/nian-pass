@@ -118,6 +118,7 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
     syncProfiles: vi.fn().mockResolvedValue([]),
     saveSyncProfile: vi.fn(),
     deleteSyncProfile: vi.fn(),
+    resetSyncState: vi.fn(),
     testSyncProvider: vi.fn(),
     syncNow: vi.fn(),
     resolveSyncConflict: vi.fn(),

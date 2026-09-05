@@ -1,5 +1,8 @@
+mod journal;
+mod metadata;
+
 use std::{
-    fs, io,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -8,15 +11,14 @@ use sync_provider_core::{CiphertextDigest, ProviderError, RemoteRevision};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
-    LocalSnapshot,
-    store_io::{
-        atomic_write, atomic_write_json, create_private_directory, read_optional_json,
-        read_private_file, remove_if_file, sync_directory,
-    },
+use crate::store_io::{
+    atomic_write, atomic_write_json, create_private_directory, read_private_file, remove_if_file,
+    sync_directory,
 };
+use metadata::{MetadataKind, MetadataSchema};
 
 const SCHEMA_VERSION: u32 = 2;
+const MAX_METADATA_BYTES: u64 = 64 * 1024;
 const BASE_METADATA: &str = "base.json";
 const JOURNAL_METADATA: &str = "journal.json";
 
@@ -87,12 +89,14 @@ impl TargetBinding {
 }
 
 /// Startup-visible recovery state; checking it never performs network I/O.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RecoveryStatus {
     /// No active transaction exists.
     None,
     /// An authenticated user-triggered recovery must run before a new sync.
     Required,
+    /// Target-unbound legacy or newer unsupported state requires explicit reset.
+    Unsupported,
 }
 
 /// Private profile-scoped BASE and journal repository.
@@ -123,27 +127,18 @@ impl SyncStore {
         })
     }
 
-    /// Returns whether an active journal requires explicit recovery credentials.
-    pub fn recovery_status(&self) -> Result<RecoveryStatus, StoreError> {
-        match fs::symlink_metadata(self.directory.join(JOURNAL_METADATA)) {
-            Ok(metadata) if metadata.file_type().is_file() => Ok(RecoveryStatus::Required),
-            Ok(_) => Err(StoreError::InvalidMetadata),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(RecoveryStatus::None),
-            Err(error) => Err(StoreError::Io(error)),
-        }
-    }
-
     pub(crate) fn load_base(&self) -> Result<Option<BaseState>, StoreError> {
         let path = self.directory.join(BASE_METADATA);
-        let Some(metadata): Option<BaseMetadata> = read_optional_json(&path)? else {
+        match self.metadata_schema(BASE_METADATA, MetadataKind::Base)? {
+            MetadataSchema::Missing => return Ok(None),
+            MetadataSchema::Unsupported => return Err(StoreError::UnsupportedSchema),
+            MetadataSchema::Current => {}
+        }
+        let Some(metadata): Option<BaseMetadata> = self.read_metadata(&path, MetadataKind::Base)?
+        else {
             return Ok(None);
         };
-        self.validate_identity(
-            metadata.schema_version,
-            metadata.profile_id,
-            &metadata.source,
-            &metadata.target,
-        )?;
+        self.validate_identity(metadata.profile_id, &metadata.source, &metadata.target)?;
         validate_private_filename(&metadata.ciphertext_file, "base-")?;
         let ciphertext = read_private_file(&self.directory.join(&metadata.ciphertext_file))?;
         let digest = CiphertextDigest::of(&ciphertext);
@@ -175,8 +170,9 @@ impl SyncStore {
             ciphertext_sha256: CiphertextDigest::of(ciphertext),
             remote_revision,
         };
-        let old = read_optional_json::<BaseMetadata>(&self.directory.join(BASE_METADATA))?;
-        atomic_write_json(&self.directory.join(BASE_METADATA), &metadata)?;
+        let metadata_path = self.directory.join(BASE_METADATA);
+        let old = self.read_metadata::<BaseMetadata>(&metadata_path, MetadataKind::Base)?;
+        atomic_write_json(&metadata_path, &metadata)?;
         if let Some(old) = old
             && old.ciphertext_file != metadata.ciphertext_file
             && validate_private_filename(&old.ciphertext_file, "base-").is_ok()
@@ -186,104 +182,13 @@ impl SyncStore {
         sync_directory(&self.directory)
     }
 
-    pub(crate) fn prepare_journal(
-        &self,
-        local: &LocalSnapshot,
-        expected_remote_revision: Option<RemoteRevision>,
-        candidate: &[u8],
-    ) -> Result<JournalRecord, StoreError> {
-        if self.recovery_status()? == RecoveryStatus::Required {
-            return Err(StoreError::ActiveJournal);
-        }
-        if local.source() != &self.source {
-            return Err(StoreError::WrongSource);
-        }
-        let operation_id = Uuid::new_v4();
-        let candidate_file = format!("candidate-{operation_id}.kdbx");
-        atomic_write(&self.directory.join(&candidate_file), candidate)?;
-        let record = JournalRecord {
-            schema_version: SCHEMA_VERSION,
-            profile_id: self.profile_id,
-            source: self.source.clone(),
-            target: self.target.clone(),
-            operation_id,
-            phase: JournalPhase::Prepared,
-            expected_local_sha256: local.digest().clone(),
-            expected_remote_revision,
-            candidate_file,
-            candidate_sha256: CiphertextDigest::of(candidate),
-            committed_remote_revision: None,
-        };
-        self.write_journal(&record)?;
-        Ok(record)
-    }
-
-    pub(crate) fn load_journal(&self) -> Result<Option<LoadedJournal>, StoreError> {
-        let Some(record): Option<JournalRecord> =
-            read_optional_json(&self.directory.join(JOURNAL_METADATA))?
-        else {
-            return Ok(None);
-        };
-        self.validate_identity(
-            record.schema_version,
-            record.profile_id,
-            &record.source,
-            &record.target,
-        )?;
-        validate_private_filename(&record.candidate_file, "candidate-")?;
-        let candidate = read_private_file(&self.directory.join(&record.candidate_file))?;
-        if CiphertextDigest::of(&candidate) != record.candidate_sha256 {
-            return Err(StoreError::CorruptJournal);
-        }
-        Ok(Some(LoadedJournal { record, candidate }))
-    }
-
-    pub(crate) fn mark_remote_committed(
-        &self,
-        record: &mut JournalRecord,
-        revision: RemoteRevision,
-    ) -> Result<(), StoreError> {
-        record.phase = JournalPhase::RemoteCommitted;
-        record.committed_remote_revision = Some(revision);
-        self.write_journal(record)
-    }
-
-    pub(crate) fn mark_local_committed(
-        &self,
-        record: &mut JournalRecord,
-    ) -> Result<(), StoreError> {
-        record.phase = JournalPhase::LocalCommitted;
-        self.write_journal(record)
-    }
-
-    pub(crate) fn remove_journal(&self, record: &JournalRecord) -> Result<(), StoreError> {
-        let current = self.load_journal()?.ok_or(StoreError::InvalidMetadata)?;
-        if current.record.operation_id != record.operation_id {
-            return Err(StoreError::InvalidMetadata);
-        }
-        remove_if_file(&self.directory.join(JOURNAL_METADATA))?;
-        remove_if_file(&self.directory.join(&record.candidate_file))?;
-        sync_directory(&self.directory)
-    }
-
-    fn write_journal(&self, record: &JournalRecord) -> Result<(), StoreError> {
-        if let Some(current) =
-            read_optional_json::<JournalRecord>(&self.directory.join(JOURNAL_METADATA))?
-            && current.operation_id != record.operation_id
-        {
-            return Err(StoreError::ActiveJournal);
-        }
-        atomic_write_json(&self.directory.join(JOURNAL_METADATA), record)
-    }
-
     fn validate_identity(
         &self,
-        schema_version: u32,
         profile_id: ProfileId,
         source: &SourceBinding,
         target: &TargetBinding,
     ) -> Result<(), StoreError> {
-        if schema_version != SCHEMA_VERSION || profile_id != self.profile_id {
+        if profile_id != self.profile_id {
             return Err(StoreError::WrongProfile);
         }
         if source != &self.source {
@@ -353,6 +258,8 @@ pub enum StoreError {
     CorruptBase,
     #[error("the synchronization journal is corrupt")]
     CorruptJournal,
+    #[error("the synchronization metadata schema is unsupported")]
+    UnsupportedSchema,
     #[error("synchronization metadata belongs to another profile")]
     WrongProfile,
     #[error("the synchronization profile belongs to another local vault")]

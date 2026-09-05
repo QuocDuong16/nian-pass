@@ -26,6 +26,8 @@ const codes: readonly DesktopErrorCode[] = [
   "sync_local_changed",
   "sync_local_changed_during_recovery",
   "sync_recovery_required",
+  "sync_state_unsupported",
+  "sync_state_corrupt",
   "sync_unsupported_provider",
   "sync_unsafe_provider",
   "sync_credentials_required",

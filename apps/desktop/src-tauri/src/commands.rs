@@ -345,10 +345,11 @@ mod tests {
         close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
         delete_entry, delete_entry_custom_field, delete_group, delete_sync_profile,
         discard_changes_and_lock, entry_detail, lock_vault, move_entry, move_group, reload_vault,
-        rename_group, resolve_browser_connection, resolve_sync_conflict, reveal_entry_custom_field,
-        reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
-        reveal_entry_username, runtime_info, save_sync_profile, save_vault, select_vault,
-        set_entry_custom_field, sync_now, sync_profiles, test_sync_provider, update_entry,
+        rename_group, reset_sync_state, resolve_browser_connection, resolve_sync_conflict,
+        reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
+        reveal_entry_url, reveal_entry_username, runtime_info, save_sync_profile, save_vault,
+        select_vault, set_entry_custom_field, sync_now, sync_profiles, test_sync_provider,
+        update_entry,
     };
     use crate::{
         browser_bridge::BrowserBridgeState,
@@ -614,6 +615,8 @@ mod tests {
             DesktopError::SyncLocalChanged,
             DesktopError::SyncLocalChangedDuringRecovery,
             DesktopError::SyncRecoveryRequired,
+            DesktopError::SyncStateUnsupported,
+            DesktopError::SyncStateCorrupt,
             DesktopError::SyncUnsupportedProvider,
             DesktopError::SyncUnsafeProvider,
             DesktopError::SyncCredentialsRequired,
@@ -693,6 +696,7 @@ mod tests {
             ))
             .is_err()
         );
+        assert!(reset_sync_state(saved.profile_id.clone(), state.clone(), runtime.clone()).is_ok());
         assert!(delete_sync_profile(saved.profile_id, state, runtime).is_ok());
     }
 

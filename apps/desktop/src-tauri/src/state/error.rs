@@ -31,6 +31,8 @@ pub enum DesktopError {
     SyncLocalChanged,
     SyncLocalChangedDuringRecovery,
     SyncRecoveryRequired,
+    SyncStateUnsupported,
+    SyncStateCorrupt,
     SyncUnsupportedProvider,
     SyncUnsafeProvider,
     SyncCredentialsRequired,

@@ -88,6 +88,30 @@ impl SyncRuntime {
         Ok(())
     }
 
+    pub fn reset_state(&self, state: &AppState, profile_id: &str) -> Result<(), DesktopError> {
+        let profile = self.profiles.load(profile_id)?;
+        let current_source = state
+            .service
+            .lock()
+            .map_err(|_| DesktopError::Internal)?
+            .sync_source_binding()?;
+        if current_source != profile.source_binding {
+            return Err(DesktopError::InvalidRequest);
+        }
+        let id = ProfileId::parse(profile_id).map_err(|_| DesktopError::InvalidRequest)?;
+        let source = SourceBinding::from_sha256(profile.source_binding.clone())
+            .map_err(|_| DesktopError::InvalidRequest)?;
+        let target = profile.target.target_binding()?;
+        SyncStore::open(&self.application_data, id, source, target)
+            .and_then(|store| store.reset_state())
+            .map_err(map_store_error)?;
+        self.engines
+            .lock()
+            .map_err(|_| DesktopError::Internal)?
+            .remove(profile_id);
+        Ok(())
+    }
+
     pub async fn test_provider(
         &self,
         profile_id: &str,
@@ -277,6 +301,17 @@ fn map_sync_error(error: SyncError) -> DesktopError {
         SyncError::Local(sync_engine::LocalCommitError::Dirty) => DesktopError::UnsavedChanges,
         SyncError::Local(sync_engine::LocalCommitError::Locked) => DesktopError::Locked,
         SyncError::Provider(provider) => map_provider_error(provider),
+        SyncError::Store(store) => map_store_error(store),
+        _ => DesktopError::SyncFailed,
+    }
+}
+
+fn map_store_error(error: sync_engine::StoreError) -> DesktopError {
+    match error {
+        sync_engine::StoreError::UnsupportedSchema => DesktopError::SyncStateUnsupported,
+        sync_engine::StoreError::CorruptBase
+        | sync_engine::StoreError::CorruptJournal
+        | sync_engine::StoreError::InvalidMetadata => DesktopError::SyncStateCorrupt,
         _ => DesktopError::SyncFailed,
     }
 }
@@ -291,7 +326,7 @@ pub fn recovery_status(
     let target = profile.target.target_binding()?;
     SyncStore::open(application_data, id, source, target)
         .and_then(|store| store.recovery_status())
-        .map_err(|_| DesktopError::SyncRecoveryRequired)
+        .map_err(map_store_error)
 }
 
 #[cfg(test)]
@@ -306,7 +341,7 @@ mod tests {
     use kdbx::KdbxDocument;
     use serde::de::DeserializeOwned;
     use serde_json::{Value, json};
-    use sync_engine::{LocalCommitError, SyncError};
+    use sync_engine::{LocalCommitError, StoreError, SyncError};
     use sync_provider_core::ProviderError;
     use tokio::{
         io::{AsyncReadExt as _, AsyncWriteExt as _},
@@ -318,7 +353,8 @@ mod tests {
     use super::profile::SyncProfileTargetDto;
     use super::{
         ConflictChoiceDto, DesktopProvider, ProviderCredentialsDto, ResolveSyncConflictRequestDto,
-        SyncCompletion, SyncRuntime, completion_status, map_provider_error, map_sync_error,
+        SyncCompletion, SyncRuntime, completion_status, map_provider_error, map_store_error,
+        map_sync_error,
     };
     use crate::{clipboard::ClipboardPort, state::AppState};
 
@@ -500,6 +536,83 @@ mod tests {
         .into_bytes();
         response.extend_from_slice(body);
         response
+    }
+
+    #[test]
+    fn reset_preserves_profile_and_local_vault_and_invalidates_cached_engine() {
+        let directory = TestDirectory::new();
+        let state = unlocked_state(&directory);
+        let runtime = SyncRuntime::new(directory.0.clone()).expect("runtime");
+        let saved = runtime
+            .save_profile(
+                &state,
+                decode(json!({
+                    "target": {
+                        "provider": "webdav",
+                        "resourceUrl": "https://dav.example.test/vault.kdbx"
+                    }
+                })),
+            )
+            .expect("save profile");
+        let stored = runtime
+            .profiles
+            .load(&saved.profile_id)
+            .expect("stored profile");
+        runtime.engine(&stored).expect("cache engine");
+        assert!(
+            runtime
+                .engines
+                .lock()
+                .expect("engines")
+                .contains_key(&saved.profile_id)
+        );
+        let sync_directory = directory.0.join("sync").join(&saved.profile_id);
+        fs::write(sync_directory.join("base.json"), br#"{"schema_version":1}"#)
+            .expect("legacy base");
+        let local_before = fs::read(directory.0.join("vault.kdbx")).expect("local before");
+
+        runtime
+            .reset_state(&state, &saved.profile_id)
+            .expect("reset state");
+
+        assert!(!sync_directory.join("base.json").exists());
+        assert_eq!(
+            fs::read(directory.0.join("vault.kdbx")).expect("local after"),
+            local_before
+        );
+        assert!(runtime.profiles.load(&saved.profile_id).is_ok());
+        assert!(
+            !runtime
+                .engines
+                .lock()
+                .expect("engines")
+                .contains_key(&saved.profile_id)
+        );
+    }
+
+    #[test]
+    fn reset_rejects_a_profile_bound_to_another_selected_source() {
+        let directory = TestDirectory::new();
+        let state = unlocked_state(&directory);
+        let runtime = SyncRuntime::new(directory.0.clone()).expect("runtime");
+        let saved = runtime
+            .save_profile(
+                &state,
+                decode(json!({
+                    "target": {
+                        "provider": "webdav",
+                        "resourceUrl": "https://dav.example.test/vault.kdbx"
+                    }
+                })),
+            )
+            .expect("save profile");
+        let other_directory = TestDirectory::new();
+        let other_state = unlocked_state(&other_directory);
+
+        assert!(matches!(
+            runtime.reset_state(&other_state, &saved.profile_id),
+            Err(crate::state::DesktopError::InvalidRequest)
+        ));
     }
 
     async fn runtime_syncs_both_directions_and_resolves_conflict_case() {
@@ -693,6 +806,28 @@ mod tests {
         assert!(matches!(
             map_sync_error(SyncError::Local(LocalCommitError::Dirty)),
             crate::state::DesktopError::UnsavedChanges
+        ));
+        assert!(matches!(
+            map_sync_error(SyncError::Store(StoreError::UnsupportedSchema)),
+            crate::state::DesktopError::SyncStateUnsupported
+        ));
+        assert!(matches!(
+            map_sync_error(SyncError::Internal),
+            crate::state::DesktopError::SyncFailed
+        ));
+        for error in [
+            StoreError::CorruptBase,
+            StoreError::CorruptJournal,
+            StoreError::InvalidMetadata,
+        ] {
+            assert!(matches!(
+                map_store_error(error),
+                crate::state::DesktopError::SyncStateCorrupt
+            ));
+        }
+        assert!(matches!(
+            map_store_error(StoreError::WrongTarget),
+            crate::state::DesktopError::SyncFailed
         ));
 
         let target = SyncProfileTargetDto::S3 {

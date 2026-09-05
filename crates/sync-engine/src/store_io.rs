@@ -1,7 +1,7 @@
 use std::{fs, io, io::Write as _, path::Path};
 
 use atomic_write_file::AtomicWriteFile;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 
 use crate::StoreError;
 
@@ -41,16 +41,22 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), StoreError> 
     Ok(())
 }
 
-pub(crate) fn read_optional_json<T: DeserializeOwned>(
+pub(crate) fn read_optional_private_file(
     path: &Path,
-) -> Result<Option<T>, StoreError> {
-    match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| StoreError::InvalidMetadata),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(StoreError::Io(error)),
+    maximum_bytes: u64,
+) -> Result<Option<Vec<u8>>, StoreError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(StoreError::Io(error)),
+    };
+    if metadata.file_type().is_symlink()
+        || !metadata.file_type().is_file()
+        || metadata.len() > maximum_bytes
+    {
+        return Err(StoreError::InvalidMetadata);
     }
+    fs::read(path).map(Some).map_err(StoreError::Io)
 }
 
 pub(crate) fn read_private_file(path: &Path) -> Result<Vec<u8>, StoreError> {

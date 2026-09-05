@@ -25,9 +25,9 @@ Desktop explicit sync supports WebDAV and AWS S3 with manual only operation;
 provider credentials are not persisted.
 
 Windows and Linux desktop now provide explicit **Sync now** for one exact
-remote KDBX object through WebDAV or AWS S3 / compatible endpoints that prove
-safe conditional-write behavior. Providers return only encrypted bytes and an
-opaque revision; `sync-engine` combines the encrypted LOCAL generation, the
+remote KDBX object through WebDAV or AWS S3 / compatible endpoints that expose
+the required conditional-write and revision semantics. Providers return only
+encrypted bytes and an opaque revision; `sync-engine` combines the encrypted LOCAL generation, the
 last proven encrypted BASE, and the encrypted REMOTE generation, then delegates
 all semantic decisions to the existing network-free `vault-sync` crate.
 
@@ -38,6 +38,13 @@ generations use a private encrypted journal, remote-first CAS, verified safe
 local replacement, and an atomic BASE update last. BASE and candidate files are
 ordinary encrypted, KeePassXC-readable KDBX ciphertext—no wrapper encryption or
 plaintext vault representation is persisted.
+
+Sync persistence schema v2 binds BASE and recovery state to one exact remote
+target. Target-unbound state from earlier development builds is never migrated
+automatically. The Sync section classifies it explicitly and offers a confirmed,
+offline reset that removes only Nian Pass sync metadata; local and remote KDBX
+files remain untouched, and the next Sync now follows the normal initial-sync
+rules.
 
 Sync is manual only and requires a clean saved vault, the real master password,
 and freshly entered provider credentials. WebDAV passwords, S3 secret keys and

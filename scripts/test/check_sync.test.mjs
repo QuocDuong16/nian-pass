@@ -46,7 +46,25 @@ function fixture(t) {
       "struct SyncStore { target: TargetBinding }\n" +
       "struct BaseMetadata { target: TargetBinding }\n" +
       "struct JournalRecord { target: TargetBinding }\n" +
-      "fn validate(target: &TargetBinding) { if target != &self.target { return Err(WrongTarget); } }\n",
+      "fn validate(target: &TargetBinding) { if target != &self.target { return Err(WrongTarget); } }\n" +
+      "enum RecoveryStatus { None, Required, Unsupported }\n" +
+      "enum MetadataSchema { Current, Unsupported }\n" +
+      "fn recovery_status() { metadata_schema(); if state == MetadataSchema::Unsupported { return RecoveryStatus::Unsupported; } }\n" +
+      "fn load_base() { metadata_schema(); if state == MetadataSchema::Unsupported { return Err(UnsupportedSchema); } }\n" +
+      "fn schema() { if schema_version == SCHEMA_VERSION { MetadataSchema::Current } else { MetadataSchema::Unsupported } }\n" +
+      "pub fn reset_state() { remove_if_file(); sync_directory(); }\n",
+  );
+  write(root, "crates/sync-engine/src/store/metadata.rs", "");
+  write(root, "crates/sync-engine/src/store/journal.rs", "");
+  write(
+    root,
+    "apps/desktop/src-tauri/src/commands/sync.rs",
+    "fn reset_sync_state() { begin_vault_operation(); }\n",
+  );
+  write(
+    root,
+    "apps/desktop/src/features/sync/sync-errors.ts",
+    "This provider requires compatible conditional-write and revision semantics.\n",
   );
   write(
     root,
@@ -81,13 +99,24 @@ function fixture(t) {
     root,
     "docs/architecture.md",
     "profile_id identifies one immutable local-source + remote-target relationship. " +
-      "A malicious or broken server may ignore CAS, and the client cannot always detect that violation.\n",
+      "A malicious or broken server may ignore CAS, and the client cannot always detect that violation. " +
+      "Schema v2 binds state to a target; target-unbound state is not automatically migrated.\n",
   );
   write(
     root,
     "docs/threat-model.md",
-    "A malicious or broken provider can violate CAS and this cannot always be detected. " +
+    "A malicious or broken provider can violate CAS and this cannot always be detected. Schema-v1 state never upgrades automatically and requires a metadata-only reset. " +
       "Concurrency protection applies when the provider cooperates. There is no cryptographic remote rollback or conditional-enforcement claim.\n",
+  );
+  write(
+    root,
+    "docs/quality.md",
+    "v1 metadata has explicit unsupported-state tests and reset returns to no-BASE initial-sync behavior.\n",
+  );
+  write(
+    root,
+    "README.md",
+    "Providers expose compatible conditional-write and revision semantics.\n",
   );
   return root;
 }
@@ -146,4 +175,32 @@ test("malicious ignored-CAS overclaims are rejected", (t) => {
   );
   const violations = runChecks(root).join("\n");
   assert.match(violations, /must not claim malicious ignored-CAS detection/);
+});
+
+test("existence-only recovery and silent legacy loading are rejected", (t) => {
+  const root = fixture(t);
+  replace(
+    root,
+    "crates/sync-engine/src/store.rs",
+    "metadata_schema(); if state == MetadataSchema::Unsupported { return RecoveryStatus::Unsupported; }",
+    "symlink_metadata(); return RecoveryStatus::Required;",
+  );
+  replace(
+    root,
+    "crates/sync-engine/src/store.rs",
+    "metadata_schema(); if state == MetadataSchema::Unsupported { return Err(UnsupportedSchema); }",
+    "return load_current_base();",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /inspect and classify persisted schema/);
+  assert.match(violations, /never load as current target-bound state/);
+});
+
+test("provider-side CAS proof wording is rejected", (t) => {
+  const root = fixture(t);
+  write(root, "README.md", "Providers prove safe conditional-write behavior.\n");
+  assert.match(
+    runChecks(root).join("\n"),
+    /must not claim provider-side CAS enforcement is proven/,
+  );
 });

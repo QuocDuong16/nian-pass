@@ -25,7 +25,17 @@ export function runChecks(root) {
   const conflictAuthoritySource = readRustProduction(
     resolve(root, "crates/sync-engine/src/conflict_authority.rs"),
   );
-  const storeSource = readRustProduction(resolve(root, "crates/sync-engine/src/store.rs"));
+  const storeSource = [
+    "crates/sync-engine/src/store.rs",
+    "crates/sync-engine/src/store/metadata.rs",
+    "crates/sync-engine/src/store/journal.rs",
+  ]
+    .map((path) => readRustProduction(resolve(root, path)))
+    .join("\n");
+  const syncCommands = readRustProduction(
+    resolve(root, "apps/desktop/src-tauri/src/commands/sync.rs"),
+  );
+  const syncErrors = source(root, "apps/desktop/src/features/sync/sync-errors.ts");
   const webdavSource = readRustProduction(
     resolve(root, "crates/sync-provider-webdav/src/lib.rs"),
   );
@@ -38,6 +48,8 @@ export function runChecks(root) {
   );
   const architecture = source(root, "docs/architecture.md");
   const threatModel = source(root, "docs/threat-model.md");
+  const quality = source(root, "docs/quality.md");
+  const readme = source(root, "README.md");
 
   for (const [path, manifest] of [
     ["crates/vault-sync/Cargo.toml", vaultSyncManifest],
@@ -89,6 +101,33 @@ export function runChecks(root) {
     violations.push("BASE and journal must remain bound to the exact remote target");
   }
   if (
+    !/enum RecoveryStatus[\s\S]{0,400}Unsupported/.test(storeSource) ||
+    !/fn recovery_status[\s\S]{0,1000}metadata_schema[\s\S]{0,700}RecoveryStatus::Unsupported/.test(
+      storeSource,
+    ) ||
+    /symlink_metadata\([\s\S]{0,180}RecoveryStatus::Required/.test(storeSource)
+  ) {
+    violations.push("recovery status must inspect and classify persisted schema, not file existence");
+  }
+  if (
+    !/fn load_base[\s\S]{0,500}MetadataSchema::Unsupported[\s\S]{0,120}UnsupportedSchema/.test(
+      storeSource,
+    ) ||
+    !/schema_version\s*==\s*SCHEMA_VERSION[\s\S]{0,180}MetadataSchema::Current[\s\S]{0,120}MetadataSchema::Unsupported/.test(
+      storeSource,
+    )
+  ) {
+    violations.push("legacy and future BASE state must never load as current target-bound state");
+  }
+  if (
+    !/pub fn reset_state[\s\S]{0,1800}remove_if_file[\s\S]{0,900}sync_directory/.test(
+      storeSource,
+    ) ||
+    !/fn reset_sync_state[\s\S]{0,500}begin_vault_operation/.test(syncCommands)
+  ) {
+    violations.push("explicit sync-state reset must remain profile-scoped and operation-gated");
+  }
+  if (
     !/pub async fn sync[\s\S]{0,520}invalidate_pending_conflict\(\)\?;[\s\S]{0,160}capture_clean\(\)\?/.test(
       engineSource,
     )
@@ -133,6 +172,22 @@ export function runChecks(root) {
     !/no cryptographic remote[\s\S]{0,160}conditional-enforcement/i.test(threatModel)
   ) {
     violations.push("threat model must not claim malicious ignored-CAS detection");
+  }
+  if (
+    !/schema v2[\s\S]{0,500}target-unbound[\s\S]{0,500}not[\s\S]{0,80}migrat/i.test(
+      architecture,
+    ) ||
+    !/schema-v1[\s\S]{0,500}never upgrades[\s\S]{0,500}metadata-only\s+reset/i.test(
+      threatModel,
+    ) ||
+    !/v1[\s\S]{0,500}unsupported-state[\s\S]{0,500}no-BASE initial-sync/i.test(quality)
+  ) {
+    violations.push("docs must retain the fail-closed target-unbound sync-state upgrade policy");
+  }
+  if (
+    /(?:prove|proven) safe conditional-write behavior/i.test(`${readme}\n${syncErrors}`)
+  ) {
+    violations.push("user-facing text must not claim provider-side CAS enforcement is proven");
   }
   return violations;
 }

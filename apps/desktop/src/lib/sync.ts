@@ -21,7 +21,7 @@ export interface SyncProfileDto {
   profileId: string;
   target: SyncProfileTarget;
   available: boolean;
-  recoveryRequired: boolean;
+  recoveryStatus: "none" | "required" | "unsupported";
 }
 
 export interface SaveSyncProfileRequest {
@@ -71,11 +71,13 @@ export function parseSyncProfile(value: unknown): SyncProfileDto {
     "profileId",
     "target",
     "available",
-    "recoveryRequired",
+    "recoveryStatus",
   ]);
   if (
     typeof object["available"] !== "boolean" ||
-    typeof object["recoveryRequired"] !== "boolean"
+    (object["recoveryStatus"] !== "none" &&
+      object["recoveryStatus"] !== "required" &&
+      object["recoveryStatus"] !== "unsupported")
   ) {
     return invalidContract();
   }
@@ -83,7 +85,7 @@ export function parseSyncProfile(value: unknown): SyncProfileDto {
     profileId: nonEmptyString(object["profileId"]),
     target: parseTarget(object["target"]),
     available: object["available"],
-    recoveryRequired: object["recoveryRequired"],
+    recoveryStatus: object["recoveryStatus"],
   };
 }
 

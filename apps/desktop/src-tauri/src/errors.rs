@@ -30,6 +30,8 @@ enum DesktopErrorCode {
     SyncLocalChanged,
     SyncLocalChangedDuringRecovery,
     SyncRecoveryRequired,
+    SyncStateUnsupported,
+    SyncStateCorrupt,
     SyncUnsupportedProvider,
     SyncUnsafeProvider,
     SyncCredentialsRequired,
@@ -71,6 +73,8 @@ impl From<DesktopError> for DesktopErrorDto {
                 DesktopErrorCode::SyncLocalChangedDuringRecovery
             }
             DesktopError::SyncRecoveryRequired => DesktopErrorCode::SyncRecoveryRequired,
+            DesktopError::SyncStateUnsupported => DesktopErrorCode::SyncStateUnsupported,
+            DesktopError::SyncStateCorrupt => DesktopErrorCode::SyncStateCorrupt,
             DesktopError::SyncUnsupportedProvider => DesktopErrorCode::SyncUnsupportedProvider,
             DesktopError::SyncUnsafeProvider => DesktopErrorCode::SyncUnsafeProvider,
             DesktopError::SyncCredentialsRequired => DesktopErrorCode::SyncCredentialsRequired,

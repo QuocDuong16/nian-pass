@@ -121,7 +121,25 @@ pub struct SyncProfileDto {
     pub profile_id: String,
     pub target: SyncProfileTargetDto,
     pub available: bool,
-    pub recovery_required: bool,
+    pub recovery_status: SyncRecoveryStatusDto,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncRecoveryStatusDto {
+    None,
+    Required,
+    Unsupported,
+}
+
+impl From<RecoveryStatus> for SyncRecoveryStatusDto {
+    fn from(value: RecoveryStatus) -> Self {
+        match value {
+            RecoveryStatus::None => Self::None,
+            RecoveryStatus::Required => Self::Required,
+            RecoveryStatus::Unsupported => Self::Unsupported,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -158,11 +176,10 @@ impl ProfileRepository {
                 continue;
             }
             let profile = read_profile(&path)?;
-            let recovery_required =
-                super::recovery_status(application_data, &profile)? == RecoveryStatus::Required;
+            let recovery_status = super::recovery_status(application_data, &profile)?.into();
             profiles.push(SyncProfileDto {
                 available: current_source == Some(profile.source_binding.as_str()),
-                recovery_required,
+                recovery_status,
                 profile_id: profile.profile_id,
                 target: profile.target,
             });
@@ -199,13 +216,12 @@ impl ProfileRepository {
         };
         let bytes = serde_json::to_vec(&profile).map_err(|_| DesktopError::SyncFailed)?;
         atomic_write(&self.path(&profile_id), &bytes)?;
-        let recovery_required =
-            super::recovery_status(application_data, &profile)? == RecoveryStatus::Required;
+        let recovery_status = super::recovery_status(application_data, &profile)?.into();
         Ok(SyncProfileDto {
             profile_id,
             target: profile.target,
             available: true,
-            recovery_required,
+            recovery_status,
         })
     }
 
@@ -222,12 +238,10 @@ impl ProfileRepository {
         let target = profile.target.target_binding()?;
         let store = SyncStore::open(application_data, id, source, target)
             .map_err(|_| DesktopError::SyncFailed)?;
-        if store
-            .recovery_status()
-            .map_err(|_| DesktopError::SyncFailed)?
-            == RecoveryStatus::Required
-        {
-            return Err(DesktopError::SyncRecoveryRequired);
+        match store.recovery_status().map_err(map_store_error)? {
+            RecoveryStatus::None => {}
+            RecoveryStatus::Required => return Err(DesktopError::SyncRecoveryRequired),
+            RecoveryStatus::Unsupported => return Err(DesktopError::SyncStateUnsupported),
         }
         remove_regular_file(&self.path(profile_id))?;
         let sync_directory = application_data.join("sync").join(profile_id);
@@ -244,6 +258,16 @@ impl ProfileRepository {
 
     fn path(&self, profile_id: &str) -> PathBuf {
         self.directory.join(format!("{profile_id}.json"))
+    }
+}
+
+fn map_store_error(error: sync_engine::StoreError) -> DesktopError {
+    match error {
+        sync_engine::StoreError::UnsupportedSchema => DesktopError::SyncStateUnsupported,
+        sync_engine::StoreError::CorruptBase
+        | sync_engine::StoreError::CorruptJournal
+        | sync_engine::StoreError::InvalidMetadata => DesktopError::SyncStateCorrupt,
+        _ => DesktopError::SyncFailed,
     }
 }
 
@@ -311,10 +335,13 @@ fn remove_regular_file(path: &Path) -> Result<(), DesktopError> {
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use sync_engine::ProfileId;
+    use sync_engine::{ProfileId, StoreError};
     use sync_provider_core::CiphertextDigest;
 
-    use super::{ProfileRepository, SaveSyncProfileRequestDto, SyncProfileTargetDto};
+    use super::{
+        ProfileRepository, SaveSyncProfileRequestDto, SyncProfileTargetDto, SyncRecoveryStatusDto,
+        map_store_error,
+    };
     use crate::state::DesktopError;
 
     struct TestDirectory(PathBuf);
@@ -564,5 +591,93 @@ mod tests {
         assert_ne!(first.profile_id, second.profile_id);
         ProfileId::parse(&first.profile_id).expect("first UUID v4");
         ProfileId::parse(&second.profile_id).expect("second UUID v4");
+    }
+
+    #[test]
+    fn recovery_status_dto_and_store_errors_remain_distinct() {
+        assert_eq!(
+            serde_json::to_value(SyncRecoveryStatusDto::None).expect("none"),
+            "none"
+        );
+        assert_eq!(
+            serde_json::to_value(SyncRecoveryStatusDto::Required).expect("required"),
+            "required"
+        );
+        assert_eq!(
+            serde_json::to_value(SyncRecoveryStatusDto::Unsupported).expect("unsupported"),
+            "unsupported"
+        );
+        assert_eq!(
+            map_store_error(StoreError::UnsupportedSchema),
+            DesktopError::SyncStateUnsupported
+        );
+        for error in [
+            StoreError::CorruptBase,
+            StoreError::CorruptJournal,
+            StoreError::InvalidMetadata,
+        ] {
+            assert_eq!(map_store_error(error), DesktopError::SyncStateCorrupt);
+        }
+        assert_eq!(
+            map_store_error(StoreError::WrongTarget),
+            DesktopError::SyncFailed
+        );
+    }
+
+    #[test]
+    fn delete_distinguishes_current_recovery_from_unsupported_legacy_state() {
+        let directory = TestDirectory::new();
+        let repository = ProfileRepository::open(&directory.0).expect("repository");
+        let current = save_new(
+            &repository,
+            &directory,
+            webdav("https://dav.example.test/current.kdbx"),
+        );
+        let current_profile = repository
+            .load(&current.profile_id)
+            .expect("current profile");
+        let sync_directory = directory.0.join("sync").join(&current.profile_id);
+        let operation_id = uuid::Uuid::new_v4();
+        let candidate_file = format!("candidate-{operation_id}.kdbx");
+        let candidate = b"synthetic encrypted candidate";
+        fs::write(sync_directory.join(&candidate_file), candidate).expect("candidate");
+        fs::write(
+            sync_directory.join("journal.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 2,
+                "profile_id": current.profile_id,
+                "source": current_profile.source_binding,
+                "target": current_profile.target.target_binding().expect("target").as_str(),
+                "operation_id": operation_id,
+                "phase": "prepared",
+                "expected_local_sha256": CiphertextDigest::of(b"local").as_str(),
+                "expected_remote_revision": null,
+                "candidate_file": candidate_file,
+                "candidate_sha256": CiphertextDigest::of(candidate).as_str(),
+                "committed_remote_revision": null
+            }))
+            .expect("journal JSON"),
+        )
+        .expect("journal");
+        assert!(matches!(
+            repository.delete(&current.profile_id, &directory.0),
+            Err(DesktopError::SyncRecoveryRequired)
+        ));
+
+        let legacy = save_new(
+            &repository,
+            &directory,
+            webdav("https://dav.example.test/legacy.kdbx"),
+        );
+        let legacy_directory = directory.0.join("sync").join(&legacy.profile_id);
+        fs::write(
+            legacy_directory.join("journal.json"),
+            br#"{"schema_version":1}"#,
+        )
+        .expect("legacy journal");
+        assert!(matches!(
+            repository.delete(&legacy.profile_id, &directory.0),
+            Err(DesktopError::SyncStateUnsupported)
+        ));
     }
 }
