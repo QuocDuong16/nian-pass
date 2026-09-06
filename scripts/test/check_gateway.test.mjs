@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   forbiddenRuntimeDependencies,
+  gatewaySecretBuildContextViolations,
   protocolSourceViolations,
 } from "../check_gateway.mjs";
 
@@ -39,4 +40,29 @@ test("protocol policy detects blind writes, weak auth, and missing bounds", () =
   assert.match(violations, /share/);
   assert.match(violations, /HTTPS/);
   assert.match(violations, /TLS/);
+});
+
+test("documented gateway environment file must be excluded from Docker context", () => {
+  const selfHosting = "Use deploy/gateway.env with Docker Compose.";
+  assert.deepEqual(
+    gatewaySecretBuildContextViolations({
+      selfHosting,
+      dockerignore: "target\ndeploy/gateway.env\n",
+    }),
+    [],
+  );
+  assert.match(
+    gatewaySecretBuildContextViolations({
+      selfHosting,
+      dockerignore: "target\ndeploy/gateway-token.txt\n",
+    }).join("\n"),
+    /deploy\/gateway\.env.*Docker build context/,
+  );
+  assert.match(
+    gatewaySecretBuildContextViolations({
+      selfHosting,
+      dockerignore: "target\n*.env\n",
+    }).join("\n"),
+    /deploy\/gateway\.env.*Docker build context/,
+  );
 });

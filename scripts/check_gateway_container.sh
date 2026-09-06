@@ -6,7 +6,9 @@ compose_file="${repository_root}/deploy/sync-gateway.compose.yml"
 fixture="${repository_root}/fixtures/kdbx/keepassxc-2.7.12-kdbx41.kdbx"
 project="nian-pass-gateway-${RANDOM}-$$"
 scratch="$(mktemp -d -t nian-pass-gateway-container-XXXXXXXX)"
-environment_file="${scratch}/gateway.env"
+environment_file="${repository_root}/deploy/gateway.env"
+environment_file_created=0
+probe_image="${project}-context-probe"
 token="synthetic-container-gateway-token-0000000000000001"
 wrong_token="synthetic-container-gateway-token-9999999999999999"
 vault_id="9252bb19-9941-4bb8-b10b-f074ff9dfe35"
@@ -20,6 +22,10 @@ compose=(
 
 cleanup() {
   "${compose[@]}" down --volumes --remove-orphans --rmi local >/dev/null 2>&1 || true
+  docker image rm --force "${probe_image}" >/dev/null 2>&1 || true
+  if [[ "${environment_file_created}" == 1 ]]; then
+    rm -f -- "${environment_file}"
+  fi
   if [[ "${scratch}" == /tmp/nian-pass-gateway-container-* ]]; then
     rm -rf -- "${scratch}"
   fi
@@ -68,18 +74,34 @@ expect_startup_failure() {
     fail "startup diagnostic category was missing: ${expected}"
 }
 
-for command in docker curl cmp grep sed tr; do
+for command in docker curl cmp grep sed stat tr; do
   require_command "${command}"
 done
 docker info >/dev/null 2>&1 || fail "Docker daemon is unavailable"
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is unavailable"
 
 umask 077
-printf 'NIAN_PASS_GATEWAY_TOKEN=%s\nNIAN_PASS_GATEWAY_PORT=0\n' \
-  "${token}" >"${environment_file}"
+if [[ -e "${environment_file}" || -L "${environment_file}" ]]; then
+  fail "refusing to replace existing deploy/gateway.env"
+fi
+if ! (set -o noclobber; printf 'NIAN_PASS_GATEWAY_TOKEN=%s\nNIAN_PASS_GATEWAY_PORT=0\n' \
+  "${token}" >"${environment_file}"); then
+  fail "could not create synthetic deploy/gateway.env"
+fi
+environment_file_created=1
 printf 'header = "Authorization: Bearer %s"\n' "${token}" >"${scratch}/auth.curl"
 printf 'header = "Authorization: Bearer %s"\n' "${wrong_token}" >"${scratch}/wrong-auth.curl"
 chmod 0600 "${environment_file}" "${scratch}/auth.curl" "${scratch}/wrong-auth.curl"
+[[ "$(stat --format '%a' "${environment_file}")" == "600" ]] ||
+  fail "synthetic deploy/gateway.env is not mode 0600"
+
+runtime_base="$(sed -n 's/^FROM \(debian:bookworm-slim@sha256:[0-9a-f]*\)$/\1/p' \
+  "${repository_root}/apps/sync-gateway/Dockerfile")"
+[[ -n "${runtime_base}" ]] || fail "could not resolve the pinned runtime base image"
+printf 'FROM %s\nCOPY . /source\nRUN test ! -e /source/deploy/gateway.env\n' \
+  "${runtime_base}" >"${scratch}/Dockerfile.context-probe"
+docker build --file "${scratch}/Dockerfile.context-probe" \
+  --tag "${probe_image}" "${repository_root}" >/dev/null
 
 "${compose[@]}" up --build --detach
 container_id="$("${compose[@]}" ps --quiet sync-gateway)"
@@ -89,6 +111,8 @@ container_id="$("${compose[@]}" ps --quiet sync-gateway)"
 docker exec "${container_id}" sh -c \
   'test "$(id -u)" = 10001 && test "$(id -g)" = 10001' ||
   fail "gateway process is not running as UID/GID 10001"
+command_line="$(docker inspect --format '{{json .Path}} {{json .Args}}' "${container_id}")"
+assert_secret_absent "${command_line}"
 
 published="$("${compose[@]}" port sync-gateway 8080)"
 port="${published##*:}"
@@ -123,6 +147,10 @@ cmp --silent "${fixture}" "${scratch}/download.kdbx" || fail "downloaded bytes d
 image="$(docker inspect --format '{{.Config.Image}}' "${container_id}")"
 history="$(docker history --no-trunc "${image}")"
 assert_secret_absent "${history}"
+docker image save --output "${scratch}/image.tar" "${image}"
+if grep -aFq -- "${token}" "${scratch}/image.tar"; then
+  fail "gateway token appeared in final image configuration or filesystem layers"
+fi
 logs="$("${compose[@]}" logs --no-color)"
 assert_secret_absent "${logs}"
 
@@ -193,5 +221,8 @@ expect_startup_failure 'storage initialization failed' \
   --env-file "${environment_file}" \
   --mount "type=bind,src=${scratch}/unsafe-storage,dst=/unsafe,readonly" \
   "${image}" --storage-dir /unsafe
+
+logs="$("${compose[@]}" logs --no-color)"
+assert_secret_absent "${logs}"
 
 printf 'Gateway container check passed.\n'

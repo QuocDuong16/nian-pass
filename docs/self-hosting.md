@@ -112,10 +112,13 @@ The Compose example builds the multi-stage
 named volume, and binds the HTTP port to loopback for an external reverse proxy.
 The token is runtime configuration: it is not a bind-mounted file, command-line
 argument, image layer, or build input. The private host environment file is
-read by Compose, and the non-root process reads the resulting environment value.
-As with other container environment secrets, the Docker daemon and host root can
-inspect it; those principals already control the gateway process and ciphertext.
-The final image contains only the gateway binary and minimal Debian runtime.
+gitignored and dockerignored at the exact path `deploy/gateway.env`, remains mode
+`0600`, and is read by Compose rather than sent in the Docker build context. The
+non-root process reads the resulting runtime environment value. As with other
+container environment secrets, the Docker daemon, container runtime
+administrator, and host root can inspect it; those principals already control
+the gateway process and ciphertext. The final image contains only the gateway
+binary and minimal Debian runtime.
 
 Direct `docker run` is an advanced equivalent. It uses the same private
 environment file and therefore does not depend on bind-mount UID mapping:

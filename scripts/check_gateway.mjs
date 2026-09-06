@@ -85,6 +85,19 @@ export function protocolSourceViolations({ server, storage, auth, provider, prot
   return violations;
 }
 
+export function gatewaySecretBuildContextViolations({ selfHosting, dockerignore }) {
+  const documentedSecret = "deploy/gateway.env";
+  const documented = selfHosting.includes(documentedSecret);
+  const ignoredExactly = dockerignore
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .some((line) => line === documentedSecret);
+  if (!documented || !ignoredExactly) {
+    return ["documented deploy/gateway.env must be excluded exactly from the Docker build context"];
+  }
+  return [];
+}
+
 export function runChecks(root) {
   const violations = [];
   const packages = new Map(
@@ -253,9 +266,12 @@ export function runChecks(root) {
   const workflow = source(root, ".forgejo/workflows/quality.yml");
   const makefile = source(root, "Makefile");
   const selfHosting = source(root, "docs/self-hosting.md");
+  const dockerignore = source(root, ".dockerignore");
+  violations.push(...gatewaySecretBuildContextViolations({ selfHosting, dockerignore }));
   if (
     !/Gateway container check passed/.test(containerCheck) ||
     !/10001:10001/.test(containerCheck) ||
+    !/repository_root\}\/deploy\/gateway\.env/.test(containerCheck) ||
     !/gateway-container-check: gateway-source-check/.test(makefile) ||
     !/run: make gateway-container-check/.test(workflow)
   ) {

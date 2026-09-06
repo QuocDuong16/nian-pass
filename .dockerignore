@@ -9,4 +9,5 @@ apps/browser-extension/dist
 apps/desktop/coverage
 apps/desktop/src-tauri/gen
 apps/browser-extension/coverage
+deploy/gateway.env
 deploy/gateway-token.txt

@@ -99,10 +99,14 @@ The gateway narrows these threats as follows:
 
 - One high-entropy token is loaded only from an explicit environment value or
   secret file. Missing, empty, short, overlong, duplicated, or malformed bearer
-  values fail with a generic 401. The configured token is retained only as a
-  SHA-256 digest and compared to a presented digest in constant time. Tokens,
-  Authorization headers, ciphertext, request bodies, paths, and internal errors
-  are absent from production logs and API error bodies.
+  values fail with a generic 401. After startup, gateway application state
+  retains only a SHA-256 verifier digest and compares it to a presented digest
+  in constant time. With environment-based configuration, the container runtime
+  or host may still retain the original environment value; Rust zeroizes only
+  its own copied string and cannot erase runtime metadata. The Docker daemon and
+  host administrator are already privileged actors in this threat model.
+  Tokens, Authorization headers, ciphertext, request bodies, paths, and internal
+  errors are absent from production logs and API error bodies.
 - Only one validated canonical UUID-v4 can select one object. User input never
   becomes a raw filesystem path. Directory browsing, arbitrary names, and
   unconditional overwrite do not exist. Symlinks and non-regular objects fail

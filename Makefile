@@ -352,6 +352,7 @@ gateway-integration-check: gateway-source-check
 gateway-container-check: gateway-source-check
 	@echo "Run the documented non-root gateway container lifecycle smoke..."
 	bash scripts/check_gateway_container.sh
+	test ! -e deploy/gateway.env
 
 mobile-source-check:
 	@echo "Check deterministic mobile foundation sources..."
