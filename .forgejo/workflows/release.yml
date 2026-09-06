@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing vX.Y.Z tag to build"
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ forgejo.event.inputs.release_tag || forgejo.ref_name }}
+
+jobs:
+  quality:
+    runs-on: docker
+    timeout-minutes: 70
+    container:
+      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
+    steps:
+      - name: Install pinned release prerequisites
+        run: |
+          set -Eeuo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+            build-essential curl keepassxc libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev wget xz-utils
+          archive=node-v26.7.0-linux-x64.tar.xz
+          curl --fail --silent --show-error --location \
+            --output "/tmp/${archive}" "https://nodejs.org/dist/v26.7.0/${archive}"
+          echo "982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee  /tmp/${archive}" | sha256sum --check -
+          tar --extract --xz --file "/tmp/${archive}" --directory /usr/local --strip-components=1
+          npm install --global corepack@0.35.0
+          corepack enable
+          corepack install --global pnpm@11.22.0
+
+      - name: Check out exact release source
+        uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Verify source, tag, and canonical deterministic quality
+        run: |
+          make tools-install
+          make release-source-check
+          make quality-check
+
+  browser:
+    needs: quality
+    runs-on: docker
+    timeout-minutes: 20
+    container:
+      image: node:26.7.0-bookworm@sha256:e929171d35b9df7773a3ec5b068e387fa109441dc90f91e6560af5d39b7e9bf1
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+      - run: |
+          npm install --global corepack@0.35.0
+          corepack enable
+          corepack install --global pnpm@11.22.0
+          pnpm install --frozen-lockfile
+          make release-source-check release-browser-package
+      - uses: https://data.forgejo.org/actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-packages
+          path: artifacts/release
+          if-no-files-found: error
+
+  linux:
+    needs: quality
+    runs-on: docker
+    timeout-minutes: 55
+    container:
+      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
+    steps:
+      - name: Install Linux bundle prerequisites
+        run: |
+          set -Eeuo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev wget xz-utils
+          archive=node-v26.7.0-linux-x64.tar.xz
+          curl --fail --silent --show-error --location \
+            --output "/tmp/${archive}" "https://nodejs.org/dist/v26.7.0/${archive}"
+          echo "982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee  /tmp/${archive}" | sha256sum --check -
+          tar --extract --xz --file "/tmp/${archive}" --directory /usr/local --strip-components=1
+          npm install --global corepack@0.35.0
+          corepack enable
+          corepack install --global pnpm@11.22.0
+      - uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+      - run: make release-linux-build
+      - uses: https://data.forgejo.org/actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-packages
+          path: artifacts/release
+          if-no-files-found: error
+
+  gateway:
+    needs: quality
+    runs-on: docker
+    timeout-minutes: 35
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Install pinned Node release tooling
+        run: |
+          test "$(node --version)" = "v26.7.0" || {
+            echo "Gateway release runner requires Node v26.7.0; current: $(node --version)" >&2
+            exit 1
+          }
+          npm install --global corepack@0.35.0
+          corepack enable
+          corepack install --global pnpm@11.22.0
+          pnpm install --frozen-lockfile
+      - run: |
+          make release-source-check gateway-container-check release-gateway-image
+      - uses: https://data.forgejo.org/actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gateway-reference
+          path: artifacts/release
+          if-no-files-found: error
+
+  attest:
+    needs: [browser, linux, gateway]
+    runs-on: docker
+    timeout-minutes: 20
+    container:
+      image: node:26.7.0-bookworm@sha256:e929171d35b9df7773a3ec5b068e387fa109441dc90f91e6560af5d39b7e9bf1
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+      - run: |
+          npm install --global corepack@0.35.0
+          corepack enable
+          corepack install --global pnpm@11.22.0
+          pnpm install --frozen-lockfile
+      - uses: https://data.forgejo.org/actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: "*-packages"
+          path: artifacts/release
+          merge-multiple: true
+      - uses: https://data.forgejo.org/actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: gateway-reference
+          path: artifacts/release
+      - name: Generate SBOM, provenance manifest, checksums, and artifact scan
+        run: make release-source-check release-artifact-check
+      - uses: https://data.forgejo.org/actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nian-pass-${{ env.RELEASE_TAG }}
+          path: artifacts/release
+          if-no-files-found: error

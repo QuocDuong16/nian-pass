@@ -11,6 +11,9 @@ command -v rustup >/dev/null 2>&1 || fail "rustup not found. Install the reposit
 command -v node >/dev/null 2>&1 || fail "Node.js not found. Activate the repository-pinned Node version."
 command -v pnpm >/dev/null 2>&1 || fail "pnpm not found. Activate the repository-pinned pnpm version."
 
+java_major="$(java -XshowSettings:properties -version 2>&1 | awk -F'= ' '/java.specification.version =/{print $2; exit}')"
+[[ "${java_major}" == "21" ]] || fail "JDK 21 is required; current Java specification version is ${java_major:-unknown}."
+
 if [[ -n "${ANDROID_HOME:-}" && -n "${ANDROID_SDK_ROOT:-}" && "${ANDROID_HOME}" != "${ANDROID_SDK_ROOT}" ]]; then
   fail "ANDROID_HOME and ANDROID_SDK_ROOT point to different SDK directories."
 fi
@@ -28,11 +31,13 @@ for required in \
   [[ -e "${android_sdk}/${required}" ]] || fail "Missing Android SDK component ${required}. Install it with sdkmanager."
 done
 
+expected_ndk="28.2.13676358"
 ndk_root="${NDK_HOME:-}"
 if [[ -z "${ndk_root}" ]]; then
-  ndk_root="$(find "${android_sdk}/ndk" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort -V | tail -n 1)"
+  ndk_root="${android_sdk}/ndk/${expected_ndk}"
 fi
 [[ -n "${ndk_root}" && -d "${ndk_root}/toolchains/llvm/prebuilt" ]] || fail "Android NDK not found. Set NDK_HOME or install an NDK under the Android SDK."
+[[ "$(basename "${ndk_root}")" == "${expected_ndk}" ]] || fail "Android NDK ${expected_ndk} is required; current: ${ndk_root}."
 
 installed_targets="$(rustup target list --installed)"
 for target in aarch64-linux-android x86_64-linux-android; do
@@ -43,4 +48,4 @@ expected_cli="$(node -p "require('./apps/desktop/package.json').devDependencies[
 actual_cli="$(pnpm --filter @nian-pass/desktop exec tauri --version)"
 [[ "${actual_cli}" == "tauri-cli ${expected_cli}" ]] || fail "Expected Tauri CLI ${expected_cli}; current: ${actual_cli}"
 
-printf 'Mobile tools ready: Java, Android SDK 36, Build Tools 36.0.0, NDK, Rust Android targets, Tauri CLI %s.\n' "${expected_cli}"
+printf 'Mobile tools ready: JDK 21, Android SDK 36, Build Tools 36.0.0, NDK %s, Rust Android targets, Tauri CLI %s.\n' "${expected_ndk}" "${expected_cli}"

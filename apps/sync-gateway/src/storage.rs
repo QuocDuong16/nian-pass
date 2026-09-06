@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io::{self, Read as _, Write as _},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
@@ -166,7 +166,7 @@ fn read_object(path: &Path) -> Result<Option<StoredObject>, StorageError> {
     if metadata.len() > MAX_REMOTE_CIPHERTEXT_BYTES as u64 {
         return Err(StorageError::TooLarge);
     }
-    let file = File::open(path).map_err(|_| StorageError::Io)?;
+    let file = open_existing(path, false).map_err(|_| StorageError::Io)?;
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.take((MAX_REMOTE_CIPHERTEXT_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
@@ -237,31 +237,70 @@ fn open_private_lock(path: &Path) -> Result<File, StorageError> {
     {
         return Err(StorageError::UnsafeFile);
     }
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
+        use rustix::fs::{CWD, Mode, OFlags, openat};
+        openat(
+            CWD,
+            path,
+            OFlags::RDWR | OFlags::CREATE | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::RUSR | Mode::WUSR,
+        )
+        .map(File::from)
+        .map_err(|_| StorageError::Io)
     }
-    options.open(path).map_err(|_| StorageError::Io)
+    #[cfg(not(unix))]
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)
+        .map_err(|_| StorageError::Io)
 }
 
 fn private_create_new(path: &Path) -> Result<File, StorageError> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
+        use rustix::fs::{CWD, Mode, OFlags, openat};
+        openat(
+            CWD,
+            path,
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::RUSR | Mode::WUSR,
+        )
+        .map(File::from)
+        .map_err(|_| StorageError::Io)
     }
-    options.open(path).map_err(|_| StorageError::Io)
+    #[cfg(not(unix))]
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|_| StorageError::Io)
 }
 
 fn sync_directory(path: &Path) -> Result<(), StorageError> {
-    File::open(path)
+    open_existing(path, true)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| StorageError::Io)
+}
+
+#[cfg(unix)]
+fn open_existing(path: &Path, directory: bool) -> io::Result<File> {
+    use rustix::fs::{CWD, Mode, OFlags, openat};
+
+    let mut flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    if directory {
+        flags |= OFlags::DIRECTORY;
+    }
+    openat(CWD, path, flags, Mode::empty())
+        .map(File::from)
+        .map_err(Into::into)
+}
+
+#[cfg(not(unix))]
+fn open_existing(path: &Path, _directory: bool) -> io::Result<File> {
+    File::open(path)
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]

@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { runChecks } from "../check_security.mjs";
 
-const approvedCsp = "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'";
+const approvedCsp = "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'";
 const workspaceMembers = [
   "apps/cli",
   "apps/desktop/src-tauri",

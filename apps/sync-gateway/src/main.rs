@@ -1,13 +1,13 @@
 use std::{
     env, fs, io,
-    io::Write as _,
+    io::{Read as _, Write as _},
     net::SocketAddr,
     path::{Path, PathBuf},
     process::ExitCode,
     sync::Arc,
 };
 
-use clap::Parser;
+use clap::{Parser, error::ErrorKind};
 use nian_pass_sync_gateway::{GatewayState, Storage, StorageError, TokenVerifier, serve};
 use sync_gateway_protocol::MAX_GATEWAY_TOKEN_BYTES;
 use thiserror::Error;
@@ -15,7 +15,7 @@ use tokio::{net::TcpListener, signal};
 use zeroize::Zeroize as _;
 
 #[derive(Parser)]
-#[command(name = "nian-pass-sync-gateway")]
+#[command(name = "nian-pass-sync-gateway", version)]
 struct Arguments {
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: SocketAddr,
@@ -37,7 +37,19 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<(), StartupError> {
-    let arguments = Arguments::try_parse().map_err(|_| StartupError::InvalidArguments)?;
+    let arguments = match Arguments::try_parse() {
+        Ok(arguments) => arguments,
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
+            error.print().map_err(|_| StartupError::InvalidArguments)?;
+            return Ok(());
+        }
+        Err(_) => return Err(StartupError::InvalidArguments),
+    };
     let mut token = load_token(arguments.token_file.as_deref())?;
     let verifier = TokenVerifier::new(&token).map_err(|_| StartupError::TokenInvalid)?;
     token.zeroize();
@@ -72,19 +84,52 @@ fn load_token(command_file: Option<&Path>) -> Result<String, StartupError> {
 }
 
 fn read_token_file(path: &Path) -> Result<String, StartupError> {
-    let metadata = fs::symlink_metadata(path).map_err(|_| StartupError::TokenFileUnreadable)?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+    let file = open_token_file(path)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| StartupError::TokenFileUnreadable)?;
+    if !metadata.file_type().is_file() {
         return Err(StartupError::TokenFileUnreadable);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(StartupError::TokenFilePermissions);
+        }
     }
     if metadata.len() > (MAX_GATEWAY_TOKEN_BYTES + 2) as u64 {
         return Err(StartupError::TokenInvalid);
     }
-    let token = fs::read_to_string(path).map_err(|_| StartupError::TokenFileUnreadable)?;
-    Ok(token
-        .strip_suffix("\r\n")
-        .or_else(|| token.strip_suffix('\n'))
-        .unwrap_or(&token)
-        .to_owned())
+    let mut token = String::new();
+    file.take((MAX_GATEWAY_TOKEN_BYTES + 3) as u64)
+        .read_to_string(&mut token)
+        .map_err(|_| StartupError::TokenFileUnreadable)?;
+    if token.ends_with("\r\n") {
+        token.truncate(token.len() - 2);
+    } else if token.ends_with('\n') {
+        token.truncate(token.len() - 1);
+    }
+    Ok(token)
+}
+
+#[cfg(unix)]
+fn open_token_file(path: &Path) -> Result<fs::File, StartupError> {
+    use rustix::fs::{CWD, Mode, OFlags, openat};
+
+    openat(
+        CWD,
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(|_| StartupError::TokenFileUnreadable)
+}
+
+#[cfg(not(unix))]
+fn open_token_file(path: &Path) -> Result<fs::File, StartupError> {
+    fs::File::open(path).map_err(|_| StartupError::TokenFileUnreadable)
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -97,6 +142,8 @@ enum StartupError {
     TokenSourceAmbiguous,
     #[error("token file could not be read")]
     TokenFileUnreadable,
+    #[error("token file permissions are not private")]
+    TokenFilePermissions,
     #[error("token format is invalid")]
     TokenInvalid,
     #[error("storage initialization failed")]
@@ -124,5 +171,65 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = signal::ctrl_c().await;
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt as _, symlink},
+        path::PathBuf,
+    };
+
+    use uuid::Uuid;
+
+    use super::{StartupError, read_token_file};
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("nian-pass-token-{}", Uuid::new_v4()));
+            fs::create_dir(&path).expect("test directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn token_file_requires_private_permissions() {
+        let directory = TestDirectory::new();
+        let path = directory.0.join("token");
+        fs::write(&path, "0123456789abcdef0123456789abcdef\n").expect("token fixture");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("permissions");
+        assert_eq!(
+            read_token_file(&path),
+            Err(StartupError::TokenFilePermissions)
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("permissions");
+        assert_eq!(
+            read_token_file(&path).expect("private token"),
+            "0123456789abcdef0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn token_file_symlink_is_rejected_at_open() {
+        let directory = TestDirectory::new();
+        let target = directory.0.join("target");
+        let link = directory.0.join("link");
+        fs::write(&target, "0123456789abcdef0123456789abcdef").expect("target");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).expect("permissions");
+        symlink(&target, &link).expect("link");
+        assert_eq!(
+            read_token_file(&link),
+            Err(StartupError::TokenFileUnreadable)
+        );
     }
 }

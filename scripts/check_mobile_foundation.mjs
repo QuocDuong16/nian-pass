@@ -264,6 +264,26 @@ export function runChecks(root) {
       "Android Gradle configuration must retain generated compileSdk 36",
     );
   }
+  for (const variable of [
+    "NIAN_PASS_ANDROID_KEYSTORE",
+    "NIAN_PASS_ANDROID_KEYSTORE_PASSWORD",
+    "NIAN_PASS_ANDROID_KEY_ALIAS",
+    "NIAN_PASS_ANDROID_KEY_PASSWORD",
+  ]) {
+    if (!gradle.includes(`System.getenv("${variable}")`)) {
+      violations.push(`Android release signing must read ${variable} from the environment`);
+    }
+  }
+  if (
+    !gradle.includes("releaseSigningEnvironment.values.all") ||
+    !gradle.includes("releaseSigningEnvironment.values.any") ||
+    !gradle.includes('create("releaseFromEnvironment")')
+  ) {
+    violations.push("Android release signing must fail closed on partial environment configuration");
+  }
+  if (/storePassword\s*=\s*"|keyPassword\s*=\s*"/.test(gradle)) {
+    violations.push("Android signing passwords may not be declared in Gradle source");
+  }
   if (
     !/crate-type\s*=\s*\[\s*"staticlib"\s*,\s*"cdylib"\s*,\s*"rlib"\s*\]/.test(
       cargoManifest,
@@ -630,8 +650,10 @@ export function runChecks(root) {
   for (const forbidden of [
     "getSharedPreferences",
     "SharedPreferences",
-    "Log.d(",
-    "Log.v(",
+    "Log.",
+    "System.out",
+    "System.err",
+    "printStackTrace",
     "DatabaseKey",
     "Argon2",
     "composite key",

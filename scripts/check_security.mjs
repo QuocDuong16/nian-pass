@@ -36,6 +36,7 @@ const approvedCsp = new Map([
   ["object-src", new Set(["'none'"])],
   ["base-uri", new Set(["'none'"])],
   ["frame-src", new Set(["'none'"])],
+  ["form-action", new Set(["'none'"])],
 ]);
 const normalizedKeywords = new Set([
   "'self'",
@@ -116,6 +117,14 @@ export function runChecks(root) {
       source,
       /\b(?:dbg|todo|unimplemented)!\s*\(/g,
       "dbg!/todo!/unimplemented! are forbidden in production Rust",
+    );
+    reportMatches(
+      violations,
+      root,
+      path,
+      source,
+      /\b(?:tracing|log)::(?:trace|debug|info|warn|error)!\s*\(/g,
+      "unreviewed Rust runtime logging is forbidden; diagnostics must use a bounded application boundary",
     );
     if (name !== "apps/cli/src/main.rs") {
       reportMatches(

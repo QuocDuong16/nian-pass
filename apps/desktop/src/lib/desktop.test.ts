@@ -100,9 +100,17 @@ test("desktop adapter validates successful IPC responses", async () => {
 });
 
 test("runtime adapter invokes the narrow platform command and validates it", async () => {
-  invoke.mockResolvedValue({ platform: "desktop" });
+  invoke.mockResolvedValue({
+    platform: "desktop",
+    version: "0.1.0",
+    commit: "unknown",
+  });
 
-  await expect(runtimeApi.getInfo()).resolves.toEqual({ platform: "desktop" });
+  await expect(runtimeApi.getInfo()).resolves.toEqual({
+    platform: "desktop",
+    version: "0.1.0",
+    commit: "unknown",
+  });
   expect(invoke).toHaveBeenCalledWith("runtime_info", undefined);
 });
 

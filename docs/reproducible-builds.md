@@ -1,0 +1,33 @@
+# Reproducible release inputs
+
+`VERSION` is the authoritative user-facing release version. The release source
+gate requires matching desktop Rust/Tauri/npm, CLI, browser host/extension, and
+gateway versions. A tag must be exactly `v<VERSION>` and the Git tree must be
+clean. Every release records the exact commit and workflow.
+
+Pinned inputs are Rust 1.98.0, Node 26.7.0, Corepack 0.35.0 in CI, pnpm 11.22.0,
+Tauri CLI 2.11.4, Android SDK/API 36, Build Tools 36.0.0, NDK 28.2.13676358,
+Gradle 8.14.3 with its distribution SHA-256, exact Cargo/npm/Gradle dependencies, digest-pinned container
+bases, and commit-pinned Forgejo actions. `Cargo.lock` and `pnpm-lock.yaml` are
+required inputs. No production git dependency or floating container/action is
+allowed.
+
+Rust release builds use one codegen unit, thin LTO, optimization level 3,
+overflow checks, stripped symbols, and no debug info. Panic unwinding is kept:
+the retained mobile/FFI containment boundary relies on it, and changing to
+abort globally would weaken that boundary. Browser ZIPs use sorted entries,
+fixed metadata, stored bytes, and 0644 archive modes. Build outputs can still
+differ when platform linker, WebView bootstrapper, Android packaging, or native
+installer tooling embeds nondeterministic metadata; checksums identify the
+actual released bytes, not a claim of bit-for-bit identity across OS images.
+Signing credentials are intentionally outside reproducible inputs. Android
+reads a complete four-variable signing set from the runner environment and
+fails on partial configuration; no keystore path or password is declared in
+source. Windows/browser/container/checksum signing follows the same external
+secret-store boundary.
+
+The CycloneDX SBOM inventories locked third-party Rust packages reachable by
+normal/build edges and production Node components. Dev-only dependency edges
+are excluded. It is generated without network access from Cargo metadata and
+the installed frozen pnpm graph. It is useful inventory, not a vulnerability
+scan or proof that every target-specific component is present in every artifact.

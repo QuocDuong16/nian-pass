@@ -26,11 +26,18 @@ export function frontendProductionFiles(root) {
 
 export function rustProductionFiles(root) {
   const roots = [
+    "apps/browser-native-host/src",
     "apps/cli/src",
     "apps/desktop/src-tauri/src",
+    "apps/sync-gateway/src",
+    "crates/browser-native-protocol/src",
+    "crates/credential-provider-core/src",
+    "crates/ios-credential-ffi/src",
     "crates/kdbx/src",
     "crates/sync-engine/src",
+    "crates/sync-gateway-protocol/src",
     "crates/sync-provider-core/src",
+    "crates/sync-provider-gateway/src",
     "crates/sync-provider-s3/src",
     "crates/sync-provider-webdav/src",
     "crates/vault-core/src",
@@ -41,7 +48,14 @@ export function rustProductionFiles(root) {
   return roots.flatMap((directory) => {
     const path = resolve(root, directory);
     return existsSync(path)
-      ? walk(path).filter((candidate) => candidate.endsWith(".rs"))
+      ? walk(path).filter((candidate) => {
+          const name = projectPath(root, candidate);
+          return (
+            candidate.endsWith(".rs") &&
+            !/(?:^|\/)(?:tests?|[^/]+_tests)\.rs$/.test(name) &&
+            !name.includes("/tests/")
+          );
+        })
       : [];
   });
 }

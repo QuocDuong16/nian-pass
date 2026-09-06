@@ -2,6 +2,7 @@
 all-features = true
 
 [advisories]
+yanked = "deny"
 ignore = [
   { id = "RUSTSEC-2024-0370", reason = "Transitive GTK3 macro dependency from Tauri; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },
   { id = "RUSTSEC-2024-0411", reason = "Transitive Tauri Linux GTK3 stack; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },

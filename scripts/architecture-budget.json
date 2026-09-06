@@ -6,6 +6,10 @@
   "rust": {
     "defaultMaxLines": 400,
     "exceptions": {
+      "apps/browser-native-host/src/installer.rs": {
+        "maxLines": 497,
+        "reason": "The M6.5 cross-browser and Windows transactional registration implementation predates its inclusion in the repository-wide Rust scanner; M8 records its exact size instead of risking installer rollback behavior during hardening."
+      },
       "crates/kdbx/src/lib.rs": {
         "maxLines": 992,
         "reason": "Preservation-aware KDBX adapter accumulated before M4.Q; this exact ceiling prevents further growth while later decomposition preserves the sealed dependency boundary."
@@ -19,8 +23,8 @@
         "reason": "The compact domain model is only slightly over the default and remains one cohesive secret-boundary module; no additional growth is permitted."
       },
       "crates/vault-session/src/lib.rs": {
-        "maxLines": 702,
-        "reason": "The existing verified persistence transaction is security-sensitive and remains cohesive for M4.Q; the current production size is an exact ceiling."
+        "maxLines": 721,
+        "reason": "The verified persistence transaction remains cohesive; M8 adds descriptor-based O_NOFOLLOW source, backup, fingerprint, and directory opens, and this exact raised ceiling is limited to that reviewed filesystem hardening."
       }
     }
   }

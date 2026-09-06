@@ -23,8 +23,16 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.98.0"
 publish = false
+
+[profile.release]
+codegen-units = 1
+debug = 0
+lto = "thin"
+opt-level = 3
+overflow-checks = true
+strip = "symbols"
 
 [workspace.dependencies]
 atomic-write-file = "=0.3.1"
@@ -58,7 +66,7 @@ zeroize = "=1.9.0"
 credential-provider-core = { path = "crates/credential-provider-core" }
 browser-native-protocol = { path = "crates/browser-native-protocol" }
 interprocess = "=2.4.3"
-rustix = { version = "=1.1.4", default-features = false, features = ["process"] }
+rustix = { version = "=1.1.4", default-features = false, features = ["fs", "process", "std"] }
 windows-safe-replace = { path = "crates/windows-safe-replace" }
 
 [workspace.lints.rust]

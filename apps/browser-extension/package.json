@@ -8,6 +8,7 @@
     "build:chromium": "node build/build.mjs chromium",
     "build:firefox": "node build/build.mjs firefox",
     "package": "node build/package.mjs",
+    "release": "pnpm run build && pnpm run package",
     "format": "prettier --write src build package.json tsconfig.json knip.json eslint.config.js vite.config.ts",
     "format:check": "prettier --check src build package.json tsconfig.json knip.json eslint.config.js vite.config.ts",
     "typecheck": "tsc --noEmit",

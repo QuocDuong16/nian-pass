@@ -9,6 +9,7 @@ description = "Provider-independent encrypted vault sync orchestration and recov
 [dependencies]
 atomic-write-file.workspace = true
 kdbx = { path = "../kdbx" }
+rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sync-provider-core.workspace = true

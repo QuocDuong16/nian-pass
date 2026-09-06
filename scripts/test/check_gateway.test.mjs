@@ -47,7 +47,7 @@ test("documented gateway environment file must be excluded from Docker context",
   assert.deepEqual(
     gatewaySecretBuildContextViolations({
       selfHosting,
-      dockerignore: "target\ndeploy/gateway.env\n",
+      dockerignore: "target\nartifacts\ndeploy/gateway.env\n",
     }),
     [],
   );
@@ -64,5 +64,12 @@ test("documented gateway environment file must be excluded from Docker context",
       dockerignore: "target\n*.env\n",
     }).join("\n"),
     /deploy\/gateway\.env.*Docker build context/,
+  );
+  assert.match(
+    gatewaySecretBuildContextViolations({
+      selfHosting,
+      dockerignore: "target\ndeploy/gateway.env\n",
+    }).join("\n"),
+    /release artifacts must be excluded/,
   );
 });

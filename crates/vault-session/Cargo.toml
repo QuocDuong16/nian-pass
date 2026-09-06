@@ -10,6 +10,7 @@ description = "Verified local filesystem persistence for Nian Pass"
 getrandom.workspace = true
 kdbx = { path = "../kdbx" }
 sha2.workspace = true
+rustix.workspace = true
 thiserror.workspace = true
 vault-core.workspace = true
 

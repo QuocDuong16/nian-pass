@@ -6,8 +6,9 @@ manager backend, or a merge service. Nian Pass desktop remains the only merge
 authority and sends or receives the exact encrypted KDBX bytes through
 authenticated `GET` and conditional `PUT` requests.
 
-Nian Pass is still pre-release software. M7.5 does not make it production-ready
-and does not replace independent backups.
+Nian Pass is still pre-release software. A release-engineered gateway image does
+not by itself make a deployment validated and does not replace independent
+backups; use the status and integrity procedure in [`release.md`](release.md).
 
 ## Trust and metadata
 
@@ -28,7 +29,9 @@ secure.
 The binary defaults to `/data` and creates the storage root and temporary
 directory with mode `0700`; object, temporary, and lock files use mode `0600`.
 Each object filename is derived only from a validated canonical UUID-v4 vault
-ID. Symlinks and unexpected object types are rejected.
+ID. Sensitive Unix leaf opens use `O_NOFOLLOW`; symlinks and unexpected object
+types are rejected. Parent directories must still be controlled by the gateway
+service account.
 
 The gateway takes an exclusive process lock on its data root. Run exactly one
 gateway process against a volume. Active-active replicas, shared-volume
@@ -58,6 +61,8 @@ NIAN_PASS_GATEWAY_TOKEN_FILE
 
 Use an appropriately owned secret file for a native service. Use the private
 environment-file workflow documented below for Compose or direct Docker. The
+Unix token-file form must be a regular non-symlink file with no group or other
+permission bits (normally mode `0600`), otherwise startup fails closed. The
 gateway hashes the configured token in memory and compares request digests without a naive
 early-exit string comparison. It never returns or logs the token. Rotate a
 token by stopping the gateway, replacing the secret, and starting it again;
@@ -178,4 +183,4 @@ Do not run old and new gateway processes concurrently against the same volume.
 M7.5 provides no web UI, accounts, sharing, ACL management, server-side merge or
 search, version-history UI, S3/database backend, active-active operation,
 distributed lock, Windows gateway service, Kubernetes packaging, Android
-network sync, Apple runtime work, or M8 release guarantees.
+network sync, or Apple runtime work.

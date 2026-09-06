@@ -95,6 +95,9 @@ export function gatewaySecretBuildContextViolations({ selfHosting, dockerignore 
   if (!documented || !ignoredExactly) {
     return ["documented deploy/gateway.env must be excluded exactly from the Docker build context"];
   }
+  if (!dockerignore.split(/\r?\n/).map((line) => line.trim()).includes("artifacts")) {
+    return ["release artifacts must be excluded from the Docker build context"];
+  }
   return [];
 }
 

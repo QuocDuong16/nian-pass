@@ -13,8 +13,20 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val releaseSigningEnvironment = mapOf(
+    "keystore" to System.getenv("NIAN_PASS_ANDROID_KEYSTORE"),
+    "storePassword" to System.getenv("NIAN_PASS_ANDROID_KEYSTORE_PASSWORD"),
+    "keyAlias" to System.getenv("NIAN_PASS_ANDROID_KEY_ALIAS"),
+    "keyPassword" to System.getenv("NIAN_PASS_ANDROID_KEY_PASSWORD"),
+)
+val releaseSigningConfigured = releaseSigningEnvironment.values.all { !it.isNullOrBlank() }
+if (!releaseSigningConfigured && releaseSigningEnvironment.values.any { !it.isNullOrBlank() }) {
+    throw GradleException("Android release signing configuration is incomplete")
+}
+
 android {
     compileSdk = 36
+    ndkVersion = "28.2.13676358"
     namespace = "dev.nian.pass"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
@@ -23,6 +35,16 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("releaseFromEnvironment") {
+                storeFile = file(requireNotNull(releaseSigningEnvironment["keystore"]))
+                storePassword = requireNotNull(releaseSigningEnvironment["storePassword"])
+                keyAlias = requireNotNull(releaseSigningEnvironment["keyAlias"])
+                keyPassword = requireNotNull(releaseSigningEnvironment["keyPassword"])
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +59,9 @@ android {
             }
         }
         getByName("release") {
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("releaseFromEnvironment")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

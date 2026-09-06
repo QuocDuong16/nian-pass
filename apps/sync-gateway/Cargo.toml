@@ -12,6 +12,7 @@ clap.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
+rustix.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 sync-gateway-protocol.workspace = true

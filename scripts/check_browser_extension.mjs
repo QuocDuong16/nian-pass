@@ -107,6 +107,7 @@ export function runSourceChecks(root) {
     }
   }
   rejectMatches(violations, "extension production", combined, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b/g, "network APIs are forbidden");
+  rejectMatches(violations, "extension production", combined, /\bconsole\s*\./g, "production browser logging is forbidden");
   rejectMatches(violations, "extension production", combined, /\b(?:localStorage|sessionStorage|indexedDB|storage\.sync|storage\.local)\b/g, "extension storage is not used in M6");
   rejectMatches(violations, "extension production", combined, /\beval\s*\(|\bnew\s+Function\s*\(/g, "dynamic code execution is forbidden");
   rejectMatches(violations, "extension production", combined, /onMessageExternal|onConnectExternal|externally_connectable/g, "external extension messaging is forbidden");

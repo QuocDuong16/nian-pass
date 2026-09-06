@@ -47,6 +47,25 @@ impl Drop for TestDir {
 }
 
 #[test]
+fn version_reports_the_exact_release_identity_without_diagnostics() {
+    let output = Command::new(env!("CARGO_BIN_EXE_nian-pass-browser-host"))
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap_or_else(|error| panic!("version command must run: {error}"));
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap_or_else(|error| panic!("version output must be UTF-8: {error}")),
+        format!("nian-pass-browser-host {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn actual_host_process_proxies_approval_candidates_and_one_credential() {
     let runtime = TestDir::create();
     let listener = bind_desktop_listener_in(&runtime.0)

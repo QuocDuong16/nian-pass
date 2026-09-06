@@ -41,7 +41,10 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	compat-check compat-check-required policy-check quick-check quality-check \
 	sync-source-check sync-core-check sync-provider-check sync-integration-check \
 	gateway-source-check gateway-server-check gateway-provider-check gateway-integration-check \
-	gateway-container-check
+	gateway-container-check \
+	security-hardening-check release-policy-check release-source-check node-license-check \
+	release-browser-package release-linux-build release-windows-build release-android-build \
+	release-gateway-image release-stage release-artifact-check release-check
 
 tools-install:
 	@echo "Install pinned Rust quality tools locally..."
@@ -354,6 +357,71 @@ gateway-container-check: gateway-source-check
 	bash scripts/check_gateway_container.sh
 	test ! -e deploy/gateway.env
 
+release-policy-check:
+	@echo "Check pinned release inputs, versions, dependencies, actions, and containers..."
+	node scripts/check_release_source.mjs
+	$(MAKE) node-license-check
+
+node-license-check:
+	@echo "Check production Node dependency licenses..."
+	node scripts/check_node_licenses.mjs
+
+security-hardening-check:
+	$(MAKE) security-check
+	$(MAKE) mobile-source-check
+	$(MAKE) browser-source-check
+	$(MAKE) sync-source-check
+	$(MAKE) gateway-source-check
+	$(MAKE) release-policy-check
+
+release-source-check:
+	@echo "Require an exact tag and clean committed release source tree..."
+	node scripts/check_release_source.mjs --clean --tag
+
+release-browser-package: release-source-check
+	$(MAKE) browser-build browser-artifact-check
+	pnpm --filter @nian-pass/browser-extension package
+
+release-linux-build: release-source-check
+	pnpm install --frozen-lockfile
+	NIAN_PASS_COMMIT="$$(git rev-parse HEAD)" pnpm --filter @nian-pass/desktop tauri build --ci --bundles appimage,deb
+	cargo build --locked --release -p nian-pass-browser-host
+	node scripts/package_native_host.mjs linux-x86_64 target/release/nian-pass-browser-host
+	$(MAKE) release-stage
+
+release-windows-build: release-source-check
+	pnpm install --frozen-lockfile
+	NIAN_PASS_COMMIT="$$(git rev-parse HEAD)" pnpm --filter @nian-pass/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc
+	cargo build --locked --release --target x86_64-pc-windows-msvc -p nian-pass-browser-host
+	node scripts/package_native_host.mjs windows-x86_64 target/x86_64-pc-windows-msvc/release/nian-pass-browser-host.exe
+	$(MAKE) release-stage
+
+release-android-build: release-source-check mobile-android-check
+	$(MAKE) release-stage
+
+release-gateway-image: release-source-check
+	@mkdir -p artifacts/release
+	docker build --pull=false \
+		--build-arg NIAN_PASS_VERSION="$$(cat VERSION)" \
+		--build-arg NIAN_PASS_COMMIT="$$(git rev-parse HEAD)" \
+		--tag "nian-pass-sync-gateway:$$(cat VERSION)" \
+		--file apps/sync-gateway/Dockerfile .
+	@docker image inspect --format '{"imageId":"{{.Id}}","repoTags":{{json .RepoTags}}}' \
+		"nian-pass-sync-gateway:$$(cat VERSION)" > artifacts/release/gateway-image.json
+	@docker image save "nian-pass-sync-gateway:$$(cat VERSION)" | gzip -n \
+		> "artifacts/release/nian-pass-sync-gateway-$$(cat VERSION).tar.gz"
+
+release-stage: release-source-check
+	node scripts/stage_release.mjs
+
+release-artifact-check: release-source-check
+	node scripts/release_artifacts.mjs scan
+	node scripts/release_artifacts.mjs sbom
+	node scripts/release_artifacts.mjs manifest
+	node scripts/release_artifacts.mjs checksums
+
+release-check: release-source-check quality-check gateway-container-check release-browser-package release-artifact-check
+
 mobile-source-check:
 	@echo "Check deterministic mobile foundation sources..."
 	node scripts/check_mobile_foundation.mjs
@@ -364,7 +432,7 @@ mobile-tools-check:
 
 mobile-android-check: mobile-source-check mobile-tools-check
 	@echo "Build the real Tauri Android application as APKs (arm64 + x86_64)..."
-	pnpm --filter @nian-pass/desktop tauri android build --apk --target aarch64 x86_64 --ci
+	NIAN_PASS_COMMIT="$$(git rev-parse HEAD 2>/dev/null || printf unknown)" pnpm --filter @nian-pass/desktop tauri android build --apk --target aarch64 x86_64 --ci
 	@echo "Run focused Android native source tests..."
 	apps/desktop/src-tauri/gen/android/gradlew -p apps/desktop/src-tauri/gen/android \
 		:app:testUniversalDebugUnitTest :app:compileUniversalDebugAndroidTestKotlin
@@ -428,6 +496,7 @@ policy-check:
 	$(MAKE) docs-check
 	$(MAKE) sync-source-check
 	$(MAKE) gateway-source-check
+	$(MAKE) release-policy-check
 
 quick-check:
 	$(MAKE) fixture-check

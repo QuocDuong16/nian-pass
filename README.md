@@ -19,7 +19,15 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M7.5 — Self-hosted Sync Gateway — DONE
+M8 — Security Hardening / Release Engineering — IN PROGRESS
+
+M8 now provides pinned release inputs, a single `VERSION`, clean-tree and tag
+consistency gates, hardened release profiles/CSP/filesystem opens, deterministic
+browser and Native Messaging packages, Linux/Android/gateway production build
+paths, SHA-256 checksums, SBOM/provenance output, artifact regression scanning,
+and a tag/manual-only Forgejo release workflow. M8 is not marked DONE until the
+new commit has a green canonical Forgejo gate and the release report records
+platform runtime and signing results without converting `NOT RUN` into `PASS`.
 
 Desktop explicit sync supports WebDAV, AWS S3, and the Nian Pass Sync Gateway
 with manual only operation; provider credentials are not persisted.
@@ -82,13 +90,12 @@ authority before and after the Rust request. The running `DesktopVaultService`
 then revalidates the current session, `EntryId`, and exact browser origin through
 `credential-provider-core` before returning one bounded credential response.
 
-The future release architecture intentionally separates routine validation from
-production release builds. Forgejo Actions remains the normal development CI on
-self-hosted Docker/DIND infrastructure. A future GitHub Actions workflow may use
-native hosted Windows, Linux, and—only if Apple work resumes—macOS runners for
-multi-platform production release builds, triggered only by explicit `v*` tag
-pushes. It must not duplicate normal branch-push, pull-request, or scheduled CI.
-No GitHub release workflow or release artifact is introduced by M6.5.
+Release engineering separates routine validation from production builds.
+Forgejo Actions remains the normal development CI on self-hosted Docker/DIND
+infrastructure; the dedicated release workflow runs only for an explicit `v*`
+tag or manual release event. No GitHub branch CI is added. A future isolated
+native Windows release job may be considered only if Forgejo has no Windows
+runner. Apple runners remain deferred.
 
 ## Completed M5.5 milestone
 
@@ -141,7 +148,7 @@ not constitute current iOS or macOS support.
 Current product direction is a KDBX-native, offline-first, zero-knowledge
 password manager with no proprietary vault lock-in: Windows and Linux desktop,
 Android mobile, browser integration, desktop bring-your-own-cloud sync, and a
-self-hostable sync gateway next. Apple-specific runtime validation and native
+self-hostable sync gateway. Apple-specific runtime validation and native
 integration are future work; Tauri's theoretical macOS target support is not a
 claim that the macOS application has been validated or released.
 
@@ -160,11 +167,11 @@ M6   Browser Extension Foundation               DONE
 M6.5 Browser Native Messaging / Desktop Integration DONE
 M7   BYO-cloud Sync Providers                   DONE
 M7.5 Self-hosted Sync Gateway                   DONE
-M8   Security Hardening / Release Engineering  NEXT
-M9+  Apple Platform Resume
+M8   Security Hardening / Release Engineering  IN PROGRESS
+M9+  Apple Platform Resume                     DEFERRED
 ```
 
-The next milestone is M8 Security Hardening / Release Engineering. M6.5 uses standard browser
+M8 completion is the current milestone. M6.5 uses standard browser
 Native Messaging transport but does not implement or claim compatibility with
 the KeePassXC-Browser wire protocol. It requires neither `keepassxc-proxy` nor a
 KeePassXC executable. Chromium development uses the committed public Manifest

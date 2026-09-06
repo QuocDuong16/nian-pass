@@ -8,6 +8,10 @@ retrieval flow, the M5.5 Android security lifecycle, and the M6.5 browser
 desktop bridge. It records boundaries and assumptions; it is not a
 claim that Nian Pass is ready to protect production credentials.
 
+The structured M8 boundary review and finding dispositions are maintained in
+[`security-audit-m8.md`](security-audit-m8.md). Its deterministic source and
+artifact gates do not replace real platform runtime validation.
+
 ## M7 cloud-sync threats and residual limits
 
 The compact M7 boundary is: Nian Pass sends exact conditional headers, maps

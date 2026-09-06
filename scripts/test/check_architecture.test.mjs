@@ -261,6 +261,15 @@ test("cfg(test) modules do not consume Rust production line budget", (t) => {
   assert.deepEqual(runChecks(root, budget()), []);
 });
 
+test("standalone Rust test modules are excluded from production policy", (t) => {
+  const root = fixture(t);
+  writeFileSync(
+    join(root, "crates/vault-core/src/ffi_tests.rs"),
+    "unsafe fn test_only() {}\n".repeat(20),
+  );
+  assert.deepEqual(runChecks(root, budget()), []);
+});
+
 test("Serialize on a known secret-bearing type is rejected", (t) => {
   const root = fixture(t);
   writeFileSync(

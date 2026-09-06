@@ -370,9 +370,11 @@ mod tests {
     static TEST_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
-    fn runtime_info_command_exposes_only_the_host_platform() {
+    fn runtime_info_command_exposes_safe_build_metadata() {
         let encoded = serde_json::to_value(runtime_info()).expect("runtime info should serialize");
-        assert_eq!(encoded, json!({ "platform": "desktop" }));
+        assert_eq!(encoded["platform"], json!("desktop"));
+        assert_eq!(encoded["version"], json!(env!("CARGO_PKG_VERSION")));
+        assert!(encoded["commit"].as_str().is_some());
     }
 
     #[test]

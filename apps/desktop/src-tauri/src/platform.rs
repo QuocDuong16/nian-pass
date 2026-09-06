@@ -14,6 +14,8 @@ pub enum RuntimePlatform {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeInfoDto {
     pub platform: RuntimePlatform,
+    pub version: &'static str,
+    pub commit: &'static str,
 }
 
 fn classify_target(is_android: bool, is_ios: bool) -> RuntimePlatform {
@@ -31,6 +33,8 @@ impl RuntimeInfoDto {
     pub fn current() -> Self {
         Self {
             platform: classify_target(cfg!(target_os = "android"), cfg!(target_os = "ios")),
+            version: env!("CARGO_PKG_VERSION"),
+            commit: option_env!("NIAN_PASS_COMMIT").unwrap_or("unknown"),
         }
     }
 }
@@ -50,10 +54,16 @@ mod tests {
     fn runtime_contract_contains_only_the_platform_enum() {
         let encoded = serde_json::to_value(RuntimeInfoDto {
             platform: RuntimePlatform::Android,
+            version: "0.1.0",
+            commit: "0123456789abcdef0123456789abcdef01234567",
         });
         assert!(matches!(
             encoded,
-            Ok(value) if value == serde_json::json!({ "platform": "android" })
+            Ok(value) if value == serde_json::json!({
+                "platform": "android",
+                "version": "0.1.0",
+                "commit": "0123456789abcdef0123456789abcdef01234567"
+            })
         ));
     }
 

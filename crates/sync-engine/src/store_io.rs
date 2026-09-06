@@ -56,7 +56,7 @@ pub(crate) fn read_optional_private_file(
     {
         return Err(StoreError::InvalidMetadata);
     }
-    fs::read(path).map(Some).map_err(StoreError::Io)
+    read_no_follow(path).map(Some).map_err(StoreError::Io)
 }
 
 pub(crate) fn read_private_file(path: &Path) -> Result<Vec<u8>, StoreError> {
@@ -64,7 +64,7 @@ pub(crate) fn read_private_file(path: &Path) -> Result<Vec<u8>, StoreError> {
     if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
         return Err(StoreError::InvalidMetadata);
     }
-    fs::read(path).map_err(StoreError::Io)
+    read_no_follow(path).map_err(StoreError::Io)
 }
 
 pub(crate) fn remove_if_file(path: &Path) -> Result<(), StoreError> {
@@ -80,10 +80,36 @@ pub(crate) fn remove_if_file(path: &Path) -> Result<(), StoreError> {
 
 pub(crate) fn sync_directory(path: &Path) -> Result<(), StoreError> {
     #[cfg(unix)]
-    fs::File::open(path)
+    open_no_follow(path, true)
         .and_then(|directory| directory.sync_all())
         .map_err(StoreError::Io)?;
     #[cfg(windows)]
     let _ = path;
     Ok(())
+}
+
+#[cfg(unix)]
+fn open_no_follow(path: &Path, directory: bool) -> io::Result<fs::File> {
+    use rustix::fs::{CWD, Mode, OFlags, openat};
+
+    let mut flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    if directory {
+        flags |= OFlags::DIRECTORY;
+    }
+    openat(CWD, path, flags, Mode::empty())
+        .map(fs::File::from)
+        .map_err(Into::into)
+}
+
+#[cfg(unix)]
+fn read_no_follow(path: &Path) -> io::Result<Vec<u8>> {
+    use io::Read as _;
+    let mut bytes = Vec::new();
+    open_no_follow(path, false)?.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+#[cfg(windows)]
+fn read_no_follow(path: &Path) -> io::Result<Vec<u8>> {
+    fs::read(path)
 }

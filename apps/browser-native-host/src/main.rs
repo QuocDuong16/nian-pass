@@ -12,6 +12,14 @@ use std::{
 fn main() -> ExitCode {
     let command = env::args_os().nth(1);
     let result = match command.as_deref().and_then(|value| value.to_str()) {
+        Some("--version" | "-V") => {
+            let _output = writeln!(
+                io::stdout().lock(),
+                "nian-pass-browser-host {}",
+                env!("CARGO_PKG_VERSION")
+            );
+            return ExitCode::SUCCESS;
+        }
         Some("install") => installer::run(installer::Command::Install, env::args_os().skip(2)),
         Some("uninstall") => installer::run(installer::Command::Uninstall, env::args_os().skip(2)),
         Some("doctor") | Some("status") => {

@@ -66,15 +66,28 @@ export function ApplicationRoot({
   if (runtimeInfo === null) {
     return <main className="runtime-loading">Starting Nian Pass…</main>;
   }
+  let application;
   if (runtimeInfo.platform === "desktop") {
-    return (
+    application = (
       <BrowserConnectionApproval api={browserApproval}>
         <App api={api} windowLifecycle={windowLifecycle} />
       </BrowserConnectionApproval>
     );
+  } else if (runtimeInfo.platform === "android") {
+    application = <MobileVaultApp api={mobile} platform="android" />;
+  } else {
+    application = <MobileVaultApp api={mobile} platform="ios" />;
   }
-  if (runtimeInfo.platform === "android") {
-    return <MobileVaultApp api={mobile} platform="android" />;
-  }
-  return <MobileVaultApp api={mobile} platform="ios" />;
+  const revision =
+    runtimeInfo.commit === "unknown"
+      ? "unknown commit"
+      : runtimeInfo.commit.slice(0, 12);
+  return (
+    <>
+      {application}
+      <footer className="build-info" aria-label="About Nian Pass">
+        Nian Pass {runtimeInfo.version} · {revision}
+      </footer>
+    </>
+  );
 }

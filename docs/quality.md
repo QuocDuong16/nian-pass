@@ -20,6 +20,7 @@ for feedback but is intentionally not equivalent to the full gate.
 - pnpm 11.22.0 from the root `packageManager`
 - GNU Make
 - Tauri's documented headless GTK/WebKit development packages
+- Android NDK 28.2.13676358 and JDK 21 for release APK construction
 
 The dedicated Android gate additionally requires a CLI Android SDK with Android
 SDK 36, Build Tools 36.0.0, an installed NDK, Java/JDK, and the
@@ -36,6 +37,17 @@ pinned pnpm release; it does not assume Corepack is bundled with Node.
 The root's exact `smol-toml 1.8.0` dependency parses Cargo policy inputs;
 `scripts-check` installs only that locked root tooling before running. No
 quality target launches a window, X11, Wayland, or a desktop session.
+
+M8 adds `release-policy-check` to normal deterministic policy, plus
+`security-hardening-check`, `release-source-check`, `release-artifact-check`,
+and `release-check` as the canonical release interface. `VERSION` is the single
+user-facing version authority. Release source requires a clean exact commit and
+matching `v<VERSION>` tag. Platform packaging, runtime smoke, and signing remain
+separate evidence and never become ordinary Linux quality prerequisites. See
+[`release.md`](release.md) and [`reproducible-builds.md`](reproducible-builds.md).
+`node-license-check` inventories production packages through the frozen pnpm
+graph and permits only the reviewed MIT, Apache-2.0 OR MIT, and MPL-2.0
+expressions; an unknown expression fails closed pending review.
 
 ## Gate hierarchy
 
@@ -336,6 +348,10 @@ clipboard plugin's Windows-only transitive crates; this is a license approval,
 not an advisory, source, or package exception. M6.5 likewise approves the
 OSI-approved `0BSD` license used only by `interprocess` transitive support
 crates for the local browser bridge.
+
+M8 updated the runtime transitive `chacha20` lock entry from yanked 0.10.1 to
+compatible 0.10.2. Yanked packages are now an explicit deny, even when no
+RUSTSEC vulnerability advisory accompanies the yank.
 
 Wildcard registry dependency requirements are denied. A declaration such as
 `foo = "*"` is not allowed; dependencies use the repository's existing exact

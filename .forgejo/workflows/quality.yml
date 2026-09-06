@@ -10,7 +10,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 35
     container:
-      image: rust:1.98.0-bookworm
+      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
 
     steps:
       - name: Install Node.js runtime for actions
@@ -54,7 +54,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 25
     container:
-      image: node:26.7.0-bookworm
+      image: node:26.7.0-bookworm@sha256:e929171d35b9df7773a3ec5b068e387fa109441dc90f91e6560af5d39b7e9bf1
 
     steps:
       - name: Check out repository
@@ -86,7 +86,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 50
     container:
-      image: rust:1.98.0-bookworm
+      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
 
     steps:
       - name: Install Node.js runtime for actions
@@ -160,7 +160,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 20
     container:
-      image: rust:1.98.0-bookworm
+      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
 
     steps:
       - name: Install Node.js runtime for actions
@@ -219,7 +219,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 30
     container:
-      image: rust:1.98.0-bookworm
+      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
 
     steps:
       - name: Install Node.js runtime for actions

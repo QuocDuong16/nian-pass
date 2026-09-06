@@ -21,6 +21,15 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+.build-info {
+  position: fixed;
+  right: 8px;
+  bottom: 4px;
+  z-index: 50;
+  color: #587064;
+  font-size: 11px;
+  pointer-events: none;
+}
 button,
 input,
 select,

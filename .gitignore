@@ -9,4 +9,5 @@
 /apps/browser-extension/coverage/
 /apps/browser-extension/node_modules/
 /apps/browser-extension/*.zip
+/artifacts/
 /deploy/gateway.env

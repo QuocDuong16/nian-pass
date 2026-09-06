@@ -203,7 +203,7 @@ impl VaultSession {
             })?;
 
         let copied_fingerprint = {
-            let source = File::open(&self.path).map_err(SessionError::BackupFailed)?;
+            let source = open_existing_file(&self.path).map_err(SessionError::BackupFailed)?;
             ensure_handle_regular(&source)
                 .map_err(|error| match error {
                     SessionError::UnsupportedPath => io::Error::other("unsupported backup source"),
@@ -440,7 +440,7 @@ fn open_stable_document_with_hook(
     after_document_read: impl FnOnce() -> Result<(), SessionError>,
 ) -> Result<(KdbxDocument, FileFingerprint), SessionError> {
     validate_current_target(path)?;
-    let mut source = File::open(path).map_err(SessionError::ReadSource)?;
+    let mut source = open_existing_file(path).map_err(SessionError::ReadSource)?;
     ensure_handle_regular(&source)?;
 
     let fingerprint_before =
@@ -481,13 +481,13 @@ fn map_final_open_error(error: SessionError) -> SessionError {
 }
 
 fn fingerprint_path(path: &Path) -> Result<FileFingerprint, SessionError> {
-    let mut file = File::open(path).map_err(SessionError::ReadSource)?;
+    let mut file = open_existing_file(path).map_err(SessionError::ReadSource)?;
     ensure_handle_regular(&file)?;
     FileFingerprint::from_reader(&mut file).map_err(SessionError::ReadSource)
 }
 
 fn fingerprint_path_for_backup(path: &Path) -> Result<FileFingerprint, SessionError> {
-    let mut file = File::open(path).map_err(SessionError::BackupFailed)?;
+    let mut file = open_existing_file(path).map_err(SessionError::BackupFailed)?;
     FileFingerprint::from_reader(&mut file).map_err(SessionError::BackupFailed)
 }
 
@@ -561,7 +561,26 @@ impl<R: Read> Read for DigestingReader<R> {
 
 #[cfg(unix)]
 fn sync_path(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
+    open_existing_file(path)?.sync_all()
+}
+
+#[cfg(unix)]
+fn open_existing_file(path: &Path) -> io::Result<File> {
+    use rustix::fs::{CWD, Mode, OFlags, openat};
+
+    openat(
+        CWD,
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map(File::from)
+    .map_err(Into::into)
+}
+
+#[cfg(windows)]
+fn open_existing_file(path: &Path) -> io::Result<File> {
+    File::open(path)
 }
 
 #[cfg(windows)]

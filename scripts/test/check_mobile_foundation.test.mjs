@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -24,7 +24,7 @@ function fixture(t) {
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/build.gradle.kts",
-    'android { compileSdk = 36; defaultConfig { minSdk = 26 } }\ndependencies { implementation("androidx.credentials:credentials:1.6.0") }\n',
+    'val releaseSigningEnvironment = mapOf("a" to System.getenv("NIAN_PASS_ANDROID_KEYSTORE"), "b" to System.getenv("NIAN_PASS_ANDROID_KEYSTORE_PASSWORD"), "c" to System.getenv("NIAN_PASS_ANDROID_KEY_ALIAS"), "d" to System.getenv("NIAN_PASS_ANDROID_KEY_PASSWORD"))\nval configured = releaseSigningEnvironment.values.all { true }; releaseSigningEnvironment.values.any { true }\nandroid { compileSdk = 36; signingConfigs { create("releaseFromEnvironment") {} }; defaultConfig { minSdk = 26 } }\ndependencies { implementation("androidx.credentials:credentials:1.6.0") }\n',
   );
   write(
     root,
@@ -367,6 +367,13 @@ test("Android-compatible Rust library outputs are required", (t) => {
   const root = fixture(t);
   write(root, "apps/desktop/src-tauri/Cargo.toml", "[lib]\n");
   assert.match(runChecks(root).join("\n"), /staticlib, cdylib, and rlib/);
+});
+
+test("Android signing secrets cannot move into Gradle source", (t) => {
+  const root = fixture(t);
+  const path = "apps/desktop/src-tauri/gen/android/app/build.gradle.kts";
+  write(root, path, readFileSync(join(root, path), "utf8") + 'storePassword = "secret"\n');
+  assert.match(runChecks(root).join("\n"), /passwords may not be declared/);
 });
 
 test("broad generated Android filesystem providers are rejected", (t) => {

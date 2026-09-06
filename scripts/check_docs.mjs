@@ -34,6 +34,13 @@ export function runChecks(root) {
   const threatModel = readRequired(root, "docs/threat-model.md", violations);
   const writeSafety = readRequired(root, "docs/write-safety.md", violations);
   const quality = readRequired(root, "docs/quality.md", violations);
+  const securityPolicy = readRequired(root, "SECURITY.md", violations);
+  const securityAudit = readRequired(root, "docs/security-audit-m8.md", violations);
+  const release = readRequired(root, "docs/release.md", violations);
+  const reproducible = readRequired(root, "docs/reproducible-builds.md", violations);
+  const releaseChecklist = readRequired(root, "docs/release-checklist.md", violations);
+  const releaseStatus = readRequired(root, "docs/release-status-template.md", violations);
+  const ipcSurface = readRequired(root, "docs/ipc-surface.md", violations);
   const agents = readRequired(root, "AGENTS.md", violations);
   const workflow = readRequired(root, ".forgejo/workflows/quality.yml", violations);
   const packageSource = readRequired(root, "package.json", violations);
@@ -42,7 +49,15 @@ export function runChecks(root) {
   const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
   const makefile = readRequired(root, "Makefile", violations);
 
-  requirePattern(violations, "README.md", readme, /## Current milestone[\s\S]{0,120}M7(?:\.5\s*[—-]\s*Self-hosted Sync Gateway|\s*[—-]\s*BYO-cloud Sync Providers)/i, "current milestone must report M7 or M7.5 sync work");
+  requirePattern(violations, "SECURITY.md", securityPolicy, /supported versions[\s\S]{0,1200}reporting a vulnerability[\s\S]{0,1800}does not promise[\s\S]{0,100}(?:SLA|response)/i, "supported versions, private reporting, and honest response policy are required");
+  requirePattern(violations, "docs/security-audit-m8.md", securityAudit, /BLOCKER[\s\S]{0,1000}HIGH[\s\S]{0,5000}ACCEPTED RISK[\s\S]{0,5000}Secret inventory/i, "rated findings and secret inventory are required");
+  requirePattern(violations, "docs/release.md", release, /clean checkout[\s\S]{0,1000}release-source-check[\s\S]{0,3000}SHA-256[\s\S]{0,3000}NOT RUN/i, "canonical release, integrity, and honest status procedure are required");
+  requirePattern(violations, "docs/reproducible-builds.md", reproducible, /VERSION[\s\S]{0,800}Rust 1\.98\.0[\s\S]{0,2200}CycloneDX/i, "version, toolchain, and SBOM reproducibility policy are required");
+  requirePattern(violations, "docs/release-checklist.md", releaseChecklist, /No committed secrets[\s\S]{0,1000}CSP[\s\S]{0,1000}runtime[\s\S]{0,500}NOT RUN/i, "release security checklist is incomplete");
+  requirePattern(violations, "docs/release-status-template.md", releaseStatus, /Forgejo quality-check[\s\S]{0,1200}Windows desktop runtime smoke[\s\S]{0,1200}Android device runtime[\s\S]{0,1200}Artifact secret scan[\s\S]{0,800}Other signing/i, "release status matrix is incomplete");
+  requirePattern(violations, "docs/ipc-surface.md", ipcSurface, /Session control[\s\S]{0,1800}Vault mutation[\s\S]{0,1800}Browser[\s\S]{0,1800}Android/i, "Tauri IPC command classification is incomplete");
+
+  requirePattern(violations, "README.md", readme, /## Current milestone[\s\S]{0,120}M8\s*[—-]\s*Security Hardening \/ Release Engineering\s*[—-]\s*IN PROGRESS/i, "current milestone must report M8 release engineering in progress");
   requirePattern(violations, "README.md", readme, /M5\.4\s*[—-]\s*iOS Password AutoFill \+ Keychain[^\n]*DEFERRED/, "roadmap must retain M5.4 deferred");
   requirePattern(violations, "README.md", readme, /M5\.5\s+Android Mobile Security \/ Lifecycle\s+DONE[\s\S]{0,240}M6\s+Browser Extension Foundation\s+DONE[\s\S]{0,240}M6\.5\s+Browser Native Messaging \/ Desktop Integration\s+DONE[\s\S]{0,160}M7\s+BYO-cloud Sync Providers\s+DONE[\s\S]{0,160}M7\.5\s+Self-hosted Sync Gateway\s+(?:NEXT|REMEDIATION|DONE)/i, "M7-done and M7.5 roadmap status is missing");
   requirePattern(violations, "README.md", readme, /Desktop explicit sync[\s\S]{0,500}WebDAV[\s\S]{0,500}(?:AWS )?S3[\s\S]{0,800}manual only[\s\S]{0,500}(?:not persisted|never persisted)/i, "M7 provider scope and manual credential policy are missing");

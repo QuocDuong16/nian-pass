@@ -18,7 +18,7 @@ function fixture(t) {
   write(
     root,
     "README.md",
-    "## Current milestone\nM7 — BYO-cloud Sync Providers\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle DONE\nM6 Browser Extension Foundation DONE\nM6.5 Browser Native Messaging / Desktop Integration DONE\nM7 BYO-cloud Sync Providers DONE\nM7.5 Self-hosted Sync Gateway NEXT\nDesktop explicit sync supports WebDAV and AWS S3. Sync is manual only and provider credentials are not persisted.\nBrowser integration uses Chromium/Firefox MV3 with explicit per-site access, Nian Pass Native Messaging host, exact-document fill, and never automatically submit. Read-only providers have editing and Save disabled. " +
+    "## Current milestone\nM8 — Security Hardening / Release Engineering — IN PROGRESS\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle DONE\nM6 Browser Extension Foundation DONE\nM6.5 Browser Native Messaging / Desktop Integration DONE\nM7 BYO-cloud Sync Providers DONE\nM7.5 Self-hosted Sync Gateway NEXT\nDesktop explicit sync supports WebDAV and AWS S3. Sync is manual only and provider credentials are not persisted.\nBrowser integration uses Chromium/Firefox MV3 with explicit per-site access, Nian Pass Native Messaging host, exact-document fill, and never automatically submit. Read-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
       "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
@@ -87,6 +87,41 @@ function fixture(t) {
       "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension. browser-source-check then browser-extension-check then browser-native-protocol-check then browser-native-host-check then browser-integration-check do not require Chrome Chromium or Firefox GUI browsers.\n" +
       "Bridge startup failure leaves the vault usable; Windows installer rollback is tested with failure injection.\n" +
       "sync-source-check then sync-core-check then sync-provider-check then sync-integration-check cover M7.\n",
+  );
+  write(
+    root,
+    "SECURITY.md",
+    "Supported versions use the latest release. Reporting a vulnerability uses a private report. The project does not promise a response SLA.\n",
+  );
+  write(
+    root,
+    "docs/security-audit-m8.md",
+    "BLOCKER release issue fixed. HIGH filesystem issue fixed. ACCEPTED RISK remains documented. Secret inventory records lifetimes.\n",
+  );
+  write(
+    root,
+    "docs/release.md",
+    "Use a clean checkout then make release-source-check. Generate SHA-256 and report runtime evidence as NOT RUN when unavailable.\n",
+  );
+  write(
+    root,
+    "docs/reproducible-builds.md",
+    "VERSION is authoritative. Rust 1.98.0 is pinned. Generate a CycloneDX inventory.\n",
+  );
+  write(
+    root,
+    "docs/release-checklist.md",
+    "No committed secrets. Verify CSP. Record runtime checks as PASS or NOT RUN.\n",
+  );
+  write(
+    root,
+    "docs/release-status-template.md",
+    "Forgejo quality-check. Windows desktop runtime smoke. Android device runtime. Artifact secret scan. Other signing.\n",
+  );
+  write(
+    root,
+    "docs/ipc-surface.md",
+    "Session control owns Lock. Vault mutation is Rust-owned. Browser approval is opaque. Android remains native.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
   write(root, ".node-version", "26.7.0\n");
