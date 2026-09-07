@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 
-import { dirtyTreeViolation, isExactVersion, tagIdentityViolation, tagViolation } from "../check_release_source.mjs";
+import {
+  dirtyTreeViolation,
+  githubReleaseWorkflowViolations,
+  isExactVersion,
+  tagIdentityViolation,
+  tagViolation,
+} from "../check_release_source.mjs";
 
 const identity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"];
 
@@ -89,4 +95,29 @@ test("release dependency policy accepts exact versions only", () => {
   for (const value of ["latest", "^2.11.4", "~2.11.4", "git+https://example.invalid/x"]) {
     assert.equal(isExactVersion(value), false);
   }
+});
+
+test("GitHub is release-only authority and Forgejo has no competing packager", () => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  assert.deepEqual(githubReleaseWorkflowViolations(projectRoot), []);
+});
+
+test("GitHub release workflow policy rejects floating actions and branch triggers", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-release-workflow-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
+  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8");
+  writeFileSync(
+    join(root, ".github/workflows/release.yml"),
+    workflow
+      .replace("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", "actions/checkout@v4")
+      .replace("    tags:\n", "    branches:\n"),
+  );
+  const violations = githubReleaseWorkflowViolations(root).join("\n");
+  assert.match(violations, /branch push triggers are forbidden/);
+  assert.match(violations, /full commit revision/);
+  assert.match(violations, /must trigger on v\* tags/);
 });

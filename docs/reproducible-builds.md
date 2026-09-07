@@ -8,7 +8,7 @@ clean. Every release records the exact commit and workflow.
 Pinned inputs are Rust 1.98.0, Node 26.7.0, Corepack 0.35.0 in CI, pnpm 11.22.0,
 Tauri CLI 2.11.4, Android SDK/API 36, Build Tools 36.0.0, NDK 28.2.13676358,
 Gradle 8.14.3 with its distribution SHA-256, exact Cargo/npm/Gradle dependencies, digest-pinned container
-bases, and commit-pinned Forgejo actions. `Cargo.lock` and `pnpm-lock.yaml` are
+bases, and full-commit-pinned Forgejo and GitHub actions. `Cargo.lock` and `pnpm-lock.yaml` are
 required inputs. No production git dependency or floating container/action is
 allowed.
 
@@ -20,6 +20,14 @@ fixed metadata, stored bytes, and 0644 archive modes. Build outputs can still
 differ when platform linker, WebView bootstrapper, Android packaging, or native
 installer tooling embeds nondeterministic metadata; checksums identify the
 actual released bytes, not a claim of bit-for-bit identity across OS images.
+GitHub-hosted `ubuntu-24.04` and `windows-2025` VM images are external release
+infrastructure and are not digest-pinned. Their labels and the workflow run are
+recorded for traceability, but this is not a claim of bit-for-bit environmental
+reproducibility. Everything controlled by the repository remains pinned.
+The gateway image records public version, commit, source, and license metadata;
+the license label is `NOASSERTION` until the repository adopts an explicit
+license, rather than inventing rights in release automation.
+
 Signing credentials are intentionally outside reproducible inputs. Android
 reads a complete four-variable signing set from the runner environment and
 fails on partial configuration; no keystore path or password is declared in

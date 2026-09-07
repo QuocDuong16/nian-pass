@@ -4,35 +4,42 @@ Copy this template into each release record and replace only with observed
 results. `NOT RUN` is a result, not a placeholder that may be inferred as pass.
 
 ```text
-Forgejo quality-check: PASS / FAIL / NOT RUN
-Gateway container smoke: PASS / FAIL / NOT RUN
+Forgejo canonical CI                   PASS / FAIL / NOT RUN
 
-Linux desktop build: PASS / FAIL / NOT RUN
-Linux desktop runtime smoke: PASS / FAIL / NOT RUN
+GitHub release preflight              PASS / FAIL / NOT RUN
 
-Windows desktop build: PASS / FAIL / NOT RUN
-Windows desktop runtime smoke: PASS / FAIL / NOT RUN
+Windows release build                 PASS / FAIL / NOT RUN
+Windows native process smoke          PASS / FAIL / NOT RUN
+Windows full GUI runtime              PASS / FAIL / NOT RUN
+Windows Authenticode                  PASS / NOT CONFIGURED / NOT RUN
 
-Browser Chromium package: PASS / FAIL / NOT RUN
-Browser Firefox package: PASS / FAIL / NOT RUN
-Native Messaging Linux smoke: PASS / FAIL / NOT RUN
-Native Messaging Windows smoke: PASS / FAIL / NOT RUN
+Linux AppImage                        PASS / FAIL / NOT RUN
+Linux deb                             PASS / FAIL / NOT RUN
+Linux native-host package             PASS / FAIL / NOT RUN
+Linux native process smoke            PASS / FAIL / NOT RUN
+Linux full GUI runtime                PASS / FAIL / NOT RUN
 
-Android release APK: PASS / FAIL / NOT RUN
-Android device runtime: PASS / FAIL / NOT RUN
+Chromium package                      PASS / FAIL / NOT RUN
+Firefox package                       PASS / FAIL / NOT RUN
+Browser store signing                 PASS / NOT CONFIGURED / NOT RUN
 
-Gateway release image: PASS / FAIL / NOT RUN
+Android APK                           PASS / FAIL / NOT RUN
+Android static security verification  PASS / FAIL / NOT RUN
+Android runtime                       PASS / FAIL / NOT RUN
+Android signing                       PASS / NOT CONFIGURED / NOT RUN
 
-Artifact checksums: PASS / FAIL
-Artifact secret scan: PASS / FAIL
+Gateway image                         PASS / FAIL / NOT RUN
+Gateway container smoke               PASS / FAIL / NOT RUN
+Gateway registry publication          PASS / NOT CONFIGURED / NOT RUN
 
-SBOM: PASS / FAIL / NOT RUN
-
-Windows signing: PASS / NOT CONFIGURED / NOT RUN
-Android signing: PASS / NOT CONFIGURED / NOT RUN
-Other signing: PASS / NOT CONFIGURED / NOT RUN
+Artifact secret scan                  PASS / FAIL
+Docker nested-layer scan              PASS / FAIL
+SBOM                                  PASS / FAIL
+Release manifest                      PASS / FAIL
+SHA256SUMS                            PASS / FAIL
+GitHub Release publication            PASS / DRAFT / NOT RUN
 ```
 
 Also record the release tag, `VERSION`, commit SHA, workflow run URL or ID,
-artifact manifest, accepted risks, and any partial smoke that was insufficient
-for a platform PASS.
+artifact manifest, hosted-runner image labels, accepted risks, and any partial
+smoke that was insufficient for a platform runtime PASS.

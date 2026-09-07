@@ -10,7 +10,7 @@ documented threat model: **BLOCKER**, **HIGH**, **MEDIUM**, **LOW**, or
 
 | Rating | Boundary | Finding | Disposition |
 |---|---|---|---|
-| BLOCKER | Release | No authoritative version/tag/clean-tree gate, artifact set manifest, checksums, or tag-only release workflow existed. | Fixed by `VERSION`, `release-source-check`, deterministic staging, SHA-256 manifesting, and the Forgejo release workflow. |
+| BLOCKER | Release | No authoritative version/tag/clean-tree gate, artifact set manifest, checksums, or tag-only release workflow existed. | Fixed by `VERSION`, exact tag-to-HEAD `release-source-check`, deterministic staging, SHA-256 manifesting, Forgejo-owned routine CI, and the release-only GitHub multi-platform workflow. |
 | HIGH | Unix filesystem | Sensitive leaf files were checked with `symlink_metadata` and then reopened by path, leaving avoidable leaf-symlink races. | Fixed for vault reads, sync state reads/directory sync, and gateway object, temp, lock, and token opens with descriptor-verified `O_NOFOLLOW` access. Existing atomic replace/CAS protocols remain unchanged. |
 | HIGH | Gateway token file | A token file could be group/world readable after it was opened. | Fixed: Unix token files must have no group/other permission bits and are opened without following the leaf symlink. |
 | MEDIUM | Release artifacts | Browser ZIP bytes inherited filesystem timestamps and artifact contents were not inspected as one release set. | Fixed with deterministic stored ZIP output and behavioral checksum/forbidden-content checks. The scan is a regression defense, not proof that no secret exists. |

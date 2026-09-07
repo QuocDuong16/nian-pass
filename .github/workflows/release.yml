@@ -1,0 +1,452 @@
+name: Production release
+
+# Audited action pins: checkout v4.2.2, setup-node v4.4.0,
+# setup-java v4.7.1, upload-artifact v4.6.2, download-artifact v4.3.0.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing vX.Y.Z tag to build"
+        required: true
+        type: string
+      forgejo_ci_status:
+        description: "Observed canonical Forgejo CI status for this tag"
+        required: true
+        default: "NOT RUN"
+        type: choice
+        options:
+          - "NOT RUN"
+          - "PASS"
+      publish:
+        description: "Publish the prerelease instead of retaining a draft"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  NODE_VERSION: "26.7.0"
+  PNPM_VERSION: "11.22.0"
+  COREPACK_VERSION: "0.35.0"
+  RUST_VERSION: "1.98.0"
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pinned release tools
+        run: |
+          set -Eeuo pipefail
+          npm install --global "corepack@${COREPACK_VERSION}"
+          corepack enable
+          corepack install --global "pnpm@${PNPM_VERSION}"
+          rustup toolchain install "${RUST_VERSION}" --profile minimal
+          rustup default "${RUST_VERSION}"
+          pnpm install --frozen-lockfile
+          test "$(node --version)" = "v${NODE_VERSION}"
+          test "$(pnpm --version)" = "${PNPM_VERSION}"
+          test "$(rustc --version | awk '{print $2}')" = "${RUST_VERSION}"
+      - name: Verify immutable source identity
+        id: source
+        run: |
+          set -Eeuo pipefail
+          make release-source-check
+          make release-policy-check
+          make security-hardening-check
+          printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "$(cat VERSION)" >> "${GITHUB_OUTPUT}"
+
+  linux:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    outputs:
+      process_smoke: ${{ steps.report.outputs.process_smoke }}
+    steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Linux release prerequisites
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential dbus-x11 file libayatana-appindicator3-dev libfuse2 librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf unzip xvfb
+          npm install --global "corepack@${COREPACK_VERSION}"
+          corepack enable
+          corepack install --global "pnpm@${PNPM_VERSION}"
+          rustup toolchain install "${RUST_VERSION}" --profile minimal
+          rustup default "${RUST_VERSION}"
+          pnpm install --frozen-lockfile
+      - name: Build Linux release payload
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.preflight.outputs.commit }}"
+          make release-linux-build
+      - name: Validate Linux process and archive permissions
+        id: report
+        run: |
+          set -Eeuo pipefail
+          target/release/nian-pass-browser-host --version
+          cargo test --locked --release -p nian-pass-browser-host --test process actual_host_process_proxies_approval_candidates_and_one_credential
+          test -x target/release/nian-pass-desktop
+          set +e
+          timeout --signal=TERM 10s dbus-run-session -- xvfb-run -a target/release/nian-pass-desktop >/tmp/nian-pass-process-smoke.log 2>&1
+          desktop_status=$?
+          set -e
+          test "$desktop_status" -eq 0 -o "$desktop_status" -eq 124
+          extraction="$(mktemp -d)"
+          trap 'rm -rf -- "$extraction"' EXIT
+          unzip -q "artifacts/release/nian-pass-native-host-linux-x86_64-${{ needs.preflight.outputs.version }}.zip" -d "$extraction"
+          test -x "$extraction/nian-pass-browser-host"
+          test ! -x "$extraction/INSTALL.txt"
+          test -s "$(find artifacts/release -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -s "$(find artifacts/release -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          printf 'process_smoke=PASS\n' >> "${GITHUB_OUTPUT}"
+      - name: Upload Linux payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-artifacts
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    needs: preflight
+    runs-on: windows-2025
+    timeout-minutes: 75
+    outputs:
+      build: ${{ steps.build.outputs.build }}
+      process_smoke: ${{ steps.build.outputs.process_smoke }}
+      signing: ${{ steps.build.outputs.signing }}
+    steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pinned Windows release tools
+        shell: pwsh
+        run: |
+          npm install --global "corepack@$env:COREPACK_VERSION"
+          corepack enable
+          corepack install --global "pnpm@$env:PNPM_VERSION"
+          rustup toolchain install $env:RUST_VERSION --profile minimal
+          rustup default $env:RUST_VERSION
+          rustup target add x86_64-pc-windows-msvc --toolchain $env:RUST_VERSION
+      - name: Build and validate native Windows payload
+        id: build
+        shell: pwsh
+        env:
+          NIAN_PASS_WINDOWS_PFX_BASE64: ${{ secrets.NIAN_PASS_WINDOWS_PFX_BASE64 }}
+          NIAN_PASS_WINDOWS_PFX_PASSWORD: ${{ secrets.NIAN_PASS_WINDOWS_PFX_PASSWORD }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne "${{ needs.preflight.outputs.commit }}") { throw "release commit mismatch" }
+          ./scripts/release_windows.ps1
+          $installer = Get-ChildItem artifacts/release -File -Filter *.exe | Select-Object -First 1
+          if (-not $installer -or $installer.Length -eq 0) { throw "non-empty NSIS installer is required" }
+      - name: Upload Windows payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-artifacts
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  browser:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build deterministic browser payload
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.preflight.outputs.commit }}"
+          npm install --global "corepack@${COREPACK_VERSION}"
+          corepack enable
+          corepack install --global "pnpm@${PNPM_VERSION}"
+          pnpm install --frozen-lockfile
+          make release-browser-package
+      - name: Upload browser payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-artifacts
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      signing: ${{ steps.build.outputs.signing }}
+    steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pinned JDK
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install pinned Android release tools
+        run: |
+          set -Eeuo pipefail
+          npm install --global "corepack@${COREPACK_VERSION}"
+          corepack enable
+          corepack install --global "pnpm@${PNPM_VERSION}"
+          rustup toolchain install "${RUST_VERSION}" --profile minimal
+          rustup default "${RUST_VERSION}"
+          rustup target add aarch64-linux-android x86_64-linux-android --toolchain "${RUST_VERSION}"
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "platform-tools"
+          pnpm install --frozen-lockfile
+      - name: Build and statically verify Android payload
+        id: build
+        env:
+          NIAN_PASS_ANDROID_KEYSTORE_BASE64: ${{ secrets.NIAN_PASS_ANDROID_KEYSTORE_BASE64 }}
+          NIAN_PASS_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.NIAN_PASS_ANDROID_KEYSTORE_PASSWORD }}
+          NIAN_PASS_ANDROID_KEY_ALIAS: ${{ secrets.NIAN_PASS_ANDROID_KEY_ALIAS }}
+          NIAN_PASS_ANDROID_KEY_PASSWORD: ${{ secrets.NIAN_PASS_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.preflight.outputs.commit }}"
+          values=("${NIAN_PASS_ANDROID_KEYSTORE_BASE64}" "${NIAN_PASS_ANDROID_KEYSTORE_PASSWORD}" "${NIAN_PASS_ANDROID_KEY_ALIAS}" "${NIAN_PASS_ANDROID_KEY_PASSWORD}")
+          configured=0
+          for value in "${values[@]}"; do test -n "$value" && configured=$((configured + 1)); done
+          if test "$configured" -eq 0; then
+            signing="NOT CONFIGURED"
+          elif test "$configured" -ne 4; then
+            echo "Android signing configuration is incomplete" >&2
+            exit 1
+          else
+            signing="PASS"
+            export NIAN_PASS_ANDROID_KEYSTORE="${RUNNER_TEMP}/nian-pass-release.keystore"
+            printf '%s' "${NIAN_PASS_ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${NIAN_PASS_ANDROID_KEYSTORE}"
+            trap 'rm -f -- "${NIAN_PASS_ANDROID_KEYSTORE}"' EXIT
+          fi
+          make release-android-build
+          if test "$signing" = "PASS"; then
+            while IFS= read -r apk; do
+              "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --verbose "$apk"
+            done < <(find artifacts/release -maxdepth 1 -type f -name '*.apk' -print)
+          fi
+          printf 'signing=%s\n' "$signing" >> "${GITHUB_OUTPUT}"
+      - name: Upload Android payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-artifacts
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  gateway:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build and smoke-test gateway payload
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.preflight.outputs.commit }}"
+          npm install --global "corepack@${COREPACK_VERSION}"
+          corepack enable
+          corepack install --global "pnpm@${PNPM_VERSION}"
+          pnpm install --frozen-lockfile
+          make gateway-container-check release-gateway-image
+      - name: Upload gateway payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gateway-artifacts
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  attest:
+    needs: [preflight, linux, windows, browser, android, gateway]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pinned attestation tools
+        run: |
+          set -Eeuo pipefail
+          npm install --global "corepack@${COREPACK_VERSION}"
+          corepack enable
+          corepack install --global "pnpm@${PNPM_VERSION}"
+          rustup toolchain install "${RUST_VERSION}" --profile minimal
+          rustup default "${RUST_VERSION}"
+          pnpm install --frozen-lockfile
+      - name: Download Windows payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-artifacts
+          path: artifacts/platforms/windows
+      - name: Download Linux payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: linux-artifacts
+          path: artifacts/platforms/linux
+      - name: Download browser payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: browser-artifacts
+          path: artifacts/platforms/browser
+      - name: Download Android payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: android-artifacts
+          path: artifacts/platforms/android
+      - name: Download gateway payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: gateway-artifacts
+          path: artifacts/platforms/gateway
+      - name: Assemble and attest canonical release set
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+          FORGEJO_CI_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.forgejo_ci_status || 'NOT RUN' }}
+          PREFLIGHT_STATUS: PASS
+          WINDOWS_BUILD_STATUS: ${{ needs.windows.outputs.build }}
+          WINDOWS_PROCESS_STATUS: ${{ needs.windows.outputs.process_smoke }}
+          WINDOWS_GUI_STATUS: NOT RUN
+          WINDOWS_SIGNING_STATUS: ${{ needs.windows.outputs.signing }}
+          LINUX_APPIMAGE_STATUS: PASS
+          LINUX_DEB_STATUS: PASS
+          LINUX_NATIVE_PACKAGE_STATUS: PASS
+          LINUX_PROCESS_STATUS: ${{ needs.linux.outputs.process_smoke }}
+          LINUX_GUI_STATUS: NOT RUN
+          CHROMIUM_STATUS: PASS
+          FIREFOX_STATUS: PASS
+          BROWSER_SIGNING_STATUS: NOT CONFIGURED
+          ANDROID_APK_STATUS: PASS
+          ANDROID_STATIC_STATUS: PASS
+          ANDROID_RUNTIME_STATUS: NOT RUN
+          ANDROID_SIGNING_STATUS: ${{ needs.android.outputs.signing }}
+          GATEWAY_IMAGE_STATUS: PASS
+          GATEWAY_SMOKE_STATUS: PASS
+          GATEWAY_PUBLISH_STATUS: NOT CONFIGURED
+          ARTIFACT_SCAN_STATUS: PASS
+          DOCKER_LAYER_SCAN_STATUS: PASS
+          SBOM_STATUS: PASS
+          MANIFEST_STATUS: PASS
+          CHECKSUM_STATUS: PASS
+          GITHUB_RELEASE_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'PASS' || 'DRAFT' }}
+          RELEASE_STATUS_DATA_OUTPUT: ${{ runner.temp }}/release-status.json
+          RELEASE_STATUS_DATA_FILE: ${{ runner.temp }}/release-status.json
+          RELEASE_RUNNER_IMAGES: ubuntu-24.04,windows-2025
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${RELEASE_COMMIT}"
+          make release-source-check
+          node scripts/assemble_release.mjs
+          node scripts/release_status.mjs
+          make release-artifact-check
+          sha256sum --check artifacts/release/SHA256SUMS
+      - name: Upload canonical release set
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nian-pass-${{ env.RELEASE_TAG }}
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: [preflight, attest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download canonical release set
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: nian-pass-${{ env.RELEASE_TAG }}
+          path: release
+      - name: Verify and stage GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+        run: |
+          set -Eeuo pipefail
+          cd release
+          sha256sum --check SHA256SUMS
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            existing_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
+            if test "${existing_draft}" != "true" && test "${PUBLISH_RELEASE}" != "true"; then
+              echo "Refusing to replace an already-published release during a draft dry-run" >&2
+              exit 1
+            fi
+            gh release upload "${RELEASE_TAG}" --clobber ./*
+            gh release edit "${RELEASE_TAG}" --notes-file release-status.md
+          else
+            gh release create "${RELEASE_TAG}" --verify-tag --target "${RELEASE_COMMIT}" --draft --prerelease --title "Nian Pass ${RELEASE_TAG}" --notes-file release-status.md ./*
+          fi
+          if test "${PUBLISH_RELEASE}" = "true"; then
+            gh release edit "${RELEASE_TAG}" --draft=false --prerelease=true
+          else
+            gh release edit "${RELEASE_TAG}" --draft=true --prerelease=true
+          fi

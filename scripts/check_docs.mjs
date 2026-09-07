@@ -51,10 +51,10 @@ export function runChecks(root) {
 
   requirePattern(violations, "SECURITY.md", securityPolicy, /supported versions[\s\S]{0,1200}reporting a vulnerability[\s\S]{0,1800}does not promise[\s\S]{0,100}(?:SLA|response)/i, "supported versions, private reporting, and honest response policy are required");
   requirePattern(violations, "docs/security-audit-m8.md", securityAudit, /BLOCKER[\s\S]{0,1000}HIGH[\s\S]{0,5000}ACCEPTED RISK[\s\S]{0,5000}Secret inventory/i, "rated findings and secret inventory are required");
-  requirePattern(violations, "docs/release.md", release, /clean checkout[\s\S]{0,1000}release-source-check[\s\S]{0,3000}SHA-256[\s\S]{0,3000}NOT RUN/i, "canonical release, integrity, and honest status procedure are required");
+  requirePattern(violations, "docs/release.md", release, /clean checkout[\s\S]{0,1400}release-source-check[\s\S]{0,5000}SHA-256[\s\S]{0,5000}NOT RUN/i, "canonical release, integrity, and honest status procedure are required");
   requirePattern(violations, "docs/reproducible-builds.md", reproducible, /VERSION[\s\S]{0,800}Rust 1\.98\.0[\s\S]{0,2200}CycloneDX/i, "version, toolchain, and SBOM reproducibility policy are required");
   requirePattern(violations, "docs/release-checklist.md", releaseChecklist, /No committed secrets[\s\S]{0,1000}CSP[\s\S]{0,1000}runtime[\s\S]{0,500}NOT RUN/i, "release security checklist is incomplete");
-  requirePattern(violations, "docs/release-status-template.md", releaseStatus, /Forgejo quality-check[\s\S]{0,1200}Windows desktop runtime smoke[\s\S]{0,1200}Android device runtime[\s\S]{0,1200}Artifact secret scan[\s\S]{0,800}Other signing/i, "release status matrix is incomplete");
+  requirePattern(violations, "docs/release-status-template.md", releaseStatus, /Forgejo canonical CI[\s\S]{0,1200}Windows full GUI runtime[\s\S]{0,1200}Android runtime[\s\S]{0,1200}Artifact secret scan[\s\S]{0,800}GitHub Release publication/i, "release status matrix is incomplete");
   requirePattern(violations, "docs/ipc-surface.md", ipcSurface, /Session control[\s\S]{0,1800}Vault mutation[\s\S]{0,1800}Browser[\s\S]{0,1800}Android/i, "Tauri IPC command classification is incomplete");
 
   requirePattern(violations, "README.md", readme, /## Current milestone[\s\S]{0,120}M8\s*[—-]\s*Security Hardening \/ Release Engineering\s*[—-]\s*IN PROGRESS/i, "current milestone must report M8 release engineering in progress");

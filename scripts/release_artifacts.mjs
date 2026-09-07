@@ -356,17 +356,29 @@ function writeChecksums(root) {
   writeFileSync(resolve(root, "SHA256SUMS"), `${lines.join("\n")}\n`);
 }
 
-export function buildReleaseManifest({ version, tag, commit, toolchains, artifacts, signing }) {
+export function buildReleaseManifest({ version, tag, commit, toolchains, artifacts, signing, validation, infrastructure }) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     version,
     tag,
     commit,
-    workflow: ".forgejo/workflows/release.yml",
+    workflow: ".github/workflows/release.yml",
     toolchains,
+    infrastructure,
     signing,
+    validation,
     artifacts,
   };
+}
+
+export function artifactPlatform(name) {
+  if (/native-host-windows|\.exe$/i.test(name)) return "windows-x86_64";
+  if (/native-host-linux|\.AppImage$|\.deb$/i.test(name)) return "linux-x86_64";
+  if (/nian-pass-browser-(?:chromium|firefox)-/i.test(name)) return "browser";
+  if (/\.apk$/i.test(name)) return "android";
+  if (/^gateway-image\.json$|nian-pass-sync-gateway-.*\.tar\.gz$/i.test(name)) return "gateway-linux-x86_64";
+  if (name === "release-status.md") return "release-metadata";
+  throw new Error(`could not classify release artifact platform for ${name}`);
 }
 
 function releaseToolchains() {
@@ -395,9 +407,14 @@ function writeManifest(root) {
   if (commitResult.status !== 0) throw new Error("could not resolve release commit");
   const artifacts = payloadFiles(root).map((path) => ({
     name: relative(root, path).replaceAll("\\", "/"),
+    platform: artifactPlatform(relative(root, path).replaceAll("\\", "/")),
     sha256: digest(readFileSync(path)),
     size: statSync(path).size,
   }));
+  const statusFile = process.env.RELEASE_STATUS_DATA_FILE;
+  const validation = statusFile
+    ? JSON.parse(readFileSync(resolve(statusFile), "utf8"))
+    : {};
   const manifest = buildReleaseManifest({
     version,
     tag: process.env.RELEASE_TAG ?? null,
@@ -407,6 +424,13 @@ function writeManifest(root) {
       windows: process.env.WINDOWS_SIGNING_STATUS ?? "NOT CONFIGURED",
       android: process.env.ANDROID_SIGNING_STATUS ?? "NOT CONFIGURED",
       other: process.env.OTHER_SIGNING_STATUS ?? "NOT CONFIGURED",
+    },
+    validation,
+    infrastructure: {
+      provider: "GitHub Actions hosted runners",
+      workflowRunId: process.env.GITHUB_RUN_ID ?? null,
+      runnerImages: process.env.RELEASE_RUNNER_IMAGES?.split(",").filter(Boolean) ?? [],
+      reproducibilityBoundary: "Hosted runner VM images are external release infrastructure and are not digest-pinned.",
     },
     artifacts,
   });

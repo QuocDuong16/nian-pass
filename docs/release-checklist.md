@@ -1,7 +1,9 @@
 # Release security checklist
 
-- [ ] Exact `v<VERSION>` tag and clean source commit
-- [ ] Forgejo `make quality-check` green
+- [ ] Forgejo `make quality-check` green for the exact approved commit
+- [ ] Exact existing `v<VERSION>` tag propagated unchanged to the GitHub mirror
+- [ ] GitHub checkout proves `refs/tags/<tag>^{commit} == HEAD` and a clean tree
+- [ ] GitHub release preflight gates pass without mutating source or tags
 - [ ] No committed secrets, `.env`, certificates, private keys, or real vaults
 - [ ] No debug flags, development endpoints, or unintended source maps
 - [ ] Rust/Node dependency audit and accepted advisory rationale reviewed
@@ -10,8 +12,10 @@
 - [ ] Test-only KDBX fixtures used for runtime smoke; no user vault used
 - [ ] Native Messaging install/doctor/uninstall checked on available platforms
 - [ ] SHA-256 checksums and release manifest generated
+- [ ] Canonical artifacts after upload/download match `SHA256SUMS`
 - [ ] Artifact secret scan passed; understand that it is not proof of absence
 - [ ] SBOM status recorded
 - [ ] Windows, Android, browser-store, container/checksum signing status recorded honestly
 - [ ] Linux/Windows/Android/browser/gateway runtime statuses use PASS, FAIL, or NOT RUN without conversion
 - [ ] Backup, restore, rollback, lost-password, and lost-token notes included in release notes
+- [ ] GitHub Release remains draft/prerelease until explicit artifact review and operator approval

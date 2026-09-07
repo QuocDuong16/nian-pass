@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -7,11 +8,15 @@ import { gzipSync } from "node:zlib";
 
 import {
   artifactViolations,
+  artifactPlatform,
   buildReleaseManifest,
   checksumLines,
   deduplicateComponents,
   productionCargoPackages,
 } from "../release_artifacts.mjs";
+import { assembleReleaseSet } from "../assemble_release.mjs";
+import { releaseStatuses, releaseStatusMarkdown } from "../release_status.mjs";
+import { deterministicZip } from "../../apps/browser-extension/build/package.mjs";
 
 function directory(t) {
   const root = mkdtempSync(join(tmpdir(), "nian-pass-artifacts-"));
@@ -172,10 +177,133 @@ test("release manifest binds artifacts to source, toolchains, and signing", () =
     commit: "a".repeat(40),
     toolchains: { rust: "1.98.0", node: "26.7.0" },
     signing: { windows: "NOT RUN" },
+    validation: { "Windows full GUI runtime": "NOT RUN" },
+    infrastructure: { provider: "GitHub Actions hosted runners" },
     artifacts: [{ name: "app.bin", sha256: "b".repeat(64), size: 12 }],
   });
-  assert.equal(manifest.workflow, ".forgejo/workflows/release.yml");
+  assert.equal(manifest.schemaVersion, 2);
+  assert.equal(manifest.workflow, ".github/workflows/release.yml");
   assert.equal(manifest.toolchains.rust, "1.98.0");
   assert.equal(manifest.artifacts[0].sha256, "b".repeat(64));
   assert.equal(manifest.signing.windows, "NOT RUN");
+  assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
+  assert.match(manifest.infrastructure.provider, /GitHub Actions/);
+});
+
+test("release payload names map to explicit manifest platforms", () => {
+  assert.equal(artifactPlatform("Nian Pass_0.1.0_x64-setup.exe"), "windows-x86_64");
+  assert.equal(artifactPlatform("Nian_Pass_0.1.0_amd64.AppImage"), "linux-x86_64");
+  assert.equal(artifactPlatform("nian-pass-browser-firefox-0.1.0.zip"), "browser");
+  assert.equal(artifactPlatform("app-universal-release.apk"), "android");
+  assert.equal(artifactPlatform("nian-pass-sync-gateway-0.1.0.tar.gz"), "gateway-linux-x86_64");
+  assert.throws(() => artifactPlatform("unknown.bin"), /could not classify/);
+});
+
+test("platform payloads assemble into one exact canonical release set", (t) => {
+  const root = directory(t);
+  const input = join(root, "platforms");
+  const output = join(root, "release");
+  const payloads = {
+    windows: ["Nian Pass_0.1.0_x64-setup.exe", "nian-pass-native-host-windows-x86_64-0.1.0.zip"],
+    linux: ["Nian_Pass_0.1.0_amd64.AppImage", "Nian Pass_0.1.0_amd64.deb", "nian-pass-native-host-linux-x86_64-0.1.0.zip"],
+    browser: ["nian-pass-browser-chromium-0.1.0.zip", "nian-pass-browser-firefox-0.1.0.zip"],
+    android: ["app-universal-release-unsigned.apk"],
+    gateway: ["gateway-image.json", "nian-pass-sync-gateway-0.1.0.tar.gz"],
+  };
+  for (const [platform, names] of Object.entries(payloads)) {
+    mkdirSync(join(input, platform), { recursive: true });
+    for (const name of names) writeFileSync(join(input, platform, name), `${platform}:${name}`);
+  }
+  const staged = assembleReleaseSet(input, output, "0.1.0");
+  assert.deepEqual(staged.sort(), Object.values(payloads).flat().sort());
+  assert.deepEqual(readdirSync(output).sort(), staged.sort());
+  assert.equal(readFileSync(join(output, "gateway-image.json"), "utf8"), "gateway:gateway-image.json");
+});
+
+test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t) => {
+  const root = directory(t);
+  const input = join(root, "platforms");
+  const output = join(root, "release");
+  const safeZip = deterministicZip([{ name: "README.txt", bytes: Buffer.from("release payload\n") }]);
+  const safeDeb = arArchive("data.tar.gz", gzipSync(tarArchive("usr/bin/nian-pass", "binary")));
+  const payloads = {
+    windows: {
+      "Nian Pass_0.1.0_x64-setup.exe": Buffer.from([0, 1, 2, 3]),
+      "nian-pass-native-host-windows-x86_64-0.1.0.zip": safeZip,
+    },
+    linux: {
+      "Nian_Pass_0.1.0_amd64.AppImage": Buffer.from([0, 1, 2, 3]),
+      "Nian Pass_0.1.0_amd64.deb": safeDeb,
+      "nian-pass-native-host-linux-x86_64-0.1.0.zip": safeZip,
+    },
+    browser: {
+      "nian-pass-browser-chromium-0.1.0.zip": safeZip,
+      "nian-pass-browser-firefox-0.1.0.zip": safeZip,
+    },
+    android: { "app-universal-release-unsigned.apk": Buffer.from([0, 1, 2, 3]) },
+    gateway: {
+      "gateway-image.json": Buffer.from('{"imageId":"sha256:fixture"}\n'),
+      "nian-pass-sync-gateway-0.1.0.tar.gz": gzipSync(tarArchive("usr/local/bin/nian-pass-sync-gateway", "binary")),
+    },
+  };
+  for (const [platform, files] of Object.entries(payloads)) {
+    mkdirSync(join(input, platform), { recursive: true });
+    for (const [name, bytes] of Object.entries(files)) writeFileSync(join(input, platform, name), bytes);
+  }
+  assembleReleaseSet(input, output, "0.1.0");
+  writeFileSync(join(output, "release-status.md"), "# Release status\n\nExperimental release.\n");
+  const statusData = join(root, "release-status.json");
+  writeFileSync(statusData, '{"Windows full GUI runtime":"NOT RUN"}\n');
+
+  for (const command of ["scan", "sbom", "manifest", "checksums"]) {
+    const result = spawnSync(process.execPath, [join(import.meta.dirname, "..", "release_artifacts.mjs"), command], {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ARTIFACT_DIR: output,
+        RELEASE_TAG: "v0.1.0",
+        RELEASE_STATUS_DATA_FILE: statusData,
+      },
+    });
+    assert.equal(result.status, 0, `${command}: ${result.stderr}`);
+  }
+
+  const manifest = JSON.parse(readFileSync(join(output, "release-manifest.json"), "utf8"));
+  assert.equal(manifest.artifacts.length, 11);
+  assert.equal(manifest.tag, "v0.1.0");
+  assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
+  const checksumResult = spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
+    cwd: output,
+    encoding: "utf8",
+  });
+  assert.equal(checksumResult.status, 0, checksumResult.stderr);
+});
+
+test("release assembly rejects unexpected platform payloads", (t) => {
+  const root = directory(t);
+  for (const platform of ["windows", "linux", "browser", "android", "gateway"]) {
+    mkdirSync(join(root, platform), { recursive: true });
+  }
+  writeFileSync(join(root, "windows", ".env.production"), "benign");
+  assert.throws(() => assembleReleaseSet(root, join(root, "out"), "0.1.0"), /unexpected release payload/);
+});
+
+test("release status keeps runtime and signing evidence distinct", () => {
+  const statuses = releaseStatuses({
+    WINDOWS_BUILD_STATUS: "PASS",
+    WINDOWS_GUI_STATUS: "NOT RUN",
+    WINDOWS_SIGNING_STATUS: "NOT CONFIGURED",
+  });
+  const report = releaseStatusMarkdown({
+    version: "0.1.0",
+    tag: "v0.1.0",
+    commit: "a".repeat(40),
+    statuses,
+  });
+  assert.match(report, /Windows release build\s+PASS/);
+  assert.match(report, /Windows full GUI runtime\s+NOT RUN/);
+  assert.match(report, /Windows Authenticode\s+NOT CONFIGURED/);
+  assert.match(report, /Apple: M9\+ DEFERRED/);
+  assert.match(report, /Known limitations:/);
 });

@@ -25,8 +25,11 @@ M8 now provides pinned release inputs, a single `VERSION`, clean-tree and tag
 consistency gates, hardened release profiles/CSP/filesystem opens, deterministic
 browser and Native Messaging packages, Linux/Android/gateway production build
 paths, SHA-256 checksums, SBOM/provenance output, artifact regression scanning,
-and a tag/manual-only Forgejo release workflow. M8 is not marked DONE until the
-new commit has a green canonical Forgejo gate and the release report records
+and a tag/manual-only GitHub multi-platform release workflow. Forgejo remains
+the canonical routine CI authority; GitHub is only the mirror release execution
+and distribution surface. M8 is not marked DONE until the
+new commit has a green canonical Forgejo gate, a real GitHub release dry-run is
+reviewed, and the release report records
 platform runtime and signing results without converting `NOT RUN` into `PASS`.
 
 Desktop explicit sync supports WebDAV, AWS S3, and the Nian Pass Sync Gateway
@@ -92,10 +95,12 @@ then revalidates the current session, `EntryId`, and exact browser origin throug
 
 Release engineering separates routine validation from production builds.
 Forgejo Actions remains the normal development CI on self-hosted Docker/DIND
-infrastructure; the dedicated release workflow runs only for an explicit `v*`
-tag or manual release event. No GitHub branch CI is added. A future isolated
-native Windows release job may be considered only if Forgejo has no Windows
-runner. Apple runners remain deferred.
+infrastructure. GitHub Actions is release-only: an explicit existing `v*` tag
+drives native Windows MSVC/NSIS, Linux, Android, browser, gateway, and final
+attestation jobs. It has no branch, pull-request, scheduled, or Apple job and
+does not replace Forgejo source/quality authority. Releases remain draft or
+prerelease until an operator reviews the exact checksummed artifact set. Apple
+runners remain deferred.
 
 ## Completed M5.5 milestone
 

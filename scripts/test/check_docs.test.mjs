@@ -116,7 +116,7 @@ function fixture(t) {
   write(
     root,
     "docs/release-status-template.md",
-    "Forgejo quality-check. Windows desktop runtime smoke. Android device runtime. Artifact secret scan. Other signing.\n",
+    "Forgejo canonical CI. Windows full GUI runtime. Android runtime. Artifact secret scan. GitHub Release publication.\n",
   );
   write(
     root,

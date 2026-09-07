@@ -44,7 +44,7 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	gateway-container-check \
 	security-hardening-check release-policy-check release-source-check node-license-check \
 	release-browser-package release-linux-build release-windows-build release-android-build \
-	release-gateway-image release-stage release-artifact-check release-check
+	release-gateway-image release-stage release-assemble release-artifact-check release-check
 
 tools-install:
 	@echo "Install pinned Rust quality tools locally..."
@@ -389,12 +389,8 @@ release-linux-build: release-source-check
 	node scripts/package_native_host.mjs linux-x86_64 target/release/nian-pass-browser-host
 	$(MAKE) release-stage
 
-release-windows-build: release-source-check
-	pnpm install --frozen-lockfile
-	NIAN_PASS_COMMIT="$$(git rev-parse HEAD)" pnpm --filter @nian-pass/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc
-	cargo build --locked --release --target x86_64-pc-windows-msvc -p nian-pass-browser-host
-	node scripts/package_native_host.mjs windows-x86_64 target/x86_64-pc-windows-msvc/release/nian-pass-browser-host.exe
-	$(MAKE) release-stage
+release-windows-build:
+	pwsh -NoProfile -NonInteractive -File scripts/release_windows.ps1
 
 release-android-build: release-source-check mobile-android-check
 	$(MAKE) release-stage
@@ -413,6 +409,9 @@ release-gateway-image: release-source-check
 
 release-stage: release-source-check
 	node scripts/stage_release.mjs
+
+release-assemble:
+	node scripts/assemble_release.mjs
 
 release-artifact-check: release-source-check
 	node scripts/release_artifacts.mjs scan

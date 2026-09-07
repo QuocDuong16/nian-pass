@@ -142,7 +142,8 @@ and the narrow ACL-preserving `ReplaceFileW` adapter for
 Real WebDAV, AWS S3, S3-compatible, Windows desktop-to-gateway, Linux
 desktop-to-gateway, HTTPS reverse-proxy, and container runtime smoke remain
 manual and must each be reported as RUN or NOT RUN. Ordinary CI stays Forgejo-owned; M7
-adds no GitHub Actions workflow and M8 still owns tag-only release engineering.
+added no GitHub Actions workflow; M8 adds only the tag/manual existing-tag
+multi-platform release workflow and does not duplicate ordinary CI.
 
 M6.5 keeps `browser-source-check` and `browser-extension-check` and adds
 `browser-native-protocol-check`, `browser-native-host-check`, and
@@ -202,13 +203,12 @@ native job owns `browser-integration-check` because that mixed gate requires
 Cargo, native Tauri build prerequisites, Node.js, and the pinned pnpm toolchain.
 
 Routine CI remains in Forgejo Actions on the project's self-hosted Docker/DIND
-infrastructure. GitHub Actions is reserved for a future multi-platform
-production release workflow on native hosted OS runners and must be tag-only
-(initial policy `v*`), never normal branch push, pull request, or schedule CI.
-This avoids duplicating ordinary validation cost. Windows is in current release
-direction, Linux packaging may join it, and native macOS release work remains
-conditional on deferred Apple support resuming. No such GitHub workflow runs or
-is added in M6.5; Forgejo tag-trigger exclusion is deferred to release engineering.
+infrastructure. GitHub Actions owns only the M8 multi-platform production
+release workflow on native hosted OS runners. It is tag-only (`v*`) with a safe
+manual existing-tag dry-run, never normal branch push, pull request, or schedule
+CI. This avoids duplicating ordinary validation cost. Windows, Linux, Android,
+browser, gateway, and attestation jobs are release-scoped; native macOS/iOS
+release work remains deferred and no Apple runner is present.
 
 `mobile-source-check` is environment-independent and participates in the normal
 policy, quick, and quality gates. It verifies the committed Tauri-generated

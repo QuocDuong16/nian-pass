@@ -1,18 +1,31 @@
 # Canonical release procedure
 
-Releases are explicit `v*` tag or manual Forgejo workflow runs. Routine branch
-CI remains `.forgejo/workflows/quality.yml`; production packaging is never a
-branch-push side effect. Apple projects, builds, signing, and runners are not
-part of this procedure.
+Forgejo is the source-development and canonical routine CI authority. GitHub is
+a mirror used as the production multi-platform release execution and
+distribution surface. Routine branch, pull-request, scheduled, quality,
+security-policy, gateway, and Windows cross-check work remains in
+`.forgejo/workflows/quality.yml`. `.github/workflows/release.yml` runs only for
+an explicit `v*` tag or a manual dispatch naming an existing `v*` tag; it never
+builds a branch or mutates source. Apple projects, builds, signing, and runners
+are not part of this procedure.
 
 ## Source and version
 
-1. Start from a clean checkout of the exact tag. Set `RELEASE_TAG=v0.x.y`.
-2. Run `make release-source-check`. It fails on a dirty tree, a missing/mismatched
-   tag, drift from `VERSION`, unpinned dependencies/actions/images, or toolchain
-   disagreement.
-3. Run `make quality-check` and `make gateway-container-check`. Record RUN and
-   PASS/FAIL separately; do not publish after a failure.
+1. Approve one exact clean commit after canonical Forgejo CI is green. Do not
+   create a release tag before that review.
+2. Create one `v<VERSION>` tag at that commit and propagate that exact tag to
+   the GitHub mirror. If mirroring does not propagate tags, push the existing
+   tag explicitly; never recreate the same tag at another commit.
+3. GitHub starts from a clean checkout of `refs/tags/<tag>` with full history. Every build compares
+   its HEAD to the preflight commit and runs the repository source gate.
+4. `make release-source-check` fails on a dirty tree, a missing/mismatched
+   tag, `refs/tags/<tag>^{commit} != HEAD`, drift from `VERSION`, unpinned
+   dependencies/actions/images, or toolchain disagreement.
+
+Release preflight runs `release-source-check`, `release-policy-check`, and
+`security-hardening-check`. It relies on the observed Forgejo result for the
+full routine `quality-check`; it does not duplicate that expensive development
+pipeline merely to obtain another badge.
 
 ## Platform builds
 
@@ -38,15 +51,22 @@ part of this procedure.
   archive plus image reference metadata. Push/tag/sign it only through an
   authorized registry step.
 
-The current Forgejo release workflow has Docker release capacity for canonical
-quality, Linux, browser, and gateway staging. No native Windows or pinned
-Android runner is declared, so those builds and runtime checks remain NOT RUN
-until such runners are explicitly provisioned. This is not a release PASS.
+GitHub release jobs build independently on native `windows-2025` and Linux
+`ubuntu-24.04` hosted runners. Windows produces MSVC/NSIS and its native host;
+Linux produces AppImage/deb and the executable-mode-preserving native-host ZIP;
+separate jobs produce browser, Android, and gateway payloads. Each job uploads
+only its payload. The attest job rejects unexpected files while assembling one
+canonical set, then scans and hashes the exact bytes later passed to GitHub
+Release. Hosted runner VM labels are external infrastructure, not immutable
+digest-pinned build environments; provenance records that limitation.
 
 ## Artifact integrity and signing
 
-Collect outputs under ignored `artifacts/release/`, then run
-`make release-artifact-check`. It scans names, inspectable browser archives and
+Downloaded platform payloads are separated under ignored
+`artifacts/platforms/<platform>/`. `make release-assemble` accepts only the
+documented Windows, Linux, browser, Android, and gateway payload patterns and
+copies them into a clean `artifacts/release/`. Then `make
+release-artifact-check` scans names, inspectable browser archives and
 bytes for forbidden files, known secret sentinels, and secret-like text
 assignments. It recursively inspects bounded gzip TAR archives, Docker saved
 image plain nested `layer.tar` files, and Debian package payload TARs without
@@ -57,9 +77,11 @@ commit/tag/toolchain/artifact `release-manifest.json`, and generates
 absence, and it does not claim coverage of opaque proprietary installer
 formats.
 
-Signing is optional only when credentials are unavailable, not implicit. Tauri
-is configured for SHA-256 Authenticode and accepts signing configuration without
-code changes. Android uses Gradle signing configuration supplied by the runner.
+Signing is optional only when credentials are unavailable, not implicit. The
+Windows job can import a PFX from its two job-scoped GitHub secrets, sign and
+verify the native host/NSIS output with SHA-256 Authenticode, then remove the
+temporary certificate. Android uses its four job-scoped signing values and a
+temporary decoded keystore; partial signing configuration fails closed.
 Browser stores, container provenance, and checksum signatures are external
 release-authority steps. Never place keys, certificates, passwords, tokens, or
 base64 key material in Git, command arguments, logs, or artifacts. Record
@@ -77,9 +99,14 @@ proves old approval/candidates are invalid. Gateway smoke includes non-root
 startup, auth, CAS, restart persistence, locking, limits, permissions, and no
 token in logs/image.
 
-Every release report uses the status matrix requested by M8. `NOT RUN` never
-becomes `PASS`; unsigned never becomes signed. Publish checksums, SBOM status,
-release notes, known accepted risks, and the exact commit. A gateway volume is
+Every release report uses the status matrix requested by M8. Process-level
+diagnostics and package checks are not full GUI/device runtime validation.
+`NOT RUN` never becomes `PASS`; unsigned never becomes signed. Tag runs and
+manual dry-runs stage a draft/prerelease by default. A manual operator may
+explicitly publish a prerelease only after reviewing the canonical artifact
+set; this workflow never calls an experimental release stable. Publish
+checksums, SBOM status, release notes, known accepted risks, and the exact
+commit. A gateway volume is
 not trusted history. Back up stopped volumes independently. Nian Pass cannot
 recover a forgotten KDBX master password; lost provider credentials or gateway
 tokens must be rotated/replaced at the provider or gateway. Start from

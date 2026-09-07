@@ -291,18 +291,17 @@ lifetime and retains no credential cache; Rust uses `SecretString`, `Zeroizing`,
 and bounded scoped transport buffers where practical. Browser credential
 storage and persistent pairing are both absent.
 
-## CI and future release boundary
+## CI and release authority boundary
 
 Forgejo Actions owns routine development CI and calls repository Make targets
-on self-hosted Docker/DIND infrastructure. GitHub Actions is reserved for a
-future tag-triggered, native-hosted multi-platform production release build:
-Windows, potentially Linux packaging, and macOS only if deferred Apple work
-resumes. That future workflow must use an explicit version-tag trigger such as
-`push.tags: ["v*"]` and must not run for branch pushes, pull requests, or
-schedules. Before release automation lands, Forgejo's broad push trigger should
-be narrowed during the release-engineering milestone so a tag does not launch
-both full Forgejo CI and full GitHub release work. M6.5 changes neither workflow
-triggers nor release artifacts.
+on self-hosted Docker/DIND infrastructure. GitHub remains a source mirror and
+owns only the tag-triggered, native-hosted multi-platform release build for
+Windows, Linux, Android, browser packages, gateway, and attestation. Its
+`push.tags: ["v*"]` and safe manual existing-tag triggers never run for branch
+pushes, pull requests, or schedules. Every builder checks out the explicit
+`refs/tags/` ref and binds it to one preflight commit. Apple remains deferred;
+there is no macOS/iOS runner or artifact. Forgejo does not build a competing
+production release set.
 
 ## M5.5 Android security lifecycle
 

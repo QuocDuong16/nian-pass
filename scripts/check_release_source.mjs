@@ -36,6 +36,64 @@ export function isExactVersion(value) {
   return typeof value === "string" && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
 }
 
+export function githubReleaseWorkflowViolations(root) {
+  const violations = [];
+  const githubWorkflow = ".github/workflows/release.yml";
+  const forgejoWorkflow = ".forgejo/workflows/release.yml";
+  if (!existsSync(resolve(root, ".forgejo/workflows/quality.yml"))) {
+    violations.push(".forgejo/workflows/quality.yml: canonical routine CI workflow is missing");
+  }
+  if (existsSync(resolve(root, forgejoWorkflow))) {
+    violations.push(`${forgejoWorkflow}: Forgejo may not duplicate production release packaging`);
+  }
+  if (!existsSync(resolve(root, githubWorkflow))) {
+    violations.push(`${githubWorkflow}: GitHub production release workflow is missing`);
+    return violations;
+  }
+
+  const workflow = read(root, githubWorkflow);
+  const triggerBlock = workflow.match(/^on:\s*\n([\s\S]*?)^permissions:/m)?.[1] ?? "";
+  const triggers = [...triggerBlock.matchAll(/^  ([A-Za-z0-9_-]+):/gm)].map((match) => match[1]);
+  if (triggers.length !== 2 || !triggers.includes("push") || !triggers.includes("workflow_dispatch")) {
+    violations.push(`${githubWorkflow}: only push.tags v* and workflow_dispatch triggers are allowed`);
+  }
+  const require = (pattern, message) => {
+    if (!pattern.test(workflow)) violations.push(`${githubWorkflow}: ${message}`);
+  };
+  require(/^on:\s*\n[\s\S]*?^  push:\s*\n\s+tags:\s*\n\s+- ["']v\*["']/m, "must trigger on v* tags");
+  require(/^  workflow_dispatch:\s*\n[\s\S]*?release_tag:[\s\S]*?required:\s*true/m, "manual dispatch must require a release_tag");
+  require(/ref:\s*\$\{\{\s*format\(['"]refs\/tags\/\{0\}['"],\s*env\.RELEASE_TAG\)\s*\}\}/, "every checkout must select the explicit refs/tags namespace");
+  require(/^permissions:\s*\n\s+contents:\s*read\s*$/m, "default permissions must be contents: read");
+  for (const job of ["preflight", "linux", "windows", "browser", "android", "gateway", "attest", "publish"]) {
+    require(new RegExp(`^  ${job}:\\s*$`, "m"), `missing ${job} job`);
+  }
+  require(/^  windows:[\s\S]*?^    runs-on:\s*windows-/m, "Windows artifacts require a native Windows runner");
+  require(/^  linux:[\s\S]*?^    runs-on:\s*ubuntu-/m, "Linux artifacts require a Linux runner");
+  require(/^  android:[\s\S]*?^    runs-on:\s*ubuntu-/m, "Android artifacts require a Linux runner");
+  require(/^  publish:[\s\S]*?^    permissions:\s*\n\s+contents:\s*write/m, "only publish must receive release write authority");
+
+  if (/^\s+branches:/m.test(workflow)) violations.push(`${githubWorkflow}: branch push triggers are forbidden`);
+  if (/^\s{2}(?:pull_request|schedule):/m.test(workflow)) violations.push(`${githubWorkflow}: routine CI triggers are forbidden`);
+  if (/runs-on:\s*macos-/i.test(workflow)) violations.push(`${githubWorkflow}: Apple runners remain deferred`);
+  if (/make\s+quality-check/.test(workflow)) violations.push(`${githubWorkflow}: must not duplicate Forgejo routine quality-check`);
+  if (/\bgit\s+(?:tag|push)\b|\b(?:sed|perl)\b[^\n]*(?:VERSION|Cargo\.toml|package\.json)/i.test(workflow)) {
+    violations.push(`${githubWorkflow}: release workflow may not mutate source or tags`);
+  }
+  const writes = workflow.match(/^\s+contents:\s*write\s*$/gm) ?? [];
+  if (writes.length !== 1) violations.push(`${githubWorkflow}: exactly one job must have contents: write`);
+  const checkoutCount = (workflow.match(/uses:\s*actions\/checkout@/g) ?? []).length;
+  const tagCheckoutCount = (workflow.match(/ref:\s*\$\{\{\s*format\(['"]refs\/tags\/\{0\}['"],\s*env\.RELEASE_TAG\)\s*\}\}/g) ?? []).length;
+  if (checkoutCount === 0 || checkoutCount !== tagCheckoutCount) {
+    violations.push(`${githubWorkflow}: every checkout must use the exact release tag ref`);
+  }
+  for (const match of workflow.matchAll(/^\s*uses:\s*(\S+)/gm)) {
+    if (!/@[0-9a-f]{40}$/.test(match[1])) {
+      violations.push(`${githubWorkflow}: action ${match[1]} must use a full commit revision`);
+    }
+  }
+  return violations;
+}
+
 function checkCargoPins(root, violations) {
   const workspace = parseToml(read(root, "Cargo.toml"));
   const manifests = ["Cargo.toml", ...workspace.workspace.members.map((item) => `${item}/Cargo.toml`)];
@@ -128,7 +186,8 @@ export function sourcePolicyViolations(root) {
   }
 
   checkCargoPins(root, violations);
-  for (const workflow of [".forgejo/workflows/quality.yml", ".forgejo/workflows/openwiki-update.yml", ".forgejo/workflows/release.yml"]) {
+  violations.push(...githubReleaseWorkflowViolations(root));
+  for (const workflow of [".forgejo/workflows/quality.yml", ".forgejo/workflows/openwiki-update.yml", ".github/workflows/release.yml"]) {
     if (!existsSync(resolve(root, workflow))) continue;
     for (const match of read(root, workflow).matchAll(/^\s*uses:\s*(\S+)/gm)) {
       if (!/@[0-9a-f]{40}$/.test(match[1])) {
