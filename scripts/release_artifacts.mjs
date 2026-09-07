@@ -78,8 +78,19 @@ function tarEntries(bytes) {
         .trim();
     const name = [field(345, 155), field(0, 100)].filter(Boolean).join("/");
     const sizeField = field(124, 12);
-    if (!name || !/^[0-7]+$/.test(sizeField)) {
+    const checksumField = header
+      .subarray(148, 156)
+      .toString("ascii")
+      .replace(/[\0 ]+$/g, "")
+      .trim();
+    if (!name || !/^[0-7]+$/.test(sizeField) || !/^[0-7]+$/.test(checksumField)) {
       throw new Error("TAR contains an invalid header");
+    }
+    const checksumHeader = Buffer.from(header);
+    checksumHeader.fill(0x20, 148, 156);
+    const actualChecksum = checksumHeader.reduce((sum, byte) => sum + byte, 0);
+    if (actualChecksum !== Number.parseInt(checksumField, 8)) {
+      throw new Error(`TAR entry ${name} has an invalid header checksum`);
     }
     const size = Number.parseInt(sizeField, 8);
     const bodyStart = offset + 512;
@@ -142,6 +153,10 @@ function isGzip(bytes) {
   return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
+function isPlainTarName(name) {
+  return name.toLowerCase().endsWith(".tar");
+}
+
 function scanTar(name, bytes, depth = 0) {
   if (depth > 2) return [`${name}: nested archive depth exceeds the scan limit`];
   const violations = [];
@@ -160,6 +175,18 @@ function scanTar(name, bytes, depth = 0) {
       } catch (error) {
         violations.push(
           `${entryName}: compressed TAR entry could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else if (isPlainTarName(entry.name)) {
+      if (entry.bytes.length > maximumExpandedArchiveBytes) {
+        violations.push(`${entryName}: plain TAR entry exceeds the expanded archive limit`);
+        continue;
+      }
+      try {
+        violations.push(...scanTar(entryName, entry.bytes, depth + 1));
+      } catch (error) {
+        violations.push(
+          `${entryName}: plain TAR entry could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }

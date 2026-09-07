@@ -5,22 +5,75 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 
-import { dirtyTreeViolation, isExactVersion, tagViolation } from "../check_release_source.mjs";
+import { dirtyTreeViolation, isExactVersion, tagIdentityViolation, tagViolation } from "../check_release_source.mjs";
+
+const identity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"];
+
+function git(root, ...arguments_) {
+  return execFileSync("git", arguments_, {
+    cwd: root,
+    encoding: "utf8",
+  }).trim();
+}
 
 function repository(t) {
   const root = mkdtempSync(join(tmpdir(), "nian-pass-release-source-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, "VERSION"), "0.1.0\n");
-  execFileSync("git", ["init", "--quiet"], { cwd: root });
-  execFileSync("git", ["add", "VERSION"], { cwd: root });
-  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture"], { cwd: root });
+  git(root, "init", "--quiet");
+  git(root, "add", "VERSION");
+  git(root, ...identity, "commit", "--quiet", "-m", "fixture");
   return root;
+}
+
+function commitChange(root, name = "change.txt") {
+  writeFileSync(join(root, name), `${name}\n`);
+  git(root, "add", name);
+  git(root, ...identity, "commit", "--quiet", "-m", name);
 }
 
 test("tag must match the authoritative VERSION", (t) => {
   const root = repository(t);
   assert.equal(tagViolation(root, "v0.1.0"), null);
   assert.match(tagViolation(root, "v0.1.1"), /!= v0\.1\.0/);
+});
+
+test("lightweight release tag pointing to HEAD is accepted", (t) => {
+  const root = repository(t);
+  git(root, "tag", "v0.1.0");
+  assert.equal(tagIdentityViolation(root, "v0.1.0"), null);
+});
+
+test("release tag pointing to the previous commit rejects the current HEAD", (t) => {
+  const root = repository(t);
+  git(root, "tag", "v0.1.0");
+  commitChange(root);
+  assert.match(tagIdentityViolation(root, "v0.1.0"), /not HEAD/);
+});
+
+test("a branch named like the release does not satisfy the tag gate", (t) => {
+  const root = repository(t);
+  git(root, "branch", "v0.1.0");
+  assert.match(tagIdentityViolation(root, "v0.1.0"), /does not exist/);
+});
+
+test("a tag explicitly targeting another commit is rejected", (t) => {
+  const root = repository(t);
+  const firstCommit = git(root, "rev-parse", "HEAD");
+  commitChange(root);
+  git(root, "tag", "v0.1.0", firstCommit);
+  assert.match(tagIdentityViolation(root, "v0.1.0"), /not HEAD/);
+});
+
+test("annotated release tag peels to and accepts HEAD", (t) => {
+  const root = repository(t);
+  git(root, ...identity, "tag", "-a", "v0.1.0", "-m", "release");
+  assert.equal(tagIdentityViolation(root, "v0.1.0"), null);
+});
+
+test("missing release tag is rejected", (t) => {
+  const root = repository(t);
+  assert.match(tagIdentityViolation(root, "v0.1.0"), /does not exist/);
 });
 
 test("dirty-tree rejection exercises Git state", (t) => {

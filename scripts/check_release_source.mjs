@@ -156,6 +156,25 @@ export function tagViolation(root, tag) {
   return tag === expected ? null : `release tag ${tag || "<missing>"} != ${expected}`;
 }
 
+function gitCommit(root, revision) {
+  const result = spawnSync("git", ["rev-parse", "--verify", revision], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+export function tagIdentityViolation(root, tag) {
+  const tagRevision = `refs/tags/${tag}^{commit}`;
+  const tagCommit = gitCommit(root, tagRevision);
+  if (!tagCommit) return `release tag refs/tags/${tag} does not exist or does not resolve to a commit`;
+  const headCommit = gitCommit(root, "HEAD");
+  if (!headCommit) return "could not resolve the release HEAD commit";
+  return tagCommit === headCommit
+    ? null
+    : `release tag refs/tags/${tag} points to ${tagCommit}, not HEAD ${headCommit}`;
+}
+
 export function dirtyTreeViolation(root) {
   const result = spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
     cwd: root,
@@ -173,8 +192,13 @@ function main() {
     if (dirty) violations.push(dirty);
   }
   if (modes.has("--tag")) {
-    const mismatch = tagViolation(repositoryRoot, process.env.RELEASE_TAG ?? "");
+    const tag = process.env.RELEASE_TAG ?? "";
+    const mismatch = tagViolation(repositoryRoot, tag);
     if (mismatch) violations.push(mismatch);
+    else {
+      const identity = tagIdentityViolation(repositoryRoot, tag);
+      if (identity) violations.push(identity);
+    }
   }
   if (violations.length > 0) {
     process.stderr.write(`Release source check failed:\n${violations.map((item) => `- ${item}`).join("\n")}\n`);

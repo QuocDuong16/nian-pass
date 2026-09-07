@@ -47,11 +47,15 @@ until such runners are explicitly provisioned. This is not a release PASS.
 
 Collect outputs under ignored `artifacts/release/`, then run
 `make release-artifact-check`. It scans names, inspectable browser archives and
-bytes for forbidden files/test sentinels, recursively inspects bounded Debian
-package and gzip/TAR container layers without executing them, emits
+bytes for forbidden files, known secret sentinels, and secret-like text
+assignments. It recursively inspects bounded gzip TAR archives, Docker saved
+image plain nested `layer.tar` files, and Debian package payload TARs without
+executing them, then emits
 `sbom.cdx.json`, writes a
 commit/tag/toolchain/artifact `release-manifest.json`, and generates
-`SHA256SUMS`.
+`SHA256SUMS`. This scan is a regression defense, not proof of total secret
+absence, and it does not claim coverage of opaque proprietary installer
+formats.
 
 Signing is optional only when credentials are unavailable, not implicit. Tauri
 is configured for SHA-256 Authenticode and accepts signing configuration without

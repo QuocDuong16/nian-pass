@@ -19,15 +19,29 @@ function directory(t) {
   return root;
 }
 
-function tarArchive(name, body) {
-  const bytes = Buffer.from(body);
-  const paddedSize = Math.ceil(bytes.length / 512) * 512;
-  const archive = Buffer.alloc(512 + paddedSize + 1024);
-  archive.write(name, 0, 100, "utf8");
-  archive.write(`${bytes.length.toString(8).padStart(11, "0")}\0`, 124, 12, "ascii");
-  archive[156] = "0".charCodeAt(0);
-  bytes.copy(archive, 512);
-  return archive;
+function tarArchive(nameOrEntries, body) {
+  const entries = typeof nameOrEntries === "string" ? [{ name: nameOrEntries, body }] : nameOrEntries;
+  const parts = [];
+  for (const entry of entries) {
+    const bytes = Buffer.from(entry.body);
+    const header = Buffer.alloc(512);
+    header.write(entry.name, 0, 100, "utf8");
+    header.write("0000644\0", 100, 8, "ascii");
+    header.write("0000000\0", 108, 8, "ascii");
+    header.write("0000000\0", 116, 8, "ascii");
+    header.write(`${bytes.length.toString(8).padStart(11, "0")}\0`, 124, 12, "ascii");
+    header.write("00000000000\0", 136, 12, "ascii");
+    header.fill(0x20, 148, 156);
+    header[156] = "0".charCodeAt(0);
+    header.write("ustar\0", 257, 6, "ascii");
+    header.write("00", 263, 2, "ascii");
+    const checksum = header.reduce((sum, byte) => sum + byte, 0);
+    header.write(checksum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+    header[154] = 0;
+    header[155] = 0x20;
+    parts.push(header, bytes, Buffer.alloc(Math.ceil(bytes.length / 512) * 512 - bytes.length));
+  }
+  return Buffer.concat([...parts, Buffer.alloc(1024)]);
 }
 
 function arArchive(name, body) {
@@ -70,14 +84,36 @@ test("artifact scan passes an ordinary binary", (t) => {
 
 test("artifact scan inspects compressed container TAR contents", (t) => {
   const root = directory(t);
-  writeFileSync(
-    join(root, "gateway.tar.gz"),
-    gzipSync(tarArchive("image/.env.production", "TOKEN=M8_RELEASE_SECRET")),
-  );
+  writeFileSync(join(root, "gateway.tar.gz"), gzipSync(tarArchive("image/.env.production", "TOKEN=M8_RELEASE_SECRET")));
   const violations = artifactViolations(root).join("\n");
   assert.match(violations, /forbidden archived filename/);
   assert.match(violations, /secret sentinel/);
   assert.match(violations, /secret-like assignment/);
+});
+
+test("artifact scan rejects forbidden filenames inside Docker plain layer TARs", (t) => {
+  const root = directory(t);
+  const layer = tarArchive("app/.env.production", "benign fixture contents");
+  const dockerArchive = tarArchive([
+    { name: "manifest.json", body: "[]" },
+    { name: "config.json", body: "{}" },
+    { name: "abc123/layer.tar", body: layer },
+  ]);
+  writeFileSync(join(root, "nian-pass-sync-gateway-0.1.0.tar.gz"), gzipSync(dockerArchive));
+  const violations = artifactViolations(root).join("\n");
+  assert.match(violations, /abc123\/layer\.tar:app\/\.env\.production: forbidden archived filename/);
+});
+
+test("artifact scan accepts ordinary files inside Docker plain layer TARs", (t) => {
+  const root = directory(t);
+  const layer = tarArchive("usr/local/bin/nian-pass-sync-gateway", Buffer.from([0, 1, 2, 3]));
+  const dockerArchive = tarArchive([
+    { name: "manifest.json", body: "[]" },
+    { name: "config.json", body: "{}" },
+    { name: "abc123/layer.tar", body: layer },
+  ]);
+  writeFileSync(join(root, "nian-pass-sync-gateway-0.1.0.tar.gz"), gzipSync(dockerArchive));
+  assert.deepEqual(artifactViolations(root), []);
 });
 
 test("artifact scan inspects Debian data archives", (t) => {
@@ -90,11 +126,14 @@ test("artifact scan inspects Debian data archives", (t) => {
 });
 
 test("SBOM components are unique and sorted", () => {
-  assert.deepEqual(deduplicateComponents([
-    { purl: "pkg:npm/z@1", name: "z" },
-    { purl: "pkg:cargo/a@1", name: "a" },
-    { purl: "pkg:npm/z@1", name: "z" },
-  ]).map((item) => item.name), ["a", "z"]);
+  assert.deepEqual(
+    deduplicateComponents([
+      { purl: "pkg:npm/z@1", name: "z" },
+      { purl: "pkg:cargo/a@1", name: "a" },
+      { purl: "pkg:npm/z@1", name: "z" },
+    ]).map((item) => item.name),
+    ["a", "z"],
+  );
 });
 
 test("Rust SBOM excludes dependencies reachable only through dev edges", () => {

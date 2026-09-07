@@ -43,6 +43,12 @@ export function deterministicZip(entries) {
   const centralParts = [];
   let offset = 0;
   for (const entry of entries) {
+    const mode = entry.mode ?? 0o644;
+    if (!Number.isInteger(mode) || mode < 0 || (mode & ~0o777) !== 0) {
+      throw new Error(
+        `ZIP entry ${entry.name} has an invalid Unix permission mode`,
+      );
+    }
     const name = Buffer.from(entry.name.replaceAll("\\", "/"));
     const body = Buffer.from(entry.bytes);
     const checksum = crc32(body);
@@ -65,7 +71,7 @@ export function deterministicZip(entries) {
     central.writeUInt32LE(body.length, 20);
     central.writeUInt32LE(body.length, 24);
     central.writeUInt16LE(name.length, 28);
-    central.writeUInt32LE((0o100644 << 16) >>> 0, 38);
+    central.writeUInt32LE(((0o100000 | mode) << 16) >>> 0, 38);
     central.writeUInt32LE(offset, 42);
     centralParts.push(central, name);
     offset += local.length + name.length + body.length;
