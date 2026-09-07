@@ -157,11 +157,13 @@ test("password reveal is explicit, loading-safe, and times out from state", asyn
 test("Hide removes password immediately and cancels its timer", async () => {
   const revealPassword = vi.fn().mockResolvedValue(PASSWORD);
   await renderReady(api({ revealEntryPassword: revealPassword }));
-  fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
-  expect(
-    await screen.findByText(PASSWORD, {}, { timeout: 5_000 }),
-  ).toBeVisible();
   vi.useFakeTimers();
+  fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
+  await act(async () => {
+    await revealPassword.mock.results[0]?.value;
+    await Promise.resolve();
+  });
+  expect(screen.getByText(PASSWORD)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
   expect(screen.queryByText(PASSWORD)).not.toBeInTheDocument();
   act(() => {
