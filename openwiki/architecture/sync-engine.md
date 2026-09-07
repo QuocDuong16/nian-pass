@@ -7,143 +7,233 @@ tags: [sync, merge, three-way, conflict-resolution, kdbx]
 
 # Three-Way Sync Engine
 
-The sync engine performs provider-independent, synchronous three-way semantic merge on already-opened `KdbxDocument` triples. It lives in `kdbx/src/sync.rs` (~1700 lines) and is orchestrated by the `vault-sync` crate.
+The sync engine has been restructured from `kdbx/src/sync.rs` + `vault-sync` into a dedicated three-crate architecture.
 
-## Merge Model
-
-The caller supplies an explicit last common **BASE**, plus already-opened **LOCAL** and **REMOTE** `KdbxDocument` values. The engine does not open files, select generations, or perform any I/O.
+## Crate Responsibilities
 
 ```mermaid
 flowchart TD
-    A[Compare BASE/LOCAL/REMOTE] --> B{Equivalent?}
-    B -->|Yes| C[MergeOutcome::Equivalent]
-    B -->|No| D{Fast-forward?}
-    D -->|REMOTE == BASE| E[MergeOutcome::FastForwardLocal]
-    D -->|LOCAL == BASE| F[MergeOutcome::FastForwardRemote]
-    D -->|Both diverged| G[Run three-way synthesis]
-    G --> H{Conflicts?}
-    H -->|No| I[MergeOutcome::Merged]
-    H -->|Yes| J[MergeOutcome::Conflicted]
+    subgraph "sync-engine (new)"
+        SE[SyncEngine] --> ST[SyncStore]
+        SE --> JA[ConflictAuthority]
+        SE --> RV[Recovery]
+    end
+    
+    subgraph "vault-sync (unchanged)"
+        VM[merge function]
+    end
+    
+    subgraph "kdbx (unchanged)"
+        KS[kdbx/src/sync.rs]
+    end
+    
+    SE --> VM
+    VM --> KS
 ```
 
-**Three-way choice per element:** If LOCAL == BASE, take REMOTE. If REMOTE == BASE, keep LOCAL. If both changed, attempt synthesis or report conflict.
+| Crate | Responsibility | I/O |
+|---|---|---|
+| `kdbx/src/sync.rs` | Pure semantic merge primitives | None |
+| `vault-sync` | `merge(base, local, remote)` API | None |
+| `sync-engine` | Orchestration, persistence, recovery | Filesystem, network |
 
-## Fast-Forward Shortcuts
-
-Before running full synthesis, the engine checks three shortcuts:
-
-1. **Equivalent**: `local.semantically_equals(remote)` — no merge needed
-2. **FastForwardLocal**: `remote.semantically_equals(base)` — local is the safe successor
-3. **FastForwardRemote**: `local.semantically_equals(base)` — remote is the safe successor
-
-These comparisons use structural equality that ignores salts, IVs, and nonces — only parsed semantics matter.
-
-## Conflict Types
-
-The engine produces structured, value-free conflict descriptors. Conflicts identify an object and a field category but never carry competing plaintext.
-
-### `SyncConflictKind` (11 variants)
-
-| Kind | Meaning |
-|---|---|
-| `FieldEdit` | Both branches changed one field differently |
-| `DeleteVsModify` | One branch deleted an object changed by the other |
-| `MoveVsMove` | Both branches moved one object to different parents |
-| `GroupDeleteVsDescendantChange` | A deleted group contains a changed or new descendant |
-| `UuidCollision` | Both branches introduced different objects with the same UUID |
-| `HierarchyCycle` | The proposed hierarchy would be cyclic or invalid |
-| `Metadata` | Database-level or group-level metadata diverged ambiguously |
-| `Binary` | Attachment state could not be combined without loss |
-| `CustomIcon` | Custom-icon state could not be combined without loss |
-| `History` | Entry history could not be combined without loss |
-| `UnsupportedSemantic` | Parsed semantics cannot currently be synthesized safely |
-
-### `SyncConflictObject`
-
-| Variant | Meaning |
-|---|---|
-| `Entry(EntryId)` | A KDBX entry identified by stable UUID |
-| `Group(GroupId)` | A KDBX group identified by stable UUID |
-| `DatabaseMetadata` | Database-wide metadata |
-
-### `SyncConflictFieldKind`
-
-| Variant | Meaning |
-|---|---|
-| `Standard` | A standard KeePass entry field (Title, UserName, etc.) |
-| `Custom` | A non-reserved custom entry field |
-| `Reserved` | A reserved KeePass/KeePassXC field |
-| `EntryMetadata` | Other entry metadata |
-| `GroupMetadata` | Group metadata |
-| `DatabaseMetadata` | Database metadata |
-
-## What Participates in Merge
-
-The engine operates on the complete parsed KDBX representation:
-
-- **Entries**: field values, protection state, hierarchy location, UUID identity
-- **Groups**: name, hierarchy location, child ordering, UUID identity
-- **Custom icons**: icon ID mapping and referenced icon data
-- **Metadata**: database-level and group-level metadata
-- **Tombstones**: deleted-object records for sync-aware deletion tracking
-- **History**: entry change history (attachment-free history can be unioned; attachment-bearing history that crosses database generations fails closed)
-- **Child order**: surviving BASE-relative order is checked separately from membership
-
-## Validation Invariants
-
-Before returning a synthesized candidate, the engine validates:
-
-1. **UUID uniqueness** across the merged tree
-2. **Hierarchy acyclicity** — no cycles in the group tree
-3. **Root identity** — root group UUID and location remain fixed
-4. **Tombstone consistency** — deleted objects have valid tombstones
-5. **Custom-icon referential integrity** — no orphaned icon references
-
-A candidate that violates any invariant returns `KdbxError::SyncInvariant` rather than an incorrect merge.
-
-## Integration with `vault-sync`
-
-The `vault-sync` crate wraps the engine with version checking and input validation:
+## Public API Surface (`sync-engine/src/lib.rs`)
 
 ```rust
-pub fn merge(base, local, remote) -> Result<MergeOutcome, MergeError>
+pub use conflict::{ConflictChoice, ConflictDescriptor, ConflictOperation};
+pub use engine::{SyncCompletion, SyncEngine, SyncOutcome};
+pub use error::SyncError;
+pub use local::{LocalCommitError, LocalSnapshot, LocalVault};
+pub use store::{ProfileId, RecoveryStatus, SourceBinding, StoreError, SyncStore, TargetBinding};
 ```
 
-**Preconditions checked:**
+### Core Types
 
-1. All three inputs use the same KDBX version
-2. All three pass `validate_for_sync()` (UUID, tombstone, root, hierarchy invariants)
-3. Only KDBX 4.1 proceeds to full synthesis (other versions return `MergeError::UnsupportedVersion`)
+| Type | Purpose |
+|---|---|
+| `SyncEngine` | Profile-scoped sync orchestrator with one pending conflict max |
+| `SyncStore` | Private profile-scoped BASE + journal persistence |
+| `LocalSnapshot` | Clean local generation captured before network work |
+| `LocalVault` trait | Desktop-local capture/replace boundary |
+| `ConflictAuthority` | Process-local single-use conflict holder |
+| `ConflictChoice` | `KeepLocal` or `KeepRemote` resolution |
+| `SyncOutcome` | `Done(completion)` or `Conflict(operation)` |
 
-**Postcondition:** A synthesized `MergedDocument` must pass `verify_semantic_equivalence` round-trip before return.
+## Conflict Authority (`conflict_authority.rs`)
+
+**What is this?** A mutex-protected singleton holding at most one pending `PendingConflict`. It enables deferred user-mediated conflict resolution:
+
+1. Engine installs conflict with local snapshot, remote bytes, and revision
+2. Returns `ConflictOperation` with random UUID token
+3. User calls `resolve(token, choice)` to apply decision
+4. Engine revalidates all preconditions before committing
+
+**Key invariants:**
+- Single pending conflict per engine (process-local)
+- Token required for resolution (stale protection)
+- New sync attempts invalidate pending conflicts
+
+## Store Layer (`store.rs` + `store/journal.rs` + `store/metadata.rs`)
+
+**Profile-scoped persistence** with atomic writes and schema versioning:
+
+| Component | Purpose |
+|---|---|
+| `SyncStore` | Opens profile directory under `~/.openwiki/sync/{profile_id}/` |
+| `BaseState` | Encrypted BASE ciphertext with digest + remote revision |
+| `JournalRecord` | Crash-recovery journal with phase tracking |
+| `MetadataSchema` | Version validation (`SCHEMA_VERSION = 2`) |
+
+**Journal phases:**
+```
+Prepared → RemoteCommitted → LocalCommitted → [cleanup]
+```
+
+**Recovery status:**
+- `None` - no journal, clean state
+- `Required` - journal exists, must recover before new sync
+- `Unsupported` - future schema, requires reset
+
+**Metadata files:**
+- `base.json` - BASE ciphertext reference + identity bindings
+- `journal.json` - Active sync operation state
+- `base-{uuid}.kdbx` - BASE ciphertext blob
+- `candidate-{uuid}.kdbx` - Merged candidate ciphertext
+
+## Engine (`engine.rs`)
+
+**Sync flow:**
+
+```mermaid
+flowchart TD
+    A[sync] --> B{Recovery needed?}
+    B -->|Yes| C[recover_loaded]
+    B -->|No| D[Load base + remote]
+    D --> E{Base exists?}
+    E -->|No, Remote missing| F[Create remote]
+    E -->|No, Remote present| G{Semantic equal?}
+    G -->|Yes| H[Establish base]
+    G -->|No| I[Initial conflict]
+    E -->|Yes| J{Remote missing?}
+    J -->|Yes| K[Error: RemoteChanged]
+    J -->|No| L[vault-sync::merge]
+    L --> M{Outcome}
+    M -->|Equivalent| N[Update base]
+    M -->|FastForward| O[Upload/Apply]
+    M -->|Merged| P[Commit merged]
+    M -->|Conflicted| Q[Install conflict]
+```
+
+**Key methods:**
+- `sync()` - Full sync attempt with recovery check
+- `resolve()` - Apply user conflict choice with revalidation
+- `merge_existing()` - Three-way merge with BASE/LOCAL/REMOTE
+- `commit_candidate()` - Atomic remote write + local replace + journal cleanup
+
+## Store I/O (`store_io.rs`)
+
+Low-level filesystem operations with security hardening:
+
+| Property | Implementation |
+|---|---|
+| Atomic writes | `AtomicWriteFile` (no partial visibility) |
+| Symlink rejection | All reads check `is_symlink()` |
+| Permissions | 0o600 files, 0o700 directories |
+| Size limits | Metadata capped at 64 KB |
+| fsync | Directory sync on Unix |
 
 ## Error Types
 
-| Type | Variants |
-|---|---|
-| `MergeError` | `VersionMismatch`, `InvalidInput`, `UnsupportedVersion`, `Kdbx(KdbxError)` |
-| `KdbxError::SyncInvariant` | Synthesized candidate violated a required invariant |
+**`SyncError`** (orchestration):
+- `Provider`, `Store`, `Local`, `Merge` - wrapped source errors
+- `RemoteChanged`, `LocalChanged` - concurrency conflicts
+- `StaleConflict` - conflict token invalid/consumed
+- `UncertainState` - crash recovery needed
+
+**`StoreError`** (persistence):
+- `CorruptBase`, `CorruptJournal` - integrity failures
+- `WrongProfile`, `WrongSource`, `WrongTarget` - identity mismatches
+- `ActiveJournal` - journal already exists
+- `UnsupportedSchema` - future schema version
+
+## Provider Abstraction (sync-provider-core)
+
+The `RemoteObjectProvider` trait defines three CAS operations:
+
+```rust
+pub trait RemoteObjectProvider {
+    async fn read(&self) -> Result<RemoteRead, ProviderError>;
+    async fn create_if_absent(&self, data: &[u8]) -> Result<RemoteRevision, ProviderError>;
+    async fn replace_if_revision(&self, data: &[u8], expected: &RemoteRevision) -> Result<RemoteRevision, ProviderError>;
+}
+```
+
+| Method | HTTP Equivalent | Behavior |
+|---|---|---|
+| `read()` | `GET` | Returns encrypted bytes + opaque revision |
+| `create_if_absent()` | `PUT If-None-Match: *` | Create only if remote is empty |
+| `replace_if_revision()` | `PUT If-Match: <revision>` | Replace only if revision matches |
+
+No unconditional write exists — all writes are compare-and-swap. A race becomes `remoteChanged`, never a blind overwrite.
+
+### Provider Implementations
+
+| Provider | Crate | Transport | Revision Format |
+|---|---|---|---|
+| WebDAV | `sync-provider-webdav` | HTTP/WebDAV with `reqwest` + `rustls` | Strong ETag |
+| AWS S3 | `sync-provider-s3` | AWS SDK S3 | Object metadata |
+| Sync Gateway | `sync-provider-gateway` | HTTP with `reqwest` + `rustls` | SHA-256 of ciphertext |
+
+All providers enforce: production endpoints require HTTPS; plaintext HTTP accepted only on loopback for local tests.
+
+## Sync Gateway
+
+The sync gateway (`apps/sync-gateway`) is a standalone HTTP server for self-hosted zero-knowledge sync. See [self-hosting](/docs/self-hosting.md) for deployment.
+
+- **Server:** Hyper-based HTTP/1.1, bearer token auth (SHA-256 digest, constant-time), filesystem backend with per-vault files and exclusive process lock
+- **Client:** `sync-provider-gateway` implements `RemoteObjectProvider` over HTTP with post-write confirm
+- **Wire format:** `sync-gateway-protocol` defines token bounds (32–512 visible ASCII chars) shared between server and client
+- **CAS operations:** Conditional writes with `ETag`/`If-Match`, max 64 MiB per vault
+
+## Integration with Desktop
+
+Desktop triggers sync via the `sync_now` Tauri command:
+
+1. Frontend calls `sync_now` with profile ID and freshly entered provider credentials
+2. Rust backend loads the sync profile, creates provider instance
+3. `SyncEngine::sync()` runs the full lifecycle
+4. On conflict, the UI shows conflict resolution panel
+5. User resolves, `SyncEngine::resolve()` completes the commit
+
+Sync requires: clean saved vault, real master password, freshly entered provider credentials. No credential persistence, no background sync, no push notifications.
+
+## Migration Summary
+
+### Before
+- `kdbx/src/sync.rs` (~2382 lines) - merge engine + conflict types
+- `vault-sync` - thin wrapper around merge
+
+### After
+- `kdbx/src/sync.rs` - **unchanged** (pure merge primitives)
+- `vault-sync` - **unchanged** (`merge()` API)
+- `sync-engine` - **new** (orchestration, persistence, recovery)
+
+### Benefits
+1. **Separation of concerns**: Pure merge vs. orchestration vs. persistence
+2. **Testability**: Each layer independently testable
+3. **Reusability**: `sync-engine` can be used by different frontends
+4. **Security**: Dedicated I/O layer with consistent hardening
+5. **Recovery**: Explicit crash-recovery journal with schema versioning
 
 ## Test Coverage
 
-The integration test suite (`vault-sync/tests/merge.rs`) covers:
-
-- Fast-forward in both directions
-- Version mismatch rejection
-- Identical changes → equivalent
+Integration tests (`vault-sync/tests/merge.rs`) cover:
+- Fast-forward both directions
 - Independent field edits merging
-- Divergent password → conflict
-- Delete-vs-modify
-- Concurrent deletes
-- Move + field merge
-- Move-vs-move conflict
-- Custom fields + protection conflicts
-- Concurrent entry creation ordering
-- Group rename + child edit
-- Group move + rename
-- Group delete vs descendant edit
-- Group delete vs new descendant
-- Concurrent group move cycles
-- Reorder-detection tests
+- Delete-vs-modify conflicts
+- Concurrent entry/group creation
+- Move-vs-move conflicts
+- Group hierarchy operations
+- Reorder detection
 
-All merged candidates are round-tripped through serialize → reopen → `verify_semantic_equivalence`.
+All candidates round-tripped through serialize → reopen → `verify_semantic_equivalence`.

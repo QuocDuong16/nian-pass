@@ -92,6 +92,55 @@ Integration tests in `crates/vault-sync/tests/merge.rs` cover the three-way merg
 
 All merged candidates are round-tripped through serialize → reopen → `verify_semantic_equivalence`.
 
+### `sync-engine`
+
+Integration tests in `crates/sync-engine/tests/sync.rs` cover:
+
+- Full sync lifecycle with recovery check
+- Journal phase tracking and crash recovery
+- Conflict authority single-use token and stale protection
+- Store metadata persistence and schema validation
+- Local snapshot capture and replace operations
+- Error propagation from providers and merge engine
+
+### `sync-provider-gateway`
+
+Integration tests in `crates/sync-provider-gateway/tests/` cover:
+
+- Gateway provider trait implementation
+- Conditional create (`If-None-Match: *`) and conditional replace (`If-Match`)
+- Post-write read-back confirm
+- Token authentication and error handling
+- HTTP transport with mock server
+
+### `sync-gateway`
+
+Integration tests in `apps/sync-gateway/tests/` cover:
+
+- HTTP server endpoints: `/healthz`, `GET /v1/vaults/{uuid}`, `PUT /v1/vaults/{uuid}`
+- CAS operations: create, replace, conditional reject
+- Token authentication: valid, invalid, missing
+- Filesystem storage: per-vault files, exclusive process lock
+- Container build and Docker context validation
+
+### `browser-native-protocol`
+
+Tests in `crates/browser-native-protocol/src/` and `tests/` cover:
+
+- Framing: length-prefixed JSON over stream
+- IPC endpoints: `bind_desktop_listener()` / `connect_desktop()`
+- Protocol constants: version, host name, bounds
+- Message types: request/response serialization parity
+- Validation: fail-closed on unknown fields, wrong versions, oversized content
+
+### `credential-provider-core`
+
+Tests in `crates/credential-provider-core/tests/` cover:
+
+- Platform-neutral credential matching: application/web, service, origin
+- Secret retrieval with bounded output
+- Error handling for unmatched credentials
+
 ### `nian-pass` CLI
 
 Tests in `apps/cli/src/main.rs` validate argument parsing and output safety:
@@ -105,11 +154,21 @@ Tests in `apps/cli/src/main.rs` validate argument parsing and output safety:
 Frontend tests use Vitest with jsdom environment and v8 coverage provider. Tests are in `apps/desktop/src/`:
 
 - `App.test.tsx` — top-level rendering and view switching
-- `app/ErrorBoundary.test.tsx` — error boundary behavior
+- `app/ApplicationRoot.test.tsx` — application root and runtime validation
 - `lib/desktop.test.ts` — IPC gateway mocking and contract validation
-- `lib/validation.ts` — runtime DTO validators (tested indirectly through `desktop.test.ts`)
+- `lib/desktop-errors.test.ts` — error type validation
+- `lib/sync-api.test.ts` — sync API contract validation
+- `lib/sync.test.ts` — sync integration testing
+- `lib/mobile.test.ts` — mobile API mocking
+- `features/vault/` — vault entry, group, save, and dirty lifecycle tests
+- `features/sync/SyncSection.test.tsx` — sync UI panel tests
+- `features/sync/sync-errors.test.ts` — sync error handling
+- `features/mobile/MobileVaultApp.test.tsx` — mobile vault app tests
+- `features/mobile/MobileSecurityLifecycle.test.tsx` — security lifecycle tests
+- `features/mobile/MobileAutofill.test.tsx` — autofill functionality tests
+- `features/browser/BrowserConnectionApproval.test.tsx` — browser approval UI tests
 
-The Tauri backend has a Rust-side contract test in `commands.rs` that validates `desktop-contract.json` serialization matches the committed fixture bidirectionally.
+The Tauri backend has Rust-side contract tests in `commands.rs` that validate `desktop-contract.json` serialization matches the committed fixture bidirectionally.
 
 **Coverage thresholds** (Vitest config in `vite.config.ts`): 65% statements, 60% branches, 63% functions, 64% lines. These are ratchets and may only increase.
 
@@ -136,7 +195,7 @@ All fixtures are from `keepass-rs` commit `2f1dd5e0f1a23dc7420c3fa25f434fe362729
 
 ## CI Pipeline
 
-The Forgejo workflow `.forgejo/workflows/quality.yml` runs on every push, pull request, and manual dispatch with five parallel jobs:
+The Forgejo workflow `.forgejo/workflows/quality.yml` runs on every push, pull request, and manual dispatch with parallel jobs. A separate `.forgejo/workflows/release.yml` handles tag/manual release events.
 
 ### Job 1: `rust`
 
@@ -148,9 +207,9 @@ The Forgejo workflow `.forgejo/workflows/quality.yml` runs on every push, pull r
 ### Job 2: `desktop-frontend`
 
 - Runs in `node:24.19.0-bookworm`
-- Activates pinned pnpm via Corepack
+- Activates pinned pnpm via Corepack (Node 26)
 - Runs `make policy-check` (architecture, security, docs guards) then `make desktop-check`
-- Desktop checks: format, ESLint (including no-eslint-disable), typecheck, Vitest tests, coverage, dead code (Knip), contract validation, build, `pnpm audit`
+- Desktop checks: format, ESLint (including no-eslint-disable), typecheck, Vitest tests, coverage, dead code (Knip), contract validation, build, `pnpm audit` with retry
 - Resolves diff coverage base from PR context for changed-line coverage ratcheting
 
 ### Job 3: `desktop-native-check`
@@ -172,6 +231,18 @@ The Forgejo workflow `.forgejo/workflows/quality.yml` runs on every push, pull r
 - Runs `make fixture-check compat-check-required` (missing binary is a failure, not a skip)
 - Tests KDBX round-trip and vault-sync merge output against external KeePassXC
 
+### Release Workflow
+
+The dedicated release workflow (`.forgejo/workflows/release.yml`) runs only for `v*` tags or manual release events:
+
+- Clean-tree and tag consistency validation
+- Pinned release inputs and `VERSION` file checks
+- Deterministic browser and Native Messaging packages
+- Linux, Android, and gateway production build paths
+- SHA-256 checksums, SBOM/provenance output
+- Artifact regression scanning
+- Tag/manual-only Forgejo release creation
+
 ## KeePassXC Compatibility Script
 
 `scripts/test-keepassxc-compat.sh` runs two ignored tests against the external `keepassxc-cli` binary:
@@ -191,9 +262,20 @@ The `scripts/` directory contains machine-enforced repository policy guards. The
 | `check_security.mjs` | Forbids `console.*`, `dangerouslySetInnerHTML`, `eval`, unapproved Tauri plugins, CSP violations | `security-check` |
 | `check_diff_coverage.mjs` | Computes coverage of changed lines only from LCOV + `git diff` | `rust-coverage-diff`, `desktop-coverage-diff` |
 | `check_docs.mjs` | Ensures required files exist and contain canonical patterns | `docs-check` |
-| `check_no_eslint_disable.mjs` | Forbids `eslint-disable` comments in production frontend source | `desktop-no-eslint-disable` |
+| `check_sync.mjs` | Sync guard: provider trait boundaries, recovery invariants | `sync-source-check` |
+| `check_gateway.mjs` | Gateway guard: source policy, auth, CAS operations | `gateway-source-check` |
+| `check_gateway_container.sh` | Gateway Docker build context validation | `gateway-container-check` |
+| `check_browser_extension.mjs` | Browser extension guard: permissions, manifest, build artifacts | `browser-extension-check` |
+| `check_browser_native_host.mjs` | Native host guard: installer, proxy, transaction safety | `browser-native-host-check` |
+| `check_mobile_foundation.mjs` | Android mobile foundation validation | `mobile-foundation-check` |
+| `check_ios_foundation.mjs` | iOS foundation validation (deferred) | `ios-foundation-check` |
+| `check_release_source.mjs` | Release source validation | `release-source-check` |
+| `check_node_licenses.mjs` | Node.js dependency license compliance | `node-license-check` |
+| `release_artifacts.mjs` | Release artifact management | `release-artifact-check` |
+| `stage_release.mjs` | Release staging | `release-stage` |
+| `run_pnpm_audit.mjs` | pnpm audit wrapper with retry logic | `desktop-audit` |
 
-Architecture budgets (from `scripts/architecture-budget.json`): TypeScript default 250 lines, Rust default 400 lines with grandfathered exceptions for `kdbx/lib.rs` (992), `kdbx/sync.rs` (1706), `vault-core/lib.rs` (416), and `vault-session/lib.rs` (702).
+Architecture budgets (from `scripts/architecture-budget.json`): TypeScript default 250 lines, Rust default 400 lines with grandfathered exceptions.
 
 ## Testing Guidance for Future Contributors
 
@@ -217,6 +299,22 @@ Architecture budgets (from `scripts/architecture-budget.json`): TypeScript defau
 - Add integration tests in `vault-sync/tests/merge.rs`
 - All merged candidates must pass serialize → reopen → `verify_semantic_equivalence`
 
+### When adding sync-engine features
+
+- Test the full sync lifecycle including recovery check, base/remote loading, merge, and commit
+- Test journal phases: Prepared → RemoteCommitted → LocalCommitted → cleanup
+- Verify conflict authority single-use token and stale protection
+- Test recovery replay for each journal phase
+- Add integration tests in `sync-engine/tests/`
+
+### When adding sync provider features
+
+- Implement the `RemoteObjectProvider` trait with all three CAS operations
+- Test conditional create (`If-None-Match: *`) and conditional replace (`If-Match`)
+- Verify post-write read-back confirms ciphertext match
+- Test error variants: `NotFound`, `Conflict`, `Unauthorized`, `Forbidden`, `Unreachable`, `TooLarge`
+- Add tests in the provider crate's `tests/` directory
+
 ### When adding persistence features
 
 - Test the full save protocol including fingerprint verification
@@ -232,11 +330,33 @@ Architecture budgets (from `scripts/architecture-budget.json`): TypeScript defau
 ### When adding desktop features
 
 - Update `desktop-contract.json` if the IPC serialization shape changes; the Rust and TypeScript contract tests will catch drift
-- Frontend business logic goes in `src/features/vault/` or `src/lib/`; keep IPC calls centralized in `src/lib/desktop.ts`
+- Frontend business logic goes in `src/features/` or `src/lib/`; keep IPC calls centralized in `src/lib/desktop.ts`
 - Add Vitest tests for new components and utilities; mock `invoke()` calls through the `desktop.test.ts` pattern
 - New Tauri commands go in `src-tauri/src/commands.rs` only — the architecture guard enforces this
+- Sync commands go in `src-tauri/src/commands/sync.rs`
 - Do not add new Tauri plugins without explicit approval; only `tauri-plugin-dialog` is currently allowed
 - Do not use browser persistence APIs (localStorage, sessionStorage, IndexedDB, cookies) — the security guard will reject them
+
+### When adding browser integration features
+
+- Browser extension tests use `mock-browser.ts` and `mock-port.ts` for port mocking
+- Native protocol tests verify both Rust and TypeScript serialization parity against `native-contract-v1.json`
+- Test the full approval flow: Connect → ApprovalPending → Connected/Credential
+- Verify credential data never enters the React layer (only `NativeResponse.credential` goes to DOM)
+- Add tests in `apps/browser-extension/src/` (Vitest) and `apps/browser-native-host/tests/` (Rust)
+
+### When adding sync gateway features
+
+- Server tests verify CAS operations: create, replace, conditional reject
+- Client tests verify provider trait implementation and post-write confirm
+- Container tests verify Docker build and `.gateway.lock` exclusion
+- Add tests in `apps/sync-gateway/tests/` and `crates/sync-provider-gateway/tests/`
+
+### When adding mobile features
+
+- Android tests verify two-phase Lock, Activity-scoped authority, and curtain management
+- Mobile security lifecycle tests verify generation-based authority invalidation
+- Add tests in `apps/desktop/src/features/mobile/` (Vitest) and `apps/desktop/src-tauri/gen/android/app/src/test/` (Junit)
 
 ### Workspace Lints
 
