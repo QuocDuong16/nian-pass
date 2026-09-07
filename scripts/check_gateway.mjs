@@ -68,6 +68,30 @@ export function gatewayWorkflowDependencyViolations(workflow) {
   return violations;
 }
 
+export function gatewayContainerNetworkProbeViolations(containerCheck) {
+  const violations = [];
+  if (
+    !/curl_image="curlimages\/curl:8\.14\.1@sha256:[0-9a-f]{64}"/.test(
+      containerCheck,
+    )
+  ) {
+    violations.push("gateway smoke HTTP client image must use an exact digest");
+  }
+  if (
+    !/--network "\$\{network\}"/.test(containerCheck) ||
+    !/docker exec "\$\{curl_container\}" curl/.test(containerCheck)
+  ) {
+    violations.push("gateway smoke HTTP probes must run inside the Compose network");
+  }
+  if (!/base_url="http:\/\/sync-gateway:8080"/.test(containerCheck)) {
+    violations.push("gateway smoke must address the Compose service directly");
+  }
+  if (/base_url="http:\/\/127\.0\.0\.1:\$\{port\}"/.test(containerCheck)) {
+    violations.push("gateway smoke may not assume the Docker host shares the job loopback");
+  }
+  return violations;
+}
+
 export function protocolSourceViolations({ server, storage, auth, provider, protocol = "" }) {
   const violations = [];
   if (
@@ -308,6 +332,7 @@ export function runChecks(root) {
   const selfHosting = source(root, "docs/self-hosting.md");
   const dockerignore = source(root, ".dockerignore");
   violations.push(...gatewaySecretBuildContextViolations({ selfHosting, dockerignore }));
+  violations.push(...gatewayContainerNetworkProbeViolations(containerCheck));
   violations.push(...gatewayWorkflowDependencyViolations(workflow));
   if (
     !/Gateway container check passed/.test(containerCheck) ||

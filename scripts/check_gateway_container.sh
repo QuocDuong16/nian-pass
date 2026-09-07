@@ -9,9 +9,13 @@ scratch="$(mktemp -d -t nian-pass-gateway-container-XXXXXXXX)"
 environment_file="${repository_root}/deploy/gateway.env"
 environment_file_created=0
 probe_image="${project}-context-probe"
+curl_image="curlimages/curl:8.14.1@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
+curl_container="${project}-curl"
 token="synthetic-container-gateway-token-0000000000000001"
 wrong_token="synthetic-container-gateway-token-9999999999999999"
 vault_id="9252bb19-9941-4bb8-b10b-f074ff9dfe35"
+network=""
+container_id=""
 
 compose=(
   docker compose
@@ -21,6 +25,7 @@ compose=(
 )
 
 cleanup() {
+  docker container rm --force "${curl_container}" >/dev/null 2>&1 || true
   "${compose[@]}" down --volumes --remove-orphans --rmi local >/dev/null 2>&1 || true
   docker image rm --force "${probe_image}" >/dev/null 2>&1 || true
   if [[ "${environment_file_created}" == 1 ]]; then
@@ -34,6 +39,19 @@ trap cleanup EXIT
 
 fail() {
   printf 'Gateway container check failed: %s\n' "$1" >&2
+  if [[ -n "${container_id}" ]]; then
+    local state logs
+    state="$(docker inspect --format \
+      'status={{.State.Status}} exit={{.State.ExitCode}} error={{json .State.Error}}' \
+      "${container_id}" 2>/dev/null || true)"
+    logs="$("${compose[@]}" logs --no-color sync-gateway 2>&1 || true)"
+    printf 'Gateway container state: %s\n' "${state:-unavailable}" >&2
+    if grep -Fq -- "${token}" <<<"${logs}" || grep -Fq -- "${wrong_token}" <<<"${logs}"; then
+      printf 'Gateway logs omitted because they contained a synthetic token.\n' >&2
+    else
+      printf '%s\n' "${logs}" >&2
+    fi
+  fi
   exit 1
 }
 
@@ -48,11 +66,16 @@ assert_secret_absent() {
   fi
 }
 
+gateway_curl() {
+  [[ -n "${network}" ]] || fail "Compose network is unavailable"
+  docker exec "${curl_container}" curl "$@"
+}
+
 wait_for_health() {
   local base_url="$1"
   local status=""
   for _ in $(seq 1 80); do
-    status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    status="$(gateway_curl --silent --output /dev/null --write-out '%{http_code}' \
       "${base_url}/healthz" 2>/dev/null || true)"
     if [[ "${status}" == "200" ]]; then
       return
@@ -74,7 +97,7 @@ expect_startup_failure() {
     fail "startup diagnostic category was missing: ${expected}"
 }
 
-for command in docker curl cmp grep sed stat tr; do
+for command in docker cmp grep sed stat tr; do
   require_command "${command}"
 done
 docker info >/dev/null 2>&1 || fail "Docker daemon is unavailable"
@@ -106,42 +129,55 @@ docker build --file "${scratch}/Dockerfile.context-probe" \
 "${compose[@]}" up --build --detach
 container_id="$("${compose[@]}" ps --quiet sync-gateway)"
 [[ -n "${container_id}" ]] || fail "Compose did not create the gateway container"
+network="$(docker network ls --quiet \
+  --filter "label=com.docker.compose.project=${project}" \
+  --filter 'label=com.docker.compose.network=default')"
+[[ -n "${network}" ]] || fail "Compose gateway network could not be resolved"
+docker run --detach --name "${curl_container}" --network "${network}" \
+  --user 0:0 --entrypoint /bin/sh "${curl_image}" \
+  -c 'while :; do sleep 3600; done' >/dev/null
+docker exec "${curl_container}" mkdir --mode 0700 /scratch
+docker cp "${scratch}/auth.curl" "${curl_container}:/scratch/auth.curl"
+docker cp "${scratch}/wrong-auth.curl" "${curl_container}:/scratch/wrong-auth.curl"
+docker cp "${fixture}" "${curl_container}:/fixture.kdbx"
 [[ "$(docker inspect --format '{{.Config.User}}' "${container_id}")" == "10001:10001" ]] ||
   fail "container image user is not 10001:10001"
+
+published="$("${compose[@]}" port sync-gateway 8080)"
+port="${published##*:}"
+[[ "${port}" =~ ^[0-9]+$ ]] || fail "could not resolve the loopback gateway port"
+base_url="http://sync-gateway:8080"
+object_url="${base_url}/v1/vaults/${vault_id}"
+wait_for_health "${base_url}"
+
 docker exec "${container_id}" sh -c \
   'test "$(id -u)" = 10001 && test "$(id -g)" = 10001' ||
   fail "gateway process is not running as UID/GID 10001"
 command_line="$(docker inspect --format '{{json .Path}} {{json .Args}}' "${container_id}")"
 assert_secret_absent "${command_line}"
 
-published="$("${compose[@]}" port sync-gateway 8080)"
-port="${published##*:}"
-[[ "${port}" =~ ^[0-9]+$ ]] || fail "could not resolve the loopback gateway port"
-base_url="http://127.0.0.1:${port}"
-object_url="${base_url}/v1/vaults/${vault_id}"
-wait_for_health "${base_url}"
-
-status="$(curl --silent --show-error --output "${scratch}/missing.out" \
+status="$(gateway_curl --silent --show-error --output /scratch/missing.out \
   --write-out '%{http_code}' "${object_url}")"
 [[ "${status}" == "401" ]] || fail "missing token did not return 401"
-assert_secret_absent "$(<"${scratch}/missing.out")"
+assert_secret_absent "$(docker exec "${curl_container}" cat /scratch/missing.out)"
 
-status="$(curl --silent --show-error --config "${scratch}/wrong-auth.curl" \
-  --output "${scratch}/wrong.out" --write-out '%{http_code}' "${object_url}")"
+status="$(gateway_curl --silent --show-error --config /scratch/wrong-auth.curl \
+  --output /scratch/wrong.out --write-out '%{http_code}' "${object_url}")"
 [[ "${status}" == "401" ]] || fail "wrong token did not return 401"
-assert_secret_absent "$(<"${scratch}/wrong.out")"
+assert_secret_absent "$(docker exec "${curl_container}" cat /scratch/wrong.out)"
 
-status="$(curl --silent --show-error --config "${scratch}/auth.curl" \
+status="$(gateway_curl --silent --show-error --config /scratch/auth.curl \
   --request PUT --header 'If-None-Match: *' \
-  --header 'Content-Type: application/octet-stream' --data-binary "@${fixture}" \
-  --dump-header "${scratch}/create.headers" --output "${scratch}/create.out" \
+  --header 'Content-Type: application/octet-stream' --data-binary '@/fixture.kdbx' \
+  --dump-header /scratch/create.headers --output /scratch/create.out \
   --write-out '%{http_code}' "${object_url}")"
 [[ "${status}" == "201" ]] || fail "authenticated conditional create did not return 201"
-assert_secret_absent "$(<"${scratch}/create.out")"
+assert_secret_absent "$(docker exec "${curl_container}" cat /scratch/create.out)"
 
-status="$(curl --silent --show-error --config "${scratch}/auth.curl" \
-  --output "${scratch}/download.kdbx" --write-out '%{http_code}' "${object_url}")"
+status="$(gateway_curl --silent --show-error --config /scratch/auth.curl \
+  --output /scratch/download.kdbx --write-out '%{http_code}' "${object_url}")"
 [[ "${status}" == "200" ]] || fail "authenticated GET did not return 200"
+docker cp "${curl_container}:/scratch/download.kdbx" "${scratch}/download.kdbx"
 cmp --silent "${fixture}" "${scratch}/download.kdbx" || fail "downloaded bytes differ"
 
 image="$(docker inspect --format '{{.Config.Image}}' "${container_id}")"
@@ -160,18 +196,19 @@ container_id="$("${compose[@]}" ps --quiet sync-gateway)"
 published="$("${compose[@]}" port sync-gateway 8080)"
 port="${published##*:}"
 [[ "${port}" =~ ^[0-9]+$ ]] || fail "could not resolve the restarted gateway port"
-base_url="http://127.0.0.1:${port}"
+base_url="http://sync-gateway:8080"
 object_url="${base_url}/v1/vaults/${vault_id}"
 wait_for_health "${base_url}"
-status="$(curl --silent --show-error --config "${scratch}/auth.curl" \
-  --output "${scratch}/restart.kdbx" --write-out '%{http_code}' "${object_url}")"
+status="$(gateway_curl --silent --show-error --config /scratch/auth.curl \
+  --output /scratch/restart.kdbx --write-out '%{http_code}' "${object_url}")"
 [[ "${status}" == "200" ]] || fail "persisted object was unavailable after restart"
+docker cp "${curl_container}:/scratch/restart.kdbx" "${scratch}/restart.kdbx"
 cmp --silent "${fixture}" "${scratch}/restart.kdbx" || fail "persisted bytes changed"
 
-status="$(curl --silent --show-error --config "${scratch}/auth.curl" \
+status="$(gateway_curl --silent --show-error --config /scratch/auth.curl \
   --request PUT --header 'If-Match: "0000000000000000000000000000000000000000000000000000000000000000"' \
-  --header 'Content-Type: application/octet-stream' --data-binary "@${fixture}" \
-  --output "${scratch}/stale.out" --write-out '%{http_code}' "${object_url}")"
+  --header 'Content-Type: application/octet-stream' --data-binary '@/fixture.kdbx' \
+  --output /scratch/stale.out --write-out '%{http_code}' "${object_url}")"
 [[ "${status}" == "412" ]] || fail "stale replacement did not return 412 after restart"
 
 volume="$(docker volume ls --quiet \
@@ -215,11 +252,8 @@ expect_startup_failure 'listen address could not be bound' \
   --env-file "${environment_file}" --network "container:${container_id}" \
   --tmpfs '/data:uid=10001,gid=10001,mode=0700' "${image}"
 
-touch "${scratch}/unsafe-storage"
-chmod 0600 "${scratch}/unsafe-storage"
 expect_startup_failure 'storage initialization failed' \
-  --env-file "${environment_file}" \
-  --mount "type=bind,src=${scratch}/unsafe-storage,dst=/unsafe,readonly" \
+  --env-file "${environment_file}" --read-only \
   "${image}" --storage-dir /unsafe
 
 logs="$("${compose[@]}" logs --no-color)"

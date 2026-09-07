@@ -3,10 +3,30 @@ import { test } from "node:test";
 
 import {
   forbiddenRuntimeDependencies,
+  gatewayContainerNetworkProbeViolations,
   gatewaySecretBuildContextViolations,
   gatewayWorkflowDependencyViolations,
   protocolSourceViolations,
 } from "../check_gateway.mjs";
+
+test("gateway container probes use a pinned client inside the Compose network", () => {
+  const networkProbe = `
+curl_image="curlimages/curl:8.14.1@sha256:${"a".repeat(64)}"
+docker run --detach --network "\${network}" "\${curl_image}"
+docker exec "\${curl_container}" curl --silent
+base_url="http://sync-gateway:8080"
+`;
+  assert.deepEqual(gatewayContainerNetworkProbeViolations(networkProbe), []);
+
+  const hostLoopbackProbe = networkProbe.replace(
+    'base_url="http://sync-gateway:8080"',
+    'base_url="http://127.0.0.1:${port}"',
+  );
+  assert.match(
+    gatewayContainerNetworkProbeViolations(hostLoopbackProbe).join("\n"),
+    /Docker host shares the job loopback/,
+  );
+});
 
 test("runtime dependency inspection ignores integration-only dependencies", () => {
   const pkg = {
