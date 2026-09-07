@@ -40,7 +40,8 @@ function digest(bytes) {
 
 function commandFailure(result) {
   const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
-  return stderr || result.error?.message || "unknown error";
+  const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+  return stderr || result.error?.message || stdout || `exit ${String(result.status)}`;
 }
 
 function payloadFiles(root) {

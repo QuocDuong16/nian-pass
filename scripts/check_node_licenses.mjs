@@ -24,8 +24,9 @@ function main() {
   });
   if (result.status !== 0) {
     const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+    const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
     throw new Error(
-      `pnpm license inventory failed: ${stderr || result.error?.message || "unknown error"}`,
+      `pnpm license inventory failed: ${stderr || result.error?.message || stdout || `exit ${String(result.status)}`}`,
     );
   }
   const violations = licenseViolations(JSON.parse(result.stdout));

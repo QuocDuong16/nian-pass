@@ -364,6 +364,7 @@ release-policy-check:
 
 node-license-check:
 	@echo "Check production Node dependency licenses..."
+	pnpm install --frozen-lockfile
 	node scripts/check_node_licenses.mjs
 
 security-hardening-check:
