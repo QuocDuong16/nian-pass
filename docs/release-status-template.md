@@ -2,6 +2,8 @@
 
 Copy this template into each release record and replace only with observed
 results. `NOT RUN` is a result, not a placeholder that may be inferred as pass.
+Draft staging may record Forgejo as `NOT RUN`; a published release must record
+Forgejo canonical CI and GitHub Release publication as `PASS`.
 
 ```text
 Forgejo canonical CI                   PASS / FAIL / NOT RUN
@@ -43,3 +45,7 @@ GitHub Release publication            PASS / DRAFT / NOT RUN
 Also record the release tag, `VERSION`, commit SHA, workflow run URL or ID,
 artifact manifest, hosted-runner image labels, accepted risks, and any partial
 smoke that was insufficient for a platform runtime PASS.
+
+Draft assets may be replaced during review. Once the GitHub Release is
+published, this workflow must not alter its assets, checksums, notes, or title;
+publish corrected bytes only under a new version and tag.

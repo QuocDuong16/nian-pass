@@ -416,6 +416,7 @@ release-assemble:
 
 release-artifact-check: release-source-check
 	node scripts/release_artifacts.mjs scan
+	test -s "$${ARTIFACT_DIR:-artifacts/release}/release-status.md"
 	node scripts/release_artifacts.mjs sbom
 	node scripts/release_artifacts.mjs manifest
 	node scripts/release_artifacts.mjs checksums

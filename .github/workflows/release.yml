@@ -30,6 +30,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
   NODE_VERSION: "26.7.0"
@@ -393,7 +397,7 @@ jobs:
           SBOM_STATUS: PASS
           MANIFEST_STATUS: PASS
           CHECKSUM_STATUS: PASS
-          GITHUB_RELEASE_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'PASS' || 'DRAFT' }}
+          GITHUB_RELEASE_STATUS: DRAFT
           RELEASE_STATUS_DATA_OUTPUT: ${{ runner.temp }}/release-status.json
           RELEASE_STATUS_DATA_FILE: ${{ runner.temp }}/release-status.json
           RELEASE_RUNNER_IMAGES: ubuntu-24.04,windows-2025
@@ -402,8 +406,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "${RELEASE_COMMIT}"
           make release-source-check
           node scripts/assemble_release.mjs
+          node scripts/release_artifacts.mjs scan
           node scripts/release_status.mjs
-          make release-artifact-check
+          node scripts/release_artifacts.mjs sbom
+          node scripts/release_artifacts.mjs manifest
+          node scripts/release_artifacts.mjs checksums
           sha256sum --check artifacts/release/SHA256SUMS
       - name: Upload canonical release set
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -420,33 +427,89 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out exact release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install pinned Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: Download canonical release set
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: nian-pass-${{ env.RELEASE_TAG }}
           path: release
-      - name: Verify and stage GitHub Release
+      - name: Resolve immutable publication policy
+        id: publication
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}
+          FORGEJO_CI_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.forgejo_ci_status || 'NOT RUN' }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
         run: |
           set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "${RELEASE_COMMIT}"
+          (cd release && sha256sum --check SHA256SUMS)
+          error_file="$(mktemp)"
+          trap 'rm -f -- "${error_file}"' EXIT
+          if existing_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft 2>"${error_file}")"; then
+            if test "${existing_draft}" = "true"; then
+              release_state="draft"
+            else
+              release_state="published"
+            fi
+          elif grep -Fq '(HTTP 404)' "${error_file}"; then
+            release_state="none"
+          else
+            cat "${error_file}" >&2
+            exit 1
+          fi
+          publication_action="$(EXISTING_RELEASE_STATE="${release_state}" node scripts/release_publication.mjs)"
+          printf 'action=%s\n' "${publication_action}" >> "${GITHUB_OUTPUT}"
+      - name: Verify and stage GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLICATION_ACTION: ${{ steps.publication.outputs.action }}
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+        run: |
+          set -Eeuo pipefail
+          case "${PUBLICATION_ACTION}" in
+            CREATE_AND_PUBLISH|UPDATE_AND_PUBLISH) publication_status="PASS" ;;
+            CREATE_DRAFT|UPDATE_DRAFT) publication_status="DRAFT" ;;
+            *) echo "Unknown publication action: ${PUBLICATION_ACTION}" >&2; exit 1 ;;
+          esac
+          ARTIFACT_DIR="${GITHUB_WORKSPACE}/release" node scripts/release_artifacts.mjs publication-status "${publication_status}"
           cd release
           sha256sum --check SHA256SUMS
-          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            existing_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
-            if test "${existing_draft}" != "true" && test "${PUBLISH_RELEASE}" != "true"; then
-              echo "Refusing to replace an already-published release during a draft dry-run" >&2
+          case "${PUBLICATION_ACTION}" in
+            CREATE_DRAFT|CREATE_AND_PUBLISH)
+              gh release create "${RELEASE_TAG}" --verify-tag --target "${RELEASE_COMMIT}" --draft --prerelease --title "Nian Pass ${RELEASE_TAG}" --notes-file release-status.md ./*
+              ;;
+            UPDATE_DRAFT|UPDATE_AND_PUBLISH)
+              existing_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft)"
+              if test "${existing_draft}" != "true"; then
+                echo "Release ${RELEASE_TAG} is already published; published release artifacts are immutable. Create a new version/tag instead." >&2
+                exit 1
+              fi
+              gh release upload "${RELEASE_TAG}" --clobber ./*
+              gh release edit "${RELEASE_TAG}" --notes-file release-status.md
+              ;;
+          esac
+          case "${PUBLICATION_ACTION}" in
+            CREATE_AND_PUBLISH|UPDATE_AND_PUBLISH)
+              existing_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft)"
+              if test "${existing_draft}" != "true"; then
+                echo "Release ${RELEASE_TAG} left draft state before publication; refusing mutation." >&2
+                exit 1
+              fi
+              gh release edit "${RELEASE_TAG}" --draft=false --prerelease=true
+              ;;
+            CREATE_DRAFT|UPDATE_DRAFT)
+              ;;
+            *)
               exit 1
-            fi
-            gh release upload "${RELEASE_TAG}" --clobber ./*
-            gh release edit "${RELEASE_TAG}" --notes-file release-status.md
-          else
-            gh release create "${RELEASE_TAG}" --verify-tag --target "${RELEASE_COMMIT}" --draft --prerelease --title "Nian Pass ${RELEASE_TAG}" --notes-file release-status.md ./*
-          fi
-          if test "${PUBLISH_RELEASE}" = "true"; then
-            gh release edit "${RELEASE_TAG}" --draft=false --prerelease=true
-          else
-            gh release edit "${RELEASE_TAG}" --draft=true --prerelease=true
-          fi
+              ;;
+          esac

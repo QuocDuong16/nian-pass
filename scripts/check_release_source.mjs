@@ -71,6 +71,45 @@ export function githubReleaseWorkflowViolations(root) {
   require(/^  linux:[\s\S]*?^    runs-on:\s*ubuntu-/m, "Linux artifacts require a Linux runner");
   require(/^  android:[\s\S]*?^    runs-on:\s*ubuntu-/m, "Android artifacts require a Linux runner");
   require(/^  publish:[\s\S]*?^    permissions:\s*\n\s+contents:\s*write/m, "only publish must receive release write authority");
+  require(/GITHUB_RELEASE_STATUS:\s*DRAFT/, "attestation must record draft status before publication policy runs");
+  require(
+    /node scripts\/assemble_release\.mjs[\s\S]*?release_artifacts\.mjs scan[\s\S]*?release_status\.mjs[\s\S]*?release_artifacts\.mjs sbom[\s\S]*?release_artifacts\.mjs manifest[\s\S]*?release_artifacts\.mjs checksums/,
+    "attestation metadata must be generated in non-circular integrity order",
+  );
+  require(/node scripts\/release_publication\.mjs/, "publish job must use the behavioral publication policy helper");
+  require(/EXISTING_RELEASE_STATE="\$\{release_state\}"/, "publication policy must receive observed GitHub Release state");
+  require(
+    /test "\$\(git rev-parse HEAD\)" = "\$\{RELEASE_COMMIT\}"[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?node scripts\/release_publication\.mjs/,
+    "publish job must verify the preflight commit and downloaded checksums before publication policy",
+  );
+  require(
+    /PUBLISH_RELEASE:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.publish \|\| false \}\}/,
+    "tag-push release runs must remain draft-only",
+  );
+  require(
+    /FORGEJO_CI_STATUS:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.forgejo_ci_status \|\| 'NOT RUN' \}\}/,
+    "publication policy must receive the operator-observed Forgejo CI status",
+  );
+  require(
+    /existing_draft="\$\(gh api[\s\S]*?if test "\$\{existing_draft\}" != "true"; then[\s\S]*?published release artifacts are immutable/,
+    "draft asset replacement must recheck published-release immutability",
+  );
+
+  const publicationHelper = "scripts/release_publication.mjs";
+  if (!existsSync(resolve(root, publicationHelper))) {
+    violations.push(`${publicationHelper}: behavioral publication policy helper is missing`);
+  } else {
+    const helper = read(root, publicationHelper);
+    if (!/releaseState === "published"[\s\S]*?published release artifacts are immutable/.test(helper)) {
+      violations.push(`${publicationHelper}: published releases must fail closed as immutable`);
+    }
+    if (!/publish && forgejoCiStatus !== "PASS"/.test(helper)) {
+      violations.push(`${publicationHelper}: publish=true must require Forgejo canonical CI PASS`);
+    }
+    if (!/eventName === "push" && publish/.test(helper)) {
+      violations.push(`${publicationHelper}: tag-push publication must be rejected`);
+    }
+  }
 
   if (/^\s+branches:/m.test(workflow)) violations.push(`${githubWorkflow}: branch push triggers are forbidden`);
   if (/^\s{2}(?:pull_request|schedule):/m.test(workflow)) violations.push(`${githubWorkflow}: routine CI triggers are forbidden`);

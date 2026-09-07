@@ -27,7 +27,11 @@ browser and Native Messaging packages, Linux/Android/gateway production build
 paths, SHA-256 checksums, SBOM/provenance output, artifact regression scanning,
 and a tag/manual-only GitHub multi-platform release workflow. Forgejo remains
 the canonical routine CI authority; GitHub is only the mirror release execution
-and distribution surface. M8 is not marked DONE until the
+and distribution surface. Tag pushes stage drafts only; publication requires a
+manual request with observed Forgejo PASS. Draft assets may be replaced, but a
+published release is immutable and corrections require a new version/tag.
+`SHA256SUMS` covers the final status report, SBOM, release manifest, and platform
+payloads while excluding only itself. M8 is not marked DONE until the
 new commit has a green canonical Forgejo gate, a real GitHub release dry-run is
 reviewed, and the release report records
 platform runtime and signing results without converting `NOT RUN` into `PASS`.
@@ -99,7 +103,9 @@ infrastructure. GitHub Actions is release-only: an explicit existing `v*` tag
 drives native Windows MSVC/NSIS, Linux, Android, browser, gateway, and final
 attestation jobs. It has no branch, pull-request, scheduled, or Apple job and
 does not replace Forgejo source/quality authority. Releases remain draft or
-prerelease until an operator reviews the exact checksummed artifact set. Apple
+prerelease until an operator reviews the exact checksummed artifact set and
+records Forgejo PASS for publication. Published assets and notes are immutable;
+subsequent corrections require a new version/tag. Apple
 runners remain deferred.
 
 ## Completed M5.5 milestone

@@ -12,6 +12,7 @@
 - [ ] Test-only KDBX fixtures used for runtime smoke; no user vault used
 - [ ] Native Messaging install/doctor/uninstall checked on available platforms
 - [ ] SHA-256 checksums and release manifest generated
+- [ ] `SHA256SUMS` covers `release-status.md`, `sbom.cdx.json`, and `release-manifest.json`, excluding only itself
 - [ ] Canonical artifacts after upload/download match `SHA256SUMS`
 - [ ] Artifact secret scan passed; understand that it is not proof of absence
 - [ ] SBOM status recorded
@@ -19,3 +20,6 @@
 - [ ] Linux/Windows/Android/browser/gateway runtime statuses use PASS, FAIL, or NOT RUN without conversion
 - [ ] Backup, restore, rollback, lost-password, and lost-token notes included in release notes
 - [ ] GitHub Release remains draft/prerelease until explicit artifact review and operator approval
+- [ ] Tag-push run stages draft only; `publish=true` is a manual dispatch with observed Forgejo PASS
+- [ ] Existing GitHub Release is missing or draft; never replace assets or notes on a published tag
+- [ ] Corrections after publication use a new `VERSION` and tag

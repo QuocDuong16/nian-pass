@@ -27,6 +27,11 @@ Release preflight runs `release-source-check`, `release-policy-check`, and
 full routine `quality-check`; it does not duplicate that expensive development
 pipeline merely to obtain another badge.
 
+A tag push builds and stages a draft prerelease only; it never publishes. An
+actual publication is permitted only through `workflow_dispatch` with the same
+existing release tag, `publish=true`, and an operator-observed
+`forgejo_ci_status=PASS`. `NOT RUN` is sufficient only for a draft dry-run.
+
 ## Platform builds
 
 - Linux: on pinned Linux tooling, `make release-linux-build`. It creates the
@@ -70,10 +75,13 @@ release-artifact-check` scans names, inspectable browser archives and
 bytes for forbidden files, known secret sentinels, and secret-like text
 assignments. It recursively inspects bounded gzip TAR archives, Docker saved
 image plain nested `layer.tar` files, and Debian package payload TARs without
-executing them, then emits
-`sbom.cdx.json`, writes a
-commit/tag/toolchain/artifact `release-manifest.json`, and generates
-`SHA256SUMS`. This scan is a regression defense, not proof of total secret
+executing them. Generation order is scan, `release-status.md`,
+`sbom.cdx.json`, commit/tag/toolchain/artifact `release-manifest.json`, then
+`SHA256SUMS` last. The manifest inventory binds platform payloads,
+`release-status.md`, and `sbom.cdx.json`; it intentionally excludes itself and
+`SHA256SUMS` to avoid circular metadata. `SHA256SUMS` covers every final
+published file, including the status report, SBOM, and manifest, and excludes
+only itself. This scan is a regression defense, not proof of total secret
 absence, and it does not claim coverage of opaque proprietary installer
 formats.
 
@@ -102,9 +110,13 @@ token in logs/image.
 Every release report uses the status matrix requested by M8. Process-level
 diagnostics and package checks are not full GUI/device runtime validation.
 `NOT RUN` never becomes `PASS`; unsigned never becomes signed. Tag runs and
-manual dry-runs stage a draft/prerelease by default. A manual operator may
-explicitly publish a prerelease only after reviewing the canonical artifact
-set; this workflow never calls an experimental release stable. Publish
+manual dry-runs stage a draft/prerelease by default. Missing releases are
+created as drafts, and existing draft assets and notes may be replaced while
+staging. Once a release is published, this workflow treats its artifacts,
+checksums, notes, and title as completely immutable; any correction requires a
+new `VERSION`, tag, and release. A manual operator may explicitly publish a
+prerelease only after reviewing the canonical artifact set and recording
+Forgejo PASS; this workflow never calls an experimental release stable. Publish
 checksums, SBOM status, release notes, known accepted risks, and the exact
 commit. A gateway volume is
 not trusted history. Back up stopped volumes independently. Nian Pass cannot

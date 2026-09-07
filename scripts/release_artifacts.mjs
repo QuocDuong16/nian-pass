@@ -12,9 +12,13 @@ import { basename, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
 
+import { releaseStatusMarkdown } from "./release_status.mjs";
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const defaultArtifactRoot = resolve(repositoryRoot, "artifacts/release");
-const metadataNames = new Set(["SHA256SUMS", "release-manifest.json", "sbom.cdx.json"]);
+const payloadMetadataNames = new Set(["SHA256SUMS", "release-manifest.json", "sbom.cdx.json"]);
+const manifestExcludedNames = new Set(["SHA256SUMS", "release-manifest.json"]);
+const checksumExcludedNames = new Set(["SHA256SUMS"]);
 const forbiddenNames = /(?:^|\/)(?:\.env(?:\..*)?|coverage(?:\/|$)|[^/]+\.(?:kdbx|pem|p12|pfx|key|map))$/i;
 const secretSentinels = [
   "M8_RELEASE_SECRET",
@@ -44,10 +48,22 @@ function commandFailure(result) {
   return stderr || result.error?.message || stdout || `exit ${String(result.status)}`;
 }
 
-function payloadFiles(root) {
+function filesExcept(root, excludedNames) {
   return walk(root)
-    .filter((path) => !metadataNames.has(basename(path)))
+    .filter((path) => !excludedNames.has(basename(path)))
     .sort((left, right) => left.localeCompare(right));
+}
+
+function payloadFiles(root) {
+  return filesExcept(root, payloadMetadataNames);
+}
+
+function manifestFiles(root) {
+  return filesExcept(root, manifestExcludedNames);
+}
+
+function checksumFiles(root) {
+  return filesExcept(root, checksumExcludedNames);
 }
 
 function zipEntries(bytes) {
@@ -279,7 +295,7 @@ export function artifactViolations(root) {
 }
 
 export function checksumLines(root) {
-  return payloadFiles(root).map((path) => {
+  return checksumFiles(root).map((path) => {
     const name = relative(root, path).replaceAll("\\", "/");
     return `${digest(readFileSync(path))}  ${name}`;
   });
@@ -383,7 +399,7 @@ export function artifactPlatform(name) {
   if (/nian-pass-browser-(?:chromium|firefox)-/i.test(name)) return "browser";
   if (/\.apk$/i.test(name)) return "android";
   if (/^gateway-image\.json$|nian-pass-sync-gateway-.*\.tar\.gz$/i.test(name)) return "gateway-linux-x86_64";
-  if (name === "release-status.md") return "release-metadata";
+  if (name === "release-status.md" || name === "sbom.cdx.json") return "release-metadata";
   throw new Error(`could not classify release artifact platform for ${name}`);
 }
 
@@ -411,7 +427,7 @@ function writeManifest(root) {
   const version = readFileSync(resolve(repositoryRoot, "VERSION"), "utf8").trim();
   const commitResult = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repositoryRoot, encoding: "utf8" });
   if (commitResult.status !== 0) throw new Error("could not resolve release commit");
-  const artifacts = payloadFiles(root).map((path) => ({
+  const artifacts = manifestFiles(root).map((path) => ({
     name: relative(root, path).replaceAll("\\", "/"),
     platform: artifactPlatform(relative(root, path).replaceAll("\\", "/")),
     sha256: digest(readFileSync(path)),
@@ -443,6 +459,47 @@ function writeManifest(root) {
   writeFileSync(resolve(root, "release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+export function finalizePublicationStatus(root, status) {
+  if (status !== "DRAFT" && status !== "PASS") {
+    throw new Error(`publication status must be DRAFT or PASS, received ${String(status)}`);
+  }
+  const manifestPath = resolve(root, "release-manifest.json");
+  if (!existsSync(manifestPath)) throw new Error("release-manifest.json is required before publication");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (
+    typeof manifest.version !== "string" ||
+    typeof manifest.tag !== "string" ||
+    typeof manifest.commit !== "string" ||
+    typeof manifest.validation !== "object" ||
+    manifest.validation === null
+  ) {
+    throw new Error("release manifest is missing publication status inputs");
+  }
+
+  const validation = {
+    ...manifest.validation,
+    "GitHub Release publication": status,
+  };
+  writeFileSync(
+    resolve(root, "release-status.md"),
+    releaseStatusMarkdown({
+      version: manifest.version,
+      tag: manifest.tag,
+      commit: manifest.commit,
+      statuses: validation,
+    }),
+  );
+  manifest.validation = validation;
+  manifest.artifacts = manifestFiles(root).map((path) => ({
+    name: relative(root, path).replaceAll("\\", "/"),
+    platform: artifactPlatform(relative(root, path).replaceAll("\\", "/")),
+    sha256: digest(readFileSync(path)),
+    size: statSync(path).size,
+  }));
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  writeChecksums(root);
+}
+
 export function writeSbom(root, inventory) {
   const components = deduplicateComponents(
     inventory ?? [...cargoComponents(repositoryRoot), ...nodeComponents(repositoryRoot)],
@@ -467,7 +524,8 @@ function main() {
   } else if (command === "checksums") writeChecksums(root);
   else if (command === "manifest") writeManifest(root);
   else if (command === "sbom") writeSbom(root);
-  else throw new Error("usage: release_artifacts.mjs scan|checksums|manifest|sbom");
+  else if (command === "publication-status") finalizePublicationStatus(root, process.argv[3]);
+  else throw new Error("usage: release_artifacts.mjs scan|checksums|manifest|sbom|publication-status <DRAFT|PASS>");
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

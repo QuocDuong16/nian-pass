@@ -39,3 +39,13 @@ normal/build edges and production Node components. Dev-only dependency edges
 are excluded. It is generated without network access from Cargo metadata and
 the installed frozen pnpm graph. It is useful inventory, not a vulnerability
 scan or proof that every target-specific component is present in every artifact.
+
+Attestation is ordered to avoid circular hashes. The release manifest records
+the platform payloads, release status, and SBOM that exist before it, but not
+the manifest itself or `SHA256SUMS`. `SHA256SUMS` is generated last over every
+final published file except itself, so later modification of the SBOM or
+manifest fails checksum verification. Checksums identify one exact build's
+bytes; a rebuild of the same source may differ because hosted runners, native
+packagers, or timestamped signing are not bit-for-bit reproducible. For that
+reason draft assets are replaceable staging material, while published assets
+are immutable and corrections require a new version/tag.

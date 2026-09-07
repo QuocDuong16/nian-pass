@@ -108,7 +108,10 @@ test("GitHub release workflow policy rejects floating actions and branch trigger
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
   mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
-  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  writeFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "name: Quality\n",
+  );
   const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8");
   writeFileSync(
     join(root, ".github/workflows/release.yml"),
@@ -120,4 +123,50 @@ test("GitHub release workflow policy rejects floating actions and branch trigger
   assert.match(violations, /branch push triggers are forbidden/);
   assert.match(violations, /full commit revision/);
   assert.match(violations, /must trigger on v\* tags/);
+});
+
+test("GitHub release workflow policy rejects publication authority bypasses", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-publication-workflow-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  )
+    .replace(
+      'publication_action="$(EXISTING_RELEASE_STATE="${release_state}" node scripts/release_publication.mjs)"',
+      'publication_action="UPDATE_DRAFT"',
+    )
+    .replace(
+      "PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}",
+      "PUBLISH_RELEASE: ${{ inputs.publish }}",
+    )
+    .replace(
+      'if test "${existing_draft}" != "true"; then',
+      "if false; then",
+    )
+    .replace(
+      '(cd release && sha256sum --check SHA256SUMS)',
+      ": skip downloaded checksum verification",
+    );
+  writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
+  const helper = readFileSync(
+    join(projectRoot, "scripts/release_publication.mjs"),
+    "utf8",
+  ).replace('publish && forgejoCiStatus !== "PASS"', "false");
+  writeFileSync(join(root, "scripts/release_publication.mjs"), helper);
+
+  const violations = githubReleaseWorkflowViolations(root).join("\n");
+  assert.match(violations, /behavioral publication policy helper/);
+  assert.match(violations, /tag-push release runs must remain draft-only/);
+  assert.match(violations, /downloaded checksums before publication policy/);
+  assert.match(violations, /draft asset replacement must recheck/);
+  assert.match(
+    violations,
+    /publish=true must require Forgejo canonical CI PASS/,
+  );
 });

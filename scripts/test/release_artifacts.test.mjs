@@ -12,6 +12,7 @@ import {
   buildReleaseManifest,
   checksumLines,
   deduplicateComponents,
+  finalizePublicationStatus,
   productionCargoPackages,
   writeSbom,
 } from "../release_artifacts.mjs";
@@ -64,13 +65,20 @@ function arArchive(name, body) {
   ]);
 }
 
-test("checksums cover payload bytes and exclude generated metadata", (t) => {
+test("checksums cover final published metadata and exclude only themselves", (t) => {
   const root = directory(t);
   writeFileSync(join(root, "app.bin"), "release bytes");
+  writeFileSync(join(root, "release-status.md"), "DRAFT\n");
+  writeFileSync(join(root, "sbom.cdx.json"), "{}\n");
+  writeFileSync(join(root, "release-manifest.json"), "{}\n");
   writeFileSync(join(root, "SHA256SUMS"), "stale");
   const lines = checksumLines(root);
-  assert.equal(lines.length, 1);
-  assert.match(lines[0], /^[0-9a-f]{64}  app\.bin$/);
+  assert.equal(lines.length, 4);
+  assert.match(lines.join("\n"), /^[0-9a-f]{64}  app\.bin$/m);
+  assert.match(lines.join("\n"), /^[0-9a-f]{64}  release-manifest\.json$/m);
+  assert.match(lines.join("\n"), /^[0-9a-f]{64}  release-status\.md$/m);
+  assert.match(lines.join("\n"), /^[0-9a-f]{64}  sbom\.cdx\.json$/m);
+  assert.doesNotMatch(lines.join("\n"), /  SHA256SUMS$/m);
 });
 
 test("artifact scan rejects secret sentinels and forbidden retained files", (t) => {
@@ -282,15 +290,78 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   runArtifactCommand("checksums");
 
   const manifest = JSON.parse(readFileSync(join(output, "release-manifest.json"), "utf8"));
-  assert.equal(manifest.artifacts.length, 11);
+  assert.equal(manifest.artifacts.length, 12);
   assert.equal(manifest.tag, "v0.1.0");
   assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
+  assert.ok(
+    manifest.artifacts.some((artifact) => artifact.name === "release-status.md"),
+  );
+  assert.ok(
+    manifest.artifacts.some((artifact) => artifact.name === "sbom.cdx.json"),
+  );
+  assert.ok(
+    !manifest.artifacts.some(
+      (artifact) => artifact.name === "release-manifest.json",
+    ),
+  );
+  assert.ok(
+    !manifest.artifacts.some((artifact) => artifact.name === "SHA256SUMS"),
+  );
   const sbom = JSON.parse(readFileSync(join(output, "sbom.cdx.json"), "utf8"));
   assert.deepEqual(sbom.components.map((component) => component.name), ["fixture-runtime"]);
-  const checksumResult = spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
-    cwd: output,
-    encoding: "utf8",
-  });
+  const verifyChecksums = () =>
+    spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
+      cwd: output,
+      encoding: "utf8",
+    });
+  const sums = readFileSync(join(output, "SHA256SUMS"), "utf8");
+  assert.match(sums, /^[0-9a-f]{64}  Nian_Pass_0\.1\.0_amd64\.AppImage$/m);
+  assert.match(sums, /^[0-9a-f]{64}  gateway-image\.json$/m);
+  assert.match(sums, /^[0-9a-f]{64}  release-manifest\.json$/m);
+  assert.match(sums, /^[0-9a-f]{64}  release-status\.md$/m);
+  assert.match(sums, /^[0-9a-f]{64}  sbom\.cdx\.json$/m);
+  assert.doesNotMatch(sums, /  SHA256SUMS$/m);
+  let checksumResult = verifyChecksums();
+  assert.equal(checksumResult.status, 0, checksumResult.stderr);
+
+  const originalSbom = readFileSync(join(output, "sbom.cdx.json"));
+  writeFileSync(
+    join(output, "sbom.cdx.json"),
+    Buffer.concat([originalSbom, Buffer.from("tampered\n")]),
+  );
+  checksumResult = verifyChecksums();
+  assert.notEqual(
+    checksumResult.status,
+    0,
+    "post-generation SBOM tampering must fail",
+  );
+  writeFileSync(join(output, "sbom.cdx.json"), originalSbom);
+  runArtifactCommand("checksums");
+
+  const originalManifest = readFileSync(join(output, "release-manifest.json"));
+  writeFileSync(
+    join(output, "release-manifest.json"),
+    Buffer.concat([originalManifest, Buffer.from("tampered\n")]),
+  );
+  checksumResult = verifyChecksums();
+  assert.notEqual(
+    checksumResult.status,
+    0,
+    "post-generation release-manifest tampering must fail",
+  );
+  writeFileSync(join(output, "release-manifest.json"), originalManifest);
+  runArtifactCommand("checksums");
+
+  finalizePublicationStatus(output, "PASS");
+  const finalized = JSON.parse(
+    readFileSync(join(output, "release-manifest.json"), "utf8"),
+  );
+  assert.equal(finalized.validation["GitHub Release publication"], "PASS");
+  assert.match(
+    readFileSync(join(output, "release-status.md"), "utf8"),
+    /GitHub Release publication\s+PASS/,
+  );
+  checksumResult = verifyChecksums();
   assert.equal(checksumResult.status, 0, checksumResult.stderr);
 });
 
