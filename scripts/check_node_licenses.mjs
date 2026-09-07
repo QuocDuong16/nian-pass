@@ -23,8 +23,9 @@ function main() {
     maxBuffer: 8 * 1024 * 1024,
   });
   if (result.status !== 0) {
+    const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
     throw new Error(
-      `pnpm license inventory failed: ${result.stderr.trim() || result.error?.message || "unknown error"}`,
+      `pnpm license inventory failed: ${stderr || result.error?.message || "unknown error"}`,
     );
   }
   const violations = licenseViolations(JSON.parse(result.stdout));

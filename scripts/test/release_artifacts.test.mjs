@@ -13,6 +13,7 @@ import {
   checksumLines,
   deduplicateComponents,
   productionCargoPackages,
+  writeSbom,
 } from "../release_artifacts.mjs";
 import { assembleReleaseSet } from "../assemble_release.mjs";
 import { releaseStatuses, releaseStatusMarkdown } from "../release_status.mjs";
@@ -254,8 +255,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   writeFileSync(join(output, "release-status.md"), "# Release status\n\nExperimental release.\n");
   const statusData = join(root, "release-status.json");
   writeFileSync(statusData, '{"Windows full GUI runtime":"NOT RUN"}\n');
-
-  for (const command of ["scan", "sbom", "manifest", "checksums"]) {
+  const runArtifactCommand = (command) => {
     const result = spawnSync(process.execPath, [join(import.meta.dirname, "..", "release_artifacts.mjs"), command], {
       cwd: join(import.meta.dirname, "../.."),
       encoding: "utf8",
@@ -267,12 +267,26 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
       },
     });
     assert.equal(result.status, 0, `${command}: ${result.stderr}`);
-  }
+  };
+
+  runArtifactCommand("scan");
+  writeSbom(output, [
+    {
+      type: "library",
+      name: "fixture-runtime",
+      version: "1.0.0",
+      purl: "pkg:npm/fixture-runtime@1.0.0",
+    },
+  ]);
+  runArtifactCommand("manifest");
+  runArtifactCommand("checksums");
 
   const manifest = JSON.parse(readFileSync(join(output, "release-manifest.json"), "utf8"));
   assert.equal(manifest.artifacts.length, 11);
   assert.equal(manifest.tag, "v0.1.0");
   assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
+  const sbom = JSON.parse(readFileSync(join(output, "sbom.cdx.json"), "utf8"));
+  assert.deepEqual(sbom.components.map((component) => component.name), ["fixture-runtime"]);
   const checksumResult = spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
     cwd: output,
     encoding: "utf8",

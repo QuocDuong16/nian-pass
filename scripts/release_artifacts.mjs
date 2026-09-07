@@ -38,6 +38,11 @@ function digest(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function commandFailure(result) {
+  const stderr = typeof result.stderr === "string" ? result.stderr.trim() : "";
+  return stderr || result.error?.message || "unknown error";
+}
+
 function payloadFiles(root) {
   return walk(root)
     .filter((path) => !metadataNames.has(basename(path)))
@@ -286,7 +291,7 @@ function cargoComponents(root) {
     maxBuffer: 32 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(`cargo metadata failed: ${result.stderr.trim() || result.error?.message || "unknown error"}`);
+    throw new Error(`cargo metadata failed: ${commandFailure(result)}`);
   }
   return productionCargoPackages(JSON.parse(result.stdout))
     .map((item) => ({
@@ -326,7 +331,7 @@ function nodeComponents(root) {
     maxBuffer: 32 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(`pnpm production dependency inventory failed: ${result.stderr.trim() || result.error?.message || "unknown error"}`);
+    throw new Error(`pnpm production dependency inventory failed: ${commandFailure(result)}`);
   }
   const components = [];
   const visit = (dependencies) => {
@@ -437,8 +442,10 @@ function writeManifest(root) {
   writeFileSync(resolve(root, "release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function writeSbom(root) {
-  const components = deduplicateComponents([...cargoComponents(repositoryRoot), ...nodeComponents(repositoryRoot)]);
+export function writeSbom(root, inventory) {
+  const components = deduplicateComponents(
+    inventory ?? [...cargoComponents(repositoryRoot), ...nodeComponents(repositoryRoot)],
+  );
   writeFileSync(resolve(root, "sbom.cdx.json"), `${JSON.stringify({
     bomFormat: "CycloneDX",
     specVersion: "1.6",
