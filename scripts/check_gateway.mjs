@@ -31,6 +31,43 @@ export function forbiddenRuntimeDependencies(pkg, forbidden) {
     .map((dependency) => dependency.packageName);
 }
 
+function workflowJob(workflow, name) {
+  const marker = `  ${name}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start === -1) return "";
+  const remainder = workflow.slice(start + marker.length);
+  const nextJob = remainder.search(/^  [A-Za-z0-9_-]+:\s*$/m);
+  return nextJob === -1 ? remainder : remainder.slice(0, nextJob);
+}
+
+export function gatewayWorkflowDependencyViolations(workflow) {
+  const job = workflowJob(workflow, "gateway-container");
+  if (job === "") return ["Forgejo gateway container job is missing"];
+
+  const violations = [];
+  if (!/node_version="26\.7\.0"/.test(job)) {
+    violations.push(
+      "Forgejo gateway container job must install pinned Node.js 26.7.0",
+    );
+  }
+  if (!/corepack@0\.35\.0/.test(job) || !/pnpm@11\.22\.0/.test(job)) {
+    violations.push(
+      "Forgejo gateway container job must install pinned Corepack and pnpm",
+    );
+  }
+  if (!/make scripts-install/.test(job)) {
+    violations.push(
+      "Forgejo gateway container job must install locked source-policy dependencies",
+    );
+  }
+  if (!/run: make gateway-container-check/.test(job)) {
+    violations.push(
+      "Forgejo gateway container job must run the canonical container smoke",
+    );
+  }
+  return violations;
+}
+
 export function protocolSourceViolations({ server, storage, auth, provider, protocol = "" }) {
   const violations = [];
   if (
@@ -271,12 +308,12 @@ export function runChecks(root) {
   const selfHosting = source(root, "docs/self-hosting.md");
   const dockerignore = source(root, ".dockerignore");
   violations.push(...gatewaySecretBuildContextViolations({ selfHosting, dockerignore }));
+  violations.push(...gatewayWorkflowDependencyViolations(workflow));
   if (
     !/Gateway container check passed/.test(containerCheck) ||
     !/10001:10001/.test(containerCheck) ||
     !/repository_root\}\/deploy\/gateway\.env/.test(containerCheck) ||
-    !/gateway-container-check: gateway-source-check/.test(makefile) ||
-    !/run: make gateway-container-check/.test(workflow)
+    !/gateway-container-check: gateway-source-check/.test(makefile)
   ) {
     violations.push("gateway container runtime smoke must remain explicit and Forgejo-owned");
   }

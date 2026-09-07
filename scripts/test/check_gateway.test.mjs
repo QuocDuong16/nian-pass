@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   forbiddenRuntimeDependencies,
   gatewaySecretBuildContextViolations,
+  gatewayWorkflowDependencyViolations,
   protocolSourceViolations,
 } from "../check_gateway.mjs";
 
@@ -71,5 +72,31 @@ test("documented gateway environment file must be excluded from Docker context",
       dockerignore: "target\ndeploy/gateway.env\n",
     }).join("\n"),
     /release artifacts must be excluded/,
+  );
+});
+
+test("Forgejo gateway smoke installs pinned source-policy dependencies", () => {
+  const workflow = `jobs:
+  gateway-container:
+    runs-on: docker
+    steps:
+      - run: |
+          node_version="26.7.0"
+          npm install --global corepack@0.35.0
+          corepack install --global pnpm@11.22.0
+      - run: make scripts-install
+      - run: make gateway-container-check
+  another-job:
+    runs-on: docker
+`;
+  assert.deepEqual(gatewayWorkflowDependencyViolations(workflow), []);
+
+  const withoutInstall = workflow.replace(
+    "      - run: make scripts-install\n",
+    "",
+  );
+  assert.match(
+    gatewayWorkflowDependencyViolations(withoutInstall).join("\n"),
+    /locked source-policy dependencies/,
   );
 });
