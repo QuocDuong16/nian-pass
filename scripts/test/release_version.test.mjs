@@ -8,7 +8,7 @@ import {
 } from "../release_version.mjs";
 
 test("release versions classify generic prerelease suffixes", () => {
-  for (const version of ["0.1.0-rc.1", "0.1.0-rc.9", "0.1.0-beta.1"]) {
+  for (const version of ["0.1.0-rc.1", "0.1.0-rc.2", "0.1.0-rc.9", "0.1.0-beta.1"]) {
     assert.equal(isReleaseVersion(version), true);
     assert.equal(releaseVersionKind(version), "prerelease");
     assert.equal(isPrereleaseVersion(version), true);

@@ -45,9 +45,9 @@ test("tag must match the authoritative VERSION", (t) => {
 });
 
 test("RC tags must exactly match the authoritative prerelease VERSION", (t) => {
-  const root = repository(t, "0.1.0-rc.1");
-  assert.equal(tagViolation(root, "v0.1.0-rc.1"), null);
-  assert.match(tagViolation(root, "v0.1.0"), /!= v0\.1\.0-rc\.1/);
+  const root = repository(t, "0.1.0-rc.2");
+  assert.equal(tagViolation(root, "v0.1.0-rc.2"), null);
+  assert.match(tagViolation(root, "v0.1.0"), /!= v0\.1\.0-rc\.2/);
 });
 
 test("a final VERSION rejects a prerelease tag", (t) => {
@@ -56,9 +56,9 @@ test("a final VERSION rejects a prerelease tag", (t) => {
 });
 
 test("an RC tag ref pointing to HEAD passes exact identity", (t) => {
-  const root = repository(t, "0.1.0-rc.1");
-  git(root, "tag", "v0.1.0-rc.1");
-  assert.equal(tagIdentityViolation(root, "v0.1.0-rc.1"), null);
+  const root = repository(t, "0.1.0-rc.2");
+  git(root, "tag", "v0.1.0-rc.2");
+  assert.equal(tagIdentityViolation(root, "v0.1.0-rc.2"), null);
 });
 
 test("lightweight release tag pointing to HEAD is accepted", (t) => {

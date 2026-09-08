@@ -22,9 +22,10 @@ Remove-Item Env:NIAN_PASS_WINDOWS_PFX_PASSWORD -ErrorAction SilentlyContinue
 Invoke-Checked "pnpm" @("install", "--frozen-lockfile")
 $expectedNode = "v$((Get-Content -LiteralPath ".node-version" -Raw).Trim())"
 $expectedPnpm = ((Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json).packageManager -replace "^pnpm@", "")
-$mise = Get-Content -LiteralPath ".mise.toml" -Raw
-if ($mise -notmatch '(?m)^rust\s*=\s*"([^"]+)"$') { throw "Could not read the pinned Rust version" }
-$expectedRust = $Matches[1]
+$expectedRust = (& node "scripts/release_toolchain.mjs" ".mise.toml").Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedRust)) {
+    throw "Could not read the pinned Rust version"
+}
 if ((node --version).Trim() -ne $expectedNode) { throw "Pinned Node $expectedNode is required" }
 if ((pnpm --version).Trim() -ne $expectedPnpm) { throw "Pinned pnpm $expectedPnpm is required" }
 if (((rustc --version) -split ' ')[1] -ne $expectedRust) { throw "Pinned Rust $expectedRust is required" }

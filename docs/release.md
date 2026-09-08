@@ -139,14 +139,14 @@ signing status silently disappears.
 Release candidates are immutable generations, not mutable labels:
 
 ```text
-0.1.0-rc.1 -> test
-0.1.0-rc.2 -> test if RC1 needs source fixes
-0.1.0-rc.3 -> test if needed
+0.1.0-rc.1 -> Windows dry-run stopped before native validation because the Rust pin parser was CRLF-sensitive
+0.1.0-rc.2 -> test the fixed source generation
+0.1.0-rc.3 -> test if RC2 needs source fixes
 0.1.0      -> final only after the accepted RC
 ```
 
 Every step requires a new source commit, matching `VERSION`, matching tag, and
 new release. Never move an existing RC tag, replace published RC assets, or
-reuse `v0.1.0-rc.1` for corrected source. Version progression remains an
+reuse `v0.1.0-rc.2` for corrected source. Version progression remains an
 explicit reviewed source edit; release automation does not increment or promote
 versions.
