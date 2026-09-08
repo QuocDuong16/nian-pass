@@ -13,6 +13,7 @@ test("release versions classify generic prerelease suffixes", () => {
     "0.1.0-rc.2",
     "0.1.0-rc.3",
     "0.1.0-rc.4",
+    "0.1.0-rc.5",
     "0.1.0-rc.9",
     "0.1.0-beta.1",
   ]) {

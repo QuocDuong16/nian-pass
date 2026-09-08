@@ -15,6 +15,7 @@ import {
   dirtyTreeViolation,
   githubReleaseWorkflowViolations,
   isExactVersion,
+  normalizePolicyText,
   tagIdentityViolation,
   tagViolation,
 } from "../check_release_source.mjs";
@@ -47,6 +48,29 @@ function commitChange(root, name = "change.txt") {
   writeFileSync(join(root, name), `${name}\n`);
   git(root, "add", name);
   git(root, ...identity, "commit", "--quiet", "-m", name);
+}
+
+function workflowFixture(t, workflow, prefix = "nian-pass-workflow-policy-") {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
+  for (const name of [
+    "release_publication.mjs",
+    "release_publish_transaction.mjs",
+    "release_execution_mode.mjs",
+    "release_artifacts.mjs",
+  ]) {
+    writeFileSync(
+      join(root, "scripts", name),
+      readFileSync(join(projectRoot, "scripts", name), "utf8"),
+    );
+  }
+  return root;
 }
 
 test("tag must match the authoritative VERSION", (t) => {
@@ -133,6 +157,54 @@ test("release dependency policy accepts exact versions only", () => {
 test("GitHub is release-only authority and Forgejo has no competing packager", () => {
   const projectRoot = resolve(import.meta.dirname, "../..");
   assert.deepEqual(githubReleaseWorkflowViolations(projectRoot), []);
+});
+
+test("policy text normalization is LF, CRLF, and CR independent", () => {
+  assert.equal(normalizePolicyText("a\nb\n"), "a\nb\n");
+  assert.equal(normalizePolicyText("a\r\nb\r\n"), "a\nb\n");
+  assert.equal(normalizePolicyText("a\rb\r"), "a\nb\n");
+});
+
+test("canonical release workflow has identical policy results under LF, CRLF, and CR", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8");
+  const lfRoot = workflowFixture(t, workflow, "nian-pass-lf-workflow-");
+  const crlfRoot = workflowFixture(
+    t,
+    workflow.replace(/\n/g, "\r\n"),
+    "nian-pass-crlf-workflow-",
+  );
+  const crRoot = workflowFixture(t, workflow.replace(/\n/g, "\r"), "nian-pass-cr-workflow-");
+  const expected = githubReleaseWorkflowViolations(lfRoot);
+  assert.deepEqual(expected, []);
+  assert.deepEqual(githubReleaseWorkflowViolations(crlfRoot), expected);
+  assert.deepEqual(githubReleaseWorkflowViolations(crRoot), expected);
+  const falsePositives = [
+    "linux must run only in build/stage mode",
+    "windows must run only in build/stage mode",
+    "browser must run only in build/stage mode",
+    "android must run only in build/stage mode",
+    "gateway must run only in build/stage mode",
+    "attest must run only in build/stage mode",
+    "only build/stage mode may use current-run Actions artifacts",
+    "publish=true must download assets from the existing GitHub draft",
+  ];
+  for (const violation of falsePositives) {
+    assert.ok(!githubReleaseWorkflowViolations(crlfRoot).some((item) => item.includes(violation)));
+  }
+});
+
+test("CRLF workflow policy still detects a real build-mode violation", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const workflow = normalizePolicyText(
+    readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8"),
+  )
+    .replace("  linux:\n    needs: preflight\n    if: ${{ needs.preflight.outputs.build_mode == 'true' }}\n", "  linux:\n    needs: preflight\n");
+  const root = workflowFixture(t, workflow.replace(/\n/g, "\r\n"), "nian-pass-crlf-violation-");
+  assert.match(
+    githubReleaseWorkflowViolations(root).join("\n"),
+    /linux must run only in build\/stage mode/,
+  );
 });
 
 test("GitHub attestation verifies basename-only checksums from the release directory", (t) => {

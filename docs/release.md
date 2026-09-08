@@ -174,7 +174,8 @@ Release candidates are immutable generations, not mutable labels:
 0.1.0-rc.1 -> Windows dry-run stopped before native validation because the Rust pin parser was CRLF-sensitive
 0.1.0-rc.2 -> native platform payloads assembled, but attestation checksum verification used the repository cwd
 0.1.0-rc.3 -> full multi-platform build, attestation, and draft prerelease passed
-0.1.0-rc.4 -> publication transaction hardening before real publish validation
+0.1.0-rc.4 -> Windows CRLF checkout exposed LF-only release-policy regex assumptions
+0.1.0-rc.5 -> line-ending-independent release-policy remediation
 0.1.0      -> final only after the accepted RC
 ```
 

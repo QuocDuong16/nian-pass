@@ -22,6 +22,24 @@ function read(root, name) {
   return readFileSync(resolve(root, name), "utf8");
 }
 
+/** Normalize policy source only; release payload and checksum bytes stay raw. */
+export function normalizePolicyText(text) {
+  return text.replace(/\r\n?/g, "\n");
+}
+
+function readPolicyText(root, name) {
+  return normalizePolicyText(read(root, name));
+}
+
+function workflowJobBlock(workflow, job) {
+  const header = new RegExp(`^  ${job}:[ \\t]*$`, "m").exec(workflow);
+  if (!header || header.index === undefined) return "";
+
+  const afterHeader = workflow.slice(header.index + header[0].length);
+  const nextHeader = /^  [A-Za-z0-9_-]+:[ \t]*$/m.exec(afterHeader);
+  return nextHeader ? afterHeader.slice(0, nextHeader.index) : afterHeader;
+}
+
 export function releaseVersion(root) {
   const version = read(root, "VERSION").trim();
   if (!isReleaseVersion(version)) {
@@ -59,7 +77,7 @@ export function githubReleaseWorkflowViolations(root) {
     return violations;
   }
 
-  const workflow = read(root, githubWorkflow);
+  const workflow = readPolicyText(root, githubWorkflow);
   const triggerBlock =
     workflow.match(/^on:\s*\n([\s\S]*?)^permissions:/m)?.[1] ?? "";
   const triggers = [...triggerBlock.matchAll(/^  ([A-Za-z0-9_-]+):/gm)].map(
@@ -108,7 +126,13 @@ export function githubReleaseWorkflowViolations(root) {
   require(/build_mode:\s*\$\{\{ steps\.source\.outputs\.build_mode \}\}/, "preflight must resolve build versus publish-only mode once");
   require(/RELEASE_EVENT_NAME="\$\{GITHUB_EVENT_NAME\}" PUBLISH_RELEASE="\$\{PUBLISH_RELEASE\}" node scripts\/release_execution_mode\.mjs/, "preflight must use the tested build/publish execution-mode helper");
   for (const job of ["linux", "windows", "browser", "android", "gateway", "attest"]) {
-    require(new RegExp(`^  ${job}:\\n[\\s\\S]*?^    if: \\$\\{\\{ needs\\.preflight\\.outputs\\.build_mode == 'true' \\}\\}`, "m"), `${job} must run only in build/stage mode`);
+    if (
+      !/^    if: \$\{\{ needs\.preflight\.outputs\.build_mode == 'true' \}\}$/m.test(
+        workflowJobBlock(workflow, job),
+      )
+    ) {
+      violations.push(`${githubWorkflow}: ${job} must run only in build/stage mode`);
+    }
   }
   require(/^  publish:[\s\S]*?^    needs: \[preflight, linux, windows, browser, android, gateway, attest\][\s\S]*?^    if: \$\{\{ always\(\) && needs\.preflight\.result == 'success' && \(needs\.preflight\.outputs\.build_mode == 'false' \|\| needs\.attest\.result == 'success'\) \}\}/m, "publish-only mode must not be skipped because build jobs are intentionally skipped");
   require(/RELEASE_KIND:\s*\$\{\{ needs\.preflight\.outputs\.release_kind \}\}/, "publish job must use the preflight release classification");

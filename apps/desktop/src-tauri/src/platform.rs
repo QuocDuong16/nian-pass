@@ -54,14 +54,14 @@ mod tests {
     fn runtime_contract_contains_only_the_platform_enum() {
         let encoded = serde_json::to_value(RuntimeInfoDto {
             platform: RuntimePlatform::Android,
-            version: "0.1.0-rc.4",
+            version: "0.1.0-rc.5",
             commit: "0123456789abcdef0123456789abcdef01234567",
         });
         assert!(matches!(
             encoded,
             Ok(value) if value == serde_json::json!({
                 "platform": "android",
-                "version": "0.1.0-rc.4",
+                "version": "0.1.0-rc.5",
                 "commit": "0123456789abcdef0123456789abcdef01234567"
             })
         ));

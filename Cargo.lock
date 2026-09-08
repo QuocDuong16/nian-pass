@@ -2913,7 +2913,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nian-pass-browser-host"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "browser-native-protocol",
  "interprocess",
@@ -2925,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "nian-pass-cli"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "clap",
  "kdbx",
@@ -2937,7 +2937,7 @@ dependencies = [
 
 [[package]]
 name = "nian-pass-desktop"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "atomic-write-file",
  "browser-native-protocol",
@@ -2966,7 +2966,7 @@ dependencies = [
 
 [[package]]
 name = "nian-pass-sync-gateway"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "bytes",
  "clap",
