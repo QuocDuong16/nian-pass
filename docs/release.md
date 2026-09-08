@@ -32,6 +32,10 @@ Release preflight runs `release-source-check`, `release-policy-check`, and
 full routine `quality-check`; it does not duplicate that expensive development
 pipeline merely to obtain another badge.
 
+From the clean checkout, `release-source-check` precedes artifact assembly;
+record SHA-256 checksums for the canonical release directory and record every
+unavailable runtime validation honestly as `NOT RUN`.
+
 A tag push builds and stages a draft only; it never publishes. GitHub marks the
 draft prerelease or final solely from `VERSION`, and an existing draft whose
 classification differs from source fails closed. An
