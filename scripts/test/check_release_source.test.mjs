@@ -202,6 +202,37 @@ test("actual Tauri-generated Android Kotlin is ignored while authoritative Kotli
   );
 });
 
+test("Kotlin compiler session state is ignored while Android source mutations fail closed", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const sessions = [
+    "apps/desktop/src-tauri/gen/android/.kotlin/sessions/kotlin-compiler-test.salive",
+    "apps/desktop/src-tauri/gen/android/buildSrc/.kotlin/sessions/kotlin-compiler-test.salive",
+  ];
+  for (const path of sessions)
+    assert.equal(ignoredByGit(projectRoot, path), true, `${path} must be ignored`);
+
+  const root = repository(t);
+  const androidRoot = join(root, "apps/desktop/src-tauri/gen/android");
+  mkdirSync(androidRoot, { recursive: true });
+  writeFileSync(join(androidRoot, ".gitignore"), ".kotlin\n");
+  git(root, "add", "apps/desktop/src-tauri/gen/android/.gitignore");
+  git(root, ...identity, "commit", "--quiet", "-m", "ignore Kotlin sessions");
+  git(root, "tag", "v0.1.0");
+  for (const path of sessions) {
+    const absolute = join(root, path);
+    mkdirSync(resolve(absolute, ".."), { recursive: true });
+    writeFileSync(absolute, "transient\n");
+  }
+  const expected = { tag: "v0.1.0", commit: git(root, "rev-parse", "HEAD"), version: "0.1.0" };
+  assert.equal(dirtyTreeViolation(root), null);
+  assert.deepEqual(postBuildSourceViolations(root, expected), []);
+
+  const source = join(androidRoot, "app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt");
+  mkdirSync(resolve(source, ".."), { recursive: true });
+  writeFileSync(source, "unexpected\n");
+  assert.match(postBuildSourceViolations(root, expected).join("\n"), /VaultSourcePlugin\.kt/);
+});
+
 test("post-build validation keeps tag, HEAD, and VERSION bound to pre-build identity", (t) => {
   const root = repository(t);
   git(root, "tag", "v0.1.0");

@@ -382,6 +382,7 @@ export function runChecks(root) {
     "key.properties",
     "keystore.properties",
     ".gradle",
+    ".kotlin",
     "build",
     "/.tauri",
   ]) {

@@ -19,7 +19,7 @@ function fixture(t) {
   write(
     root,
     "apps/desktop/src-tauri/gen/android/.gitignore",
-    "local.properties\nkey.properties\nkeystore.properties\n.gradle\nbuild\n/.tauri\n",
+    "local.properties\nkey.properties\nkeystore.properties\n.gradle\n.kotlin\nbuild\n/.tauri\n",
   );
   write(
     root,
