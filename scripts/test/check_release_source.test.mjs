@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -144,16 +144,50 @@ test("dirty-tree rejection exercises Git state", (t) => {
   assert.match(dirtyTreeViolation(root), /\?\? source\/change\.txt/);
 });
 
-test("post-build validation permits ignored Android build state but rejects source changes", (t) => {
+function ignoredByGit(root, path) {
+  return (
+    spawnSync("git", ["check-ignore", "--quiet", "--", path], {
+      cwd: root,
+      encoding: "utf8",
+    }).status === 0
+  );
+}
+
+test("actual Tauri-generated Android Kotlin is ignored while authoritative Kotlin remains protected", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const generated = [
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/generated/RustWebView.kt",
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/generated/WryActivity.kt",
+  ];
+  for (const path of generated)
+    assert.equal(ignoredByGit(projectRoot, path), true, `${path} must be ignored`);
+  assert.equal(
+    ignoredByGit(
+      projectRoot,
+      "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+    ),
+    false,
+  );
+
   const root = repository(t);
   git(root, "tag", "v0.1.0");
-  writeFileSync(join(root, ".gitignore"), "generated/android-build-state\n");
-  git(root, "add", ".gitignore");
+  const appRoot = join(
+    root,
+    "apps/desktop/src-tauri/gen/android/app",
+  );
+  mkdirSync(appRoot, { recursive: true });
+  writeFileSync(join(appRoot, ".gitignore"), "/src/main/**/generated\n");
+  git(root, "add", "apps/desktop/src-tauri/gen/android/app/.gitignore");
   git(root, ...identity, "commit", "--quiet", "-m", "ignore generated state");
   git(root, "tag", "-d", "v0.1.0");
   git(root, "tag", "v0.1.0");
-  mkdirSync(join(root, "generated"));
-  writeFileSync(join(root, "generated/android-build-state"), "generated\n");
+  const sourceRoot = join(
+    appRoot,
+    "src/main/java/dev/nian/pass",
+  );
+  mkdirSync(join(sourceRoot, "generated"), { recursive: true });
+  writeFileSync(join(sourceRoot, "generated/RustWebView.kt"), "generated\n");
+  writeFileSync(join(sourceRoot, "generated/WryActivity.kt"), "generated\n");
   const expected = {
     tag: "v0.1.0",
     commit: git(root, "rev-parse", "HEAD"),
@@ -161,11 +195,10 @@ test("post-build validation permits ignored Android build state but rejects sour
   };
   assert.deepEqual(postBuildSourceViolations(root, expected), []);
 
-  mkdirSync(join(root, "apps", "desktop", "src"), { recursive: true });
-  writeFileSync(join(root, "apps/desktop/src/main.ts"), "unexpected\n");
+  writeFileSync(join(sourceRoot, "VaultSourcePlugin.kt"), "unexpected\n");
   assert.match(
     postBuildSourceViolations(root, expected).join("\n"),
-    /post-build mutation rejected:[\s\S]*apps\/desktop\/src\/main\.ts/,
+    /post-build mutation rejected:[\s\S]*VaultSourcePlugin\.kt/,
   );
 });
 
@@ -196,6 +229,14 @@ test("Android release staging uses pre-build clean verification and post-build m
   const makefile = readFileSync(join(projectRoot, "Makefile"), "utf8");
   assert.match(
     makefile,
+    /release-browser-package release-linux-build release-android-build release-gateway-image: private RELEASE_COMMIT := \$\(shell git rev-parse HEAD\)/,
+  );
+  assert.match(
+    makefile,
+    /release-browser-package release-linux-build release-android-build release-gateway-image: private RELEASE_VERSION := \$\(shell cat VERSION\)/,
+  );
+  assert.match(
+    makefile,
     /release-android-build: release-source-check mobile-android-check[\s\S]*?\$\(MAKE\) release-stage/,
   );
   assert.match(
@@ -214,6 +255,10 @@ test("Android release staging uses pre-build clean verification and post-build m
   assert.match(
     makefile,
     /release-gateway-image: release-source-check[\s\S]*?release-source-postbuild-check/,
+  );
+  assert.doesNotMatch(
+    makefile,
+    /RELEASE_COMMIT="\$\$\(git rev-parse HEAD\)" RELEASE_VERSION="\$\$\(cat VERSION\)" \$\(MAKE\) release-(?:stage|source-postbuild-check)/,
   );
 });
 

@@ -385,23 +385,29 @@ release-source-postbuild-check:
 
 release-source-check: release-source-prebuild-check
 
+# Capture provenance before any native tool can create generated build state.
+# Each release target passes this immutable identity explicitly to its post-build
+# verifier instead of reading HEAD or VERSION again after the build.
+release-browser-package release-linux-build release-android-build release-gateway-image: private RELEASE_COMMIT := $(shell git rev-parse HEAD)
+release-browser-package release-linux-build release-android-build release-gateway-image: private RELEASE_VERSION := $(shell cat VERSION)
+
 release-browser-package: release-source-check
 	$(MAKE) browser-build browser-artifact-check
 	pnpm --filter @nian-pass/browser-extension package
-	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-source-postbuild-check
+	RELEASE_COMMIT="$(RELEASE_COMMIT)" RELEASE_VERSION="$(RELEASE_VERSION)" $(MAKE) release-source-postbuild-check
 
 release-linux-build: release-source-check
 	pnpm install --frozen-lockfile
 	NIAN_PASS_COMMIT="$$(git rev-parse HEAD)" pnpm --filter @nian-pass/desktop tauri build --ci --bundles appimage,deb
 	cargo build --locked --release -p nian-pass-browser-host
 	node scripts/package_native_host.mjs linux-x86_64 target/release/nian-pass-browser-host
-	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-stage
+	RELEASE_COMMIT="$(RELEASE_COMMIT)" RELEASE_VERSION="$(RELEASE_VERSION)" $(MAKE) release-stage
 
 release-windows-build:
 	pwsh -NoProfile -NonInteractive -File scripts/release_windows.ps1
 
 release-android-build: release-source-check mobile-android-check
-	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-stage
+	RELEASE_COMMIT="$(RELEASE_COMMIT)" RELEASE_VERSION="$(RELEASE_VERSION)" $(MAKE) release-stage
 
 release-gateway-image: release-source-check
 	@mkdir -p artifacts/release
@@ -414,7 +420,7 @@ release-gateway-image: release-source-check
 		"nian-pass-sync-gateway:$$(cat VERSION)" > artifacts/release/gateway-image.json
 	@docker image save "nian-pass-sync-gateway:$$(cat VERSION)" | gzip -n \
 		> "artifacts/release/nian-pass-sync-gateway-$$(cat VERSION).tar.gz"
-	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-source-postbuild-check
+	RELEASE_COMMIT="$(RELEASE_COMMIT)" RELEASE_VERSION="$(RELEASE_VERSION)" $(MAKE) release-source-postbuild-check
 
 release-stage: release-source-postbuild-check
 	node scripts/stage_release.mjs
