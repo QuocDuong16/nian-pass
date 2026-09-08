@@ -5,6 +5,10 @@ results. `NOT RUN` is a result, not a placeholder that may be inferred as pass.
 Draft staging may record Forgejo as `NOT RUN`; a published release must record
 Forgejo canonical CI and GitHub Release publication as `PASS`.
 
+Record `Release class: prerelease` for suffixed versions such as
+`0.1.0-rc.1`, and `Release class: final` for unsuffixed versions. Draft status
+does not change this source-derived classification.
+
 ```text
 Forgejo canonical CI                   PASS / FAIL / NOT RUN
 

@@ -8,13 +8,17 @@ function action(
   publishRequested,
   forgejoCiStatus,
   eventName = "workflow_dispatch",
+  releaseKind = "prerelease",
+  existingPrerelease = releaseState === "draft",
 ) {
   return publicationAction({
     releaseState,
+    existingPrerelease,
+    releaseKind,
     publishRequested,
     forgejoCiStatus,
     eventName,
-    releaseTag: "v0.1.0",
+    releaseTag: releaseKind === "prerelease" ? "v0.1.0-rc.1" : "v0.1.0",
   });
 }
 
@@ -53,4 +57,36 @@ test("tag pushes are draft-only", () => {
   assert.equal(action("none", false, "NOT RUN", "push"), "CREATE_DRAFT");
   assert.equal(action("draft", false, "PASS", "push"), "UPDATE_DRAFT");
   assert.throws(() => action("none", true, "PASS", "push"), /draft-only/);
+});
+
+test("existing drafts must retain the source-derived release classification", () => {
+  assert.equal(
+    action("draft", false, "PASS", "workflow_dispatch", "prerelease", true),
+    "UPDATE_DRAFT",
+  );
+  assert.equal(
+    action("draft", false, "PASS", "workflow_dispatch", "final", false),
+    "UPDATE_DRAFT",
+  );
+  assert.throws(
+    () => action("draft", false, "PASS", "workflow_dispatch", "prerelease", false),
+    /does not match source release kind prerelease/,
+  );
+  assert.throws(
+    () => action("draft", false, "PASS", "workflow_dispatch", "final", true),
+    /does not match source release kind final/,
+  );
+});
+
+test("RC and final publication actions preserve independent draft semantics", () => {
+  assert.equal(action("none", false, "NOT RUN", "push", "prerelease"), "CREATE_DRAFT");
+  assert.equal(
+    action("none", true, "PASS", "workflow_dispatch", "prerelease"),
+    "CREATE_AND_PUBLISH",
+  );
+  assert.equal(action("none", false, "NOT RUN", "push", "final"), "CREATE_DRAFT");
+  assert.equal(
+    action("none", true, "PASS", "workflow_dispatch", "final"),
+    "CREATE_AND_PUBLISH",
+  );
 });

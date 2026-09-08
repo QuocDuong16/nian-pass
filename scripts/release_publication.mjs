@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 const releaseStates = new Set(["none", "draft", "published"]);
 const forgejoStatuses = new Set(["PASS", "NOT RUN"]);
+const releaseKinds = new Set(["prerelease", "final"]);
 
 function booleanInput(value) {
   if (value === true || value === "true") return true;
@@ -13,6 +14,8 @@ function booleanInput(value) {
 
 export function publicationAction({
   releaseState,
+  existingPrerelease,
+  releaseKind,
   publishRequested,
   forgejoCiStatus,
   eventName,
@@ -23,6 +26,9 @@ export function publicationAction({
   }
   if (!forgejoStatuses.has(forgejoCiStatus)) {
     throw new Error(`invalid Forgejo CI status ${String(forgejoCiStatus)}`);
+  }
+  if (!releaseKinds.has(releaseKind)) {
+    throw new Error(`invalid release kind ${String(releaseKind)}`);
   }
   if (eventName !== "push" && eventName !== "workflow_dispatch") {
     throw new Error(
@@ -35,6 +41,15 @@ export function publicationAction({
     throw new Error(
       `Release ${releaseTag} is already published; published release artifacts are immutable. Create a new version/tag instead.`,
     );
+  }
+  if (releaseState === "draft") {
+    const observedPrerelease = booleanInput(existingPrerelease);
+    const expectedPrerelease = releaseKind === "prerelease";
+    if (observedPrerelease !== expectedPrerelease) {
+      throw new Error(
+        `Release ${releaseTag} draft prerelease state does not match source release kind ${releaseKind}`,
+      );
+    }
   }
   if (eventName === "push" && publish) {
     throw new Error("tag-push release runs are draft-only");
@@ -52,6 +67,8 @@ export function publicationAction({
 function main() {
   const action = publicationAction({
     releaseState: process.env.EXISTING_RELEASE_STATE,
+    existingPrerelease: process.env.EXISTING_RELEASE_PRERELEASE,
+    releaseKind: process.env.RELEASE_KIND,
     publishRequested: process.env.PUBLISH_RELEASE,
     forgejoCiStatus: process.env.FORGEJO_CI_STATUS,
     eventName: process.env.RELEASE_EVENT_NAME,

@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
 
 import { releaseStatusMarkdown } from "./release_status.mjs";
+import { releaseVersionKind } from "./release_version.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const defaultArtifactRoot = resolve(repositoryRoot, "artifacts/release");
@@ -382,6 +383,7 @@ export function buildReleaseManifest({ version, tag, commit, toolchains, artifac
   return {
     schemaVersion: 2,
     version,
+    releaseKind: releaseVersionKind(version),
     tag,
     commit,
     workflow: ".github/workflows/release.yml",

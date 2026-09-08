@@ -21,13 +21,20 @@ Early development. The project is not ready for real vaults.
 
 M8 — Security Hardening / Release Engineering — IN PROGRESS
 
+Current release candidate source: `0.1.0-rc.1`. After this exact generation is
+reviewed and Forgejo CI is green, an operator may create the matching
+`v0.1.0-rc.1` tag for a GitHub draft prerelease. Source preparation does not
+create release tags.
+
 M8 now provides pinned release inputs, a single `VERSION`, clean-tree and tag
 consistency gates, hardened release profiles/CSP/filesystem opens, deterministic
 browser and Native Messaging packages, Linux/Android/gateway production build
 paths, SHA-256 checksums, SBOM/provenance output, artifact regression scanning,
 and a tag/manual-only GitHub multi-platform release workflow. Forgejo remains
 the canonical routine CI authority; GitHub is only the mirror release execution
-and distribution surface. Tag pushes stage drafts only; publication requires a
+and distribution surface. Release classification comes from `VERSION`: RC and
+beta suffixes are prereleases, while an unsuffixed version is final. Tag pushes
+stage drafts only; publication requires a
 manual request with observed Forgejo PASS. Draft assets may be replaced, but a
 published release is immutable and corrections require a new version/tag.
 `SHA256SUMS` covers the final status report, SBOM, release manifest, and platform
@@ -102,8 +109,8 @@ Forgejo Actions remains the normal development CI on self-hosted Docker/DIND
 infrastructure. GitHub Actions is release-only: an explicit existing `v*` tag
 drives native Windows MSVC/NSIS, Linux, Android, browser, gateway, and final
 attestation jobs. It has no branch, pull-request, scheduled, or Apple job and
-does not replace Forgejo source/quality authority. Releases remain draft or
-prerelease until an operator reviews the exact checksummed artifact set and
+does not replace Forgejo source/quality authority. Releases remain drafts until
+an operator reviews the exact checksummed artifact set and
 records Forgejo PASS for publication. Published assets and notes are immutable;
 subsequent corrections require a new version/tag. Apple
 runners remain deferred.

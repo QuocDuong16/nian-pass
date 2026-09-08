@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 
 import { parse as parseToml } from "smol-toml";
 
+import { isReleaseVersion } from "./release_version.mjs";
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const versionFiles = [
   ["apps/cli/Cargo.toml", "toml"],
@@ -22,7 +24,7 @@ function read(root, name) {
 
 export function releaseVersion(root) {
   const version = read(root, "VERSION").trim();
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+  if (!isReleaseVersion(version)) {
     throw new Error("VERSION must contain one semantic version");
   }
   return version;
@@ -33,7 +35,7 @@ function dependencyRequirement(value) {
 }
 
 export function isExactVersion(value) {
-  return typeof value === "string" && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
+  return isReleaseVersion(value);
 }
 
 export function githubReleaseWorkflowViolations(root) {
@@ -78,6 +80,11 @@ export function githubReleaseWorkflowViolations(root) {
   );
   require(/node scripts\/release_publication\.mjs/, "publish job must use the behavioral publication policy helper");
   require(/EXISTING_RELEASE_STATE="\$\{release_state\}"/, "publication policy must receive observed GitHub Release state");
+  require(/EXISTING_RELEASE_PRERELEASE="\$\{existing_prerelease\}"/, "publication policy must receive observed draft classification");
+  require(/release_kind:\s*\$\{\{ steps\.source\.outputs\.release_kind \}\}/, "preflight must classify the release version once");
+  require(/RELEASE_KIND:\s*\$\{\{ needs\.preflight\.outputs\.release_kind \}\}/, "publish job must use the preflight release classification");
+  require(/if test "\$\{RELEASE_IS_PRERELEASE\}" = "true"; then[\s\S]*?create_args\+=\(--prerelease\)/, "draft creation must mark only source-classified prereleases");
+  require(/--draft=false "--prerelease=\$\{RELEASE_IS_PRERELEASE\}"/, "publication must preserve the source-derived prerelease flag");
   require(
     /test "\$\(git rev-parse HEAD\)" = "\$\{RELEASE_COMMIT\}"[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?node scripts\/release_publication\.mjs/,
     "publish job must verify the preflight commit and downloaded checksums before publication policy",
@@ -91,7 +98,7 @@ export function githubReleaseWorkflowViolations(root) {
     "publication policy must receive the operator-observed Forgejo CI status",
   );
   require(
-    /existing_draft="\$\(gh api[\s\S]*?if test "\$\{existing_draft\}" != "true"; then[\s\S]*?published release artifacts are immutable/,
+    /existing_metadata="\$\(gh api[\s\S]*?if test "\$\{existing_draft\}" != "true"; then[\s\S]*?published release artifacts are immutable/,
     "draft asset replacement must recheck published-release immutability",
   );
 
@@ -108,6 +115,9 @@ export function githubReleaseWorkflowViolations(root) {
     }
     if (!/eventName === "push" && publish/.test(helper)) {
       violations.push(`${publicationHelper}: tag-push publication must be rejected`);
+    }
+    if (!/observedPrerelease !== expectedPrerelease/.test(helper)) {
+      violations.push(`${publicationHelper}: existing draft classification mismatch must fail closed`);
     }
   }
 
@@ -168,6 +178,31 @@ export function sourcePolicyViolations(root) {
     const data = kind === "toml" ? parseToml(read(root, name)) : JSON.parse(read(root, name));
     const declared = kind === "toml" ? data.package?.version : data.version;
     if (declared !== version) violations.push(`${name}: version ${String(declared)} != ${version}`);
+  }
+  const browserManifest = read(root, "apps/browser-extension/src/manifest.ts");
+  if (
+    !/import packageMetadata from "\.\.\/package\.json" with \{ type: "json" \}/.test(browserManifest) ||
+    !/version_name:\s*releaseVersion/.test(browserManifest)
+  ) {
+    violations.push("apps/browser-extension/src/manifest.ts: displayed version must come from package.json");
+  }
+  const gatewayImageVersion = read(root, "apps/sync-gateway/Dockerfile").match(
+    /^ARG NIAN_PASS_VERSION=(\S+)$/m,
+  )?.[1];
+  if (gatewayImageVersion !== version) {
+    violations.push(`apps/sync-gateway/Dockerfile: default image version ${String(gatewayImageVersion)} != ${version}`);
+  }
+  const lock = parseToml(read(root, "Cargo.lock"));
+  for (const packageName of [
+    "nian-pass-cli",
+    "nian-pass-browser-host",
+    "nian-pass-desktop",
+    "nian-pass-sync-gateway",
+  ]) {
+    const locked = lock.package?.find((item) => item.name === packageName)?.version;
+    if (locked !== version) {
+      violations.push(`Cargo.lock: ${packageName} version ${String(locked)} != ${version}`);
+    }
   }
 
   const rootPackage = JSON.parse(read(root, "package.json"));

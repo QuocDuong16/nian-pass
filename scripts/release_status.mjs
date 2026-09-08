@@ -2,6 +2,8 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { releaseVersionKind } from "./release_version.mjs";
+
 const fields = [
   ["Forgejo canonical CI", "FORGEJO_CI_STATUS"],
   ["GitHub release preflight", "PREFLIGHT_STATUS"],
@@ -43,9 +45,10 @@ export function releaseStatuses(environment) {
 }
 
 export function releaseStatusMarkdown({ version, tag, commit, statuses }) {
+  const releaseKind = releaseVersionKind(version);
   const width = Math.max(...Object.keys(statuses).map((name) => name.length));
   const rows = Object.entries(statuses).map(([name, value]) => `${name.padEnd(width)}  ${value}`);
-  return `# Nian Pass ${version} release validation\n\nExperimental release. Do not use Nian Pass with production credentials.\n\nTag: ${tag}\nCommit: ${commit}\nSupported: Windows desktop, Linux desktop, Android, browser extension, self-hosted Sync Gateway\nApple: M9+ DEFERRED\nKnown limitations: full GUI/device validation, artifact signing, store signing, and registry publication are authoritative only when the matrix below records PASS.\n\n\`\`\`text\n${rows.join("\n")}\n\`\`\`\n`;
+  return `# Nian Pass ${version} release validation\n\nExperimental release. Do not use Nian Pass with production credentials.\n\nRelease class: ${releaseKind}\nTag: ${tag}\nCommit: ${commit}\nSupported: Windows desktop, Linux desktop, Android, browser extension, self-hosted Sync Gateway\nApple: M9+ DEFERRED\nKnown limitations: full GUI/device validation, artifact signing, store signing, and registry publication are authoritative only when the matrix below records PASS.\n\n\`\`\`text\n${rows.join("\n")}\n\`\`\`\n`;
 }
 
 function main() {

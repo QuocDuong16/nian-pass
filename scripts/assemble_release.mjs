@@ -2,6 +2,8 @@ import { copyFileSync, lstatSync, mkdirSync, readdirSync, rmSync } from "node:fs
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { isReleaseVersion } from "./release_version.mjs";
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 function matches(name, pattern) {
@@ -9,29 +11,36 @@ function matches(name, pattern) {
   return pattern.test(name);
 }
 
-const platformPolicy = (version) => ({
+function escapeRegularExpression(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const platformPolicy = (version) => {
+  const escapedVersion = escapeRegularExpression(version);
+  return {
   windows: [
-    { pattern: new RegExp(`^nian-pass-native-host-windows-x86_64-${version.replaceAll(".", "\\.")}\\.zip$`), count: 1 },
+    { pattern: new RegExp(`^nian-pass-native-host-windows-x86_64-${escapedVersion}\\.zip$`), count: 1 },
     { pattern: /\.exe$/i, minimum: 1 },
   ],
   linux: [
-    { pattern: new RegExp(`^nian-pass-native-host-linux-x86_64-${version.replaceAll(".", "\\.")}\\.zip$`), count: 1 },
+    { pattern: new RegExp(`^nian-pass-native-host-linux-x86_64-${escapedVersion}\\.zip$`), count: 1 },
     { pattern: /\.AppImage$/, minimum: 1 },
     { pattern: /\.deb$/i, minimum: 1 },
   ],
   browser: [
-    { pattern: new RegExp(`^nian-pass-browser-chromium-${version.replaceAll(".", "\\.")}\\.zip$`), count: 1 },
-    { pattern: new RegExp(`^nian-pass-browser-firefox-${version.replaceAll(".", "\\.")}\\.zip$`), count: 1 },
+    { pattern: new RegExp(`^nian-pass-browser-chromium-${escapedVersion}\\.zip$`), count: 1 },
+    { pattern: new RegExp(`^nian-pass-browser-firefox-${escapedVersion}\\.zip$`), count: 1 },
   ],
   android: [{ pattern: /\.apk$/i, minimum: 1 }],
   gateway: [
     { pattern: /^gateway-image\.json$/, count: 1 },
-    { pattern: new RegExp(`^nian-pass-sync-gateway-${version.replaceAll(".", "\\.")}\\.tar\\.gz$`), count: 1 },
+    { pattern: new RegExp(`^nian-pass-sync-gateway-${escapedVersion}\\.tar\\.gz$`), count: 1 },
   ],
-});
+  };
+};
 
 export function assembleReleaseSet(inputRoot, outputRoot, version) {
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
+  if (!isReleaseVersion(version)) {
     throw new Error("release assembly requires one semantic version");
   }
   const policy = platformPolicy(version);

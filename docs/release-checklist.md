@@ -2,6 +2,7 @@
 
 - [ ] Forgejo `make quality-check` green for the exact approved commit
 - [ ] Exact existing `v<VERSION>` tag propagated unchanged to the GitHub mirror
+- [ ] `VERSION` release class reviewed: suffixed RC/beta is prerelease; unsuffixed is final
 - [ ] GitHub checkout proves `refs/tags/<tag>^{commit} == HEAD` and a clean tree
 - [ ] GitHub release preflight gates pass without mutating source or tags
 - [ ] No committed secrets, `.env`, certificates, private keys, or real vaults
@@ -19,7 +20,8 @@
 - [ ] Windows, Android, browser-store, container/checksum signing status recorded honestly
 - [ ] Linux/Windows/Android/browser/gateway runtime statuses use PASS, FAIL, or NOT RUN without conversion
 - [ ] Backup, restore, rollback, lost-password, and lost-token notes included in release notes
-- [ ] GitHub Release remains draft/prerelease until explicit artifact review and operator approval
+- [ ] GitHub Release remains draft until explicit artifact review and operator approval; prerelease flag matches `VERSION`
 - [ ] Tag-push run stages draft only; `publish=true` is a manual dispatch with observed Forgejo PASS
 - [ ] Existing GitHub Release is missing or draft; never replace assets or notes on a published tag
+- [ ] Existing draft prerelease flag matches source before any asset replacement
 - [ ] Corrections after publication use a new `VERSION` and tag

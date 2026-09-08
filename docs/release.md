@@ -11,6 +11,11 @@ are not part of this procedure.
 
 ## Source and version
 
+`VERSION` also determines the GitHub release class. A suffix such as `-rc.1`
+or `-beta.2` means prerelease; an unsuffixed version is final. Draft is an
+independent staging state, so an RC can be a draft prerelease before review and
+a published prerelease afterward. A final version is never marked prerelease.
+
 1. Approve one exact clean commit after canonical Forgejo CI is green. Do not
    create a release tag before that review.
 2. Create one `v<VERSION>` tag at that commit and propagate that exact tag to
@@ -27,7 +32,9 @@ Release preflight runs `release-source-check`, `release-policy-check`, and
 full routine `quality-check`; it does not duplicate that expensive development
 pipeline merely to obtain another badge.
 
-A tag push builds and stages a draft prerelease only; it never publishes. An
+A tag push builds and stages a draft only; it never publishes. GitHub marks the
+draft prerelease or final solely from `VERSION`, and an existing draft whose
+classification differs from source fails closed. An
 actual publication is permitted only through `workflow_dispatch` with the same
 existing release tag, `publish=true`, and an operator-observed
 `forgejo_ci_status=PASS`. `NOT RUN` is sufficient only for a draft dry-run.
@@ -43,7 +50,9 @@ existing release tag, `publish=true`, and an operator-observed
   Firefox ZIPs. They retain the documented development identities and are not
   Chrome Web Store or AMO signed identities. Store publication must supply the
   final public IDs to a matching native-host build and record store signing;
-  no private store key belongs in source or artifacts.
+  no private store key belongs in source or artifacts. The manifest uses a
+  four-integer store version for browser compatibility and records the exact
+  source SemVer in `version_name`; RC, beta, and final ordering is deterministic.
 - Android: with the pinned SDK/NDK/JDK, `make release-android-build`. The release
   verifier rejects INTERNET, unexpected permissions/services, missing
   `FLAG_SECURE`, or missing native libraries. Optional signing consumes
@@ -110,12 +119,12 @@ token in logs/image.
 Every release report uses the status matrix requested by M8. Process-level
 diagnostics and package checks are not full GUI/device runtime validation.
 `NOT RUN` never becomes `PASS`; unsigned never becomes signed. Tag runs and
-manual dry-runs stage a draft/prerelease by default. Missing releases are
+manual dry-runs stage a draft with its source-derived release class. Missing releases are
 created as drafts, and existing draft assets and notes may be replaced while
 staging. Once a release is published, this workflow treats its artifacts,
 checksums, notes, and title as completely immutable; any correction requires a
 new `VERSION`, tag, and release. A manual operator may explicitly publish a
-prerelease only after reviewing the canonical artifact set and recording
+release only after reviewing the canonical artifact set and recording
 Forgejo PASS; this workflow never calls an experimental release stable. Publish
 checksums, SBOM status, release notes, known accepted risks, and the exact
 commit. A gateway volume is
@@ -124,3 +133,20 @@ recover a forgotten KDBX master password; lost provider credentials or gateway
 tokens must be rotated/replaced at the provider or gateway. Start from
 [`release-status-template.md`](release-status-template.md) so no platform or
 signing status silently disappears.
+
+## RC progression
+
+Release candidates are immutable generations, not mutable labels:
+
+```text
+0.1.0-rc.1 -> test
+0.1.0-rc.2 -> test if RC1 needs source fixes
+0.1.0-rc.3 -> test if needed
+0.1.0      -> final only after the accepted RC
+```
+
+Every step requires a new source commit, matching `VERSION`, matching tag, and
+new release. Never move an existing RC tag, replace published RC assets, or
+reuse `v0.1.0-rc.1` for corrected source. Version progression remains an
+explicit reviewed source edit; release automation does not increment or promote
+versions.

@@ -22,10 +22,10 @@ function git(root, ...arguments_) {
   }).trim();
 }
 
-function repository(t) {
+function repository(t, version = "0.1.0") {
   const root = mkdtempSync(join(tmpdir(), "nian-pass-release-source-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  writeFileSync(join(root, "VERSION"), "0.1.0\n");
+  writeFileSync(join(root, "VERSION"), `${version}\n`);
   git(root, "init", "--quiet");
   git(root, "add", "VERSION");
   git(root, ...identity, "commit", "--quiet", "-m", "fixture");
@@ -42,6 +42,23 @@ test("tag must match the authoritative VERSION", (t) => {
   const root = repository(t);
   assert.equal(tagViolation(root, "v0.1.0"), null);
   assert.match(tagViolation(root, "v0.1.1"), /!= v0\.1\.0/);
+});
+
+test("RC tags must exactly match the authoritative prerelease VERSION", (t) => {
+  const root = repository(t, "0.1.0-rc.1");
+  assert.equal(tagViolation(root, "v0.1.0-rc.1"), null);
+  assert.match(tagViolation(root, "v0.1.0"), /!= v0\.1\.0-rc\.1/);
+});
+
+test("a final VERSION rejects a prerelease tag", (t) => {
+  const root = repository(t, "0.1.0");
+  assert.match(tagViolation(root, "v0.1.0-rc.1"), /!= v0\.1\.0/);
+});
+
+test("an RC tag ref pointing to HEAD passes exact identity", (t) => {
+  const root = repository(t, "0.1.0-rc.1");
+  git(root, "tag", "v0.1.0-rc.1");
+  assert.equal(tagIdentityViolation(root, "v0.1.0-rc.1"), null);
 });
 
 test("lightweight release tag pointing to HEAD is accepted", (t) => {
@@ -138,7 +155,7 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
     "utf8",
   )
     .replace(
-      'publication_action="$(EXISTING_RELEASE_STATE="${release_state}" node scripts/release_publication.mjs)"',
+      'publication_action="$(EXISTING_RELEASE_STATE="${release_state}" EXISTING_RELEASE_PRERELEASE="${existing_prerelease}" node scripts/release_publication.mjs)"',
       'publication_action="UPDATE_DRAFT"',
     )
     .replace(
@@ -169,4 +186,35 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
     violations,
     /publish=true must require Forgejo canonical CI PASS/,
   );
+});
+
+test("GitHub release workflow policy rejects hard-coded prerelease metadata", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-release-class-workflow-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  )
+    .replace(
+      'if test "${RELEASE_IS_PRERELEASE}" = "true"; then',
+      "if true; then",
+    )
+    .replace(
+      'gh release edit "${RELEASE_TAG}" --draft=false "--prerelease=${RELEASE_IS_PRERELEASE}"',
+      'gh release edit "${RELEASE_TAG}" --draft=false --prerelease=true',
+    );
+  writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
+  writeFileSync(
+    join(root, "scripts/release_publication.mjs"),
+    readFileSync(join(projectRoot, "scripts/release_publication.mjs"), "utf8"),
+  );
+
+  const violations = githubReleaseWorkflowViolations(root).join("\n");
+  assert.match(violations, /draft creation must mark only source-classified prereleases/);
+  assert.match(violations, /publication must preserve the source-derived prerelease flag/);
 });

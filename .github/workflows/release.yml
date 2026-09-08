@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing vX.Y.Z tag to build"
+        description: "Existing vX.Y.Z or vX.Y.Z-prerelease tag to build"
         required: true
         type: string
       forgejo_ci_status:
@@ -22,7 +22,7 @@ on:
           - "NOT RUN"
           - "PASS"
       publish:
-        description: "Publish the prerelease instead of retaining a draft"
+        description: "Publish the source-classified release instead of retaining a draft"
         required: true
         default: false
         type: boolean
@@ -48,6 +48,8 @@ jobs:
     outputs:
       commit: ${{ steps.source.outputs.commit }}
       version: ${{ steps.source.outputs.version }}
+      release_kind: ${{ steps.source.outputs.release_kind }}
+      is_prerelease: ${{ steps.source.outputs.is_prerelease }}
     steps:
       - name: Check out exact release tag
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -77,8 +79,16 @@ jobs:
           make release-source-check
           make release-policy-check
           make security-hardening-check
+          release_kind="$(node scripts/release_version.mjs "$(cat VERSION)")"
+          case "${release_kind}" in
+            prerelease) is_prerelease=true ;;
+            final) is_prerelease=false ;;
+            *) echo "Unknown release kind: ${release_kind}" >&2; exit 1 ;;
+          esac
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
           printf 'version=%s\n' "$(cat VERSION)" >> "${GITHUB_OUTPUT}"
+          printf 'release_kind=%s\n' "${release_kind}" >> "${GITHUB_OUTPUT}"
+          printf 'is_prerelease=%s\n' "${is_prerelease}" >> "${GITHUB_OUTPUT}"
 
   linux:
     needs: preflight
@@ -449,13 +459,16 @@ jobs:
           FORGEJO_CI_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.forgejo_ci_status || 'NOT RUN' }}
           RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+          RELEASE_KIND: ${{ needs.preflight.outputs.release_kind }}
+          RELEASE_IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "${RELEASE_COMMIT}"
           (cd release && sha256sum --check SHA256SUMS)
           error_file="$(mktemp)"
           trap 'rm -f -- "${error_file}"' EXIT
-          if existing_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft 2>"${error_file}")"; then
+          if existing_metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv' 2>"${error_file}")"; then
+            IFS=$'\t' read -r existing_draft existing_prerelease <<< "${existing_metadata}"
             if test "${existing_draft}" = "true"; then
               release_state="draft"
             else
@@ -463,17 +476,20 @@ jobs:
             fi
           elif grep -Fq '(HTTP 404)' "${error_file}"; then
             release_state="none"
+            existing_prerelease=""
           else
             cat "${error_file}" >&2
             exit 1
           fi
-          publication_action="$(EXISTING_RELEASE_STATE="${release_state}" node scripts/release_publication.mjs)"
+          publication_action="$(EXISTING_RELEASE_STATE="${release_state}" EXISTING_RELEASE_PRERELEASE="${existing_prerelease}" node scripts/release_publication.mjs)"
           printf 'action=%s\n' "${publication_action}" >> "${GITHUB_OUTPUT}"
       - name: Verify and stage GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLICATION_ACTION: ${{ steps.publication.outputs.action }}
           RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+          RELEASE_KIND: ${{ needs.preflight.outputs.release_kind }}
+          RELEASE_IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
         run: |
           set -Eeuo pipefail
           case "${PUBLICATION_ACTION}" in
@@ -486,12 +502,21 @@ jobs:
           sha256sum --check SHA256SUMS
           case "${PUBLICATION_ACTION}" in
             CREATE_DRAFT|CREATE_AND_PUBLISH)
-              gh release create "${RELEASE_TAG}" --verify-tag --target "${RELEASE_COMMIT}" --draft --prerelease --title "Nian Pass ${RELEASE_TAG}" --notes-file release-status.md ./*
+              create_args=("${RELEASE_TAG}" --verify-tag --target "${RELEASE_COMMIT}" --draft --title "Nian Pass ${RELEASE_TAG}" --notes-file release-status.md)
+              if test "${RELEASE_IS_PRERELEASE}" = "true"; then
+                create_args+=(--prerelease)
+              fi
+              gh release create "${create_args[@]}" ./*
               ;;
             UPDATE_DRAFT|UPDATE_AND_PUBLISH)
-              existing_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft)"
+              existing_metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv')"
+              IFS=$'\t' read -r existing_draft existing_prerelease <<< "${existing_metadata}"
               if test "${existing_draft}" != "true"; then
                 echo "Release ${RELEASE_TAG} is already published; published release artifacts are immutable. Create a new version/tag instead." >&2
+                exit 1
+              fi
+              if test "${existing_prerelease}" != "${RELEASE_IS_PRERELEASE}"; then
+                echo "Release ${RELEASE_TAG} draft prerelease state does not match source release kind ${RELEASE_KIND}." >&2
                 exit 1
               fi
               gh release upload "${RELEASE_TAG}" --clobber ./*
@@ -500,12 +525,17 @@ jobs:
           esac
           case "${PUBLICATION_ACTION}" in
             CREATE_AND_PUBLISH|UPDATE_AND_PUBLISH)
-              existing_draft="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft)"
+              existing_metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv')"
+              IFS=$'\t' read -r existing_draft existing_prerelease <<< "${existing_metadata}"
               if test "${existing_draft}" != "true"; then
                 echo "Release ${RELEASE_TAG} left draft state before publication; refusing mutation." >&2
                 exit 1
               fi
-              gh release edit "${RELEASE_TAG}" --draft=false --prerelease=true
+              if test "${existing_prerelease}" != "${RELEASE_IS_PRERELEASE}"; then
+                echo "Release ${RELEASE_TAG} classification changed before publication; refusing mutation." >&2
+                exit 1
+              fi
+              gh release edit "${RELEASE_TAG}" --draft=false "--prerelease=${RELEASE_IS_PRERELEASE}"
               ;;
             CREATE_DRAFT|UPDATE_DRAFT)
               ;;

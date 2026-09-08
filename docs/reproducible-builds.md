@@ -4,6 +4,10 @@
 gate requires matching desktop Rust/Tauri/npm, CLI, browser host/extension, and
 gateway versions. A tag must be exactly `v<VERSION>` and the Git tree must be
 clean. Every release records the exact commit and workflow.
+Generic semantic prerelease suffixes are accepted. The release workflow
+classifies a suffixed version as `prerelease` and an unsuffixed version as
+`final` once during preflight; downstream metadata consumes that classification
+rather than an operator checkbox.
 
 Pinned inputs are Rust 1.98.0, Node 26.7.0, Corepack 0.35.0 in CI, pnpm 11.22.0,
 Tauri CLI 2.11.4, Android SDK/API 36, Build Tools 36.0.0, NDK 28.2.13676358,
@@ -16,7 +20,11 @@ Rust release builds use one codegen unit, thin LTO, optimization level 3,
 overflow checks, stripped symbols, and no debug info. Panic unwinding is kept:
 the retained mobile/FFI containment boundary relies on it, and changing to
 abort globally would weaken that boundary. Browser ZIPs use sorted entries,
-fixed metadata, stored bytes, and 0644 archive modes. Build outputs can still
+fixed metadata, stored bytes, and 0644 archive modes. Browser manifests derive
+`version_name` directly from the exact package SemVer. Their required numeric
+`version` maps alpha, beta, RC, and final into a deterministic fourth component
+so `0.1.0-rc.1` remains visibly identifiable and an accepted `0.1.0` final
+compares newer. Build outputs can still
 differ when platform linker, WebView bootstrapper, Android packaging, or native
 installer tooling embeds nondeterministic metadata; checksums identify the
 actual released bytes, not a claim of bit-for-bit identity across OS images.
@@ -41,7 +49,8 @@ the installed frozen pnpm graph. It is useful inventory, not a vulnerability
 scan or proof that every target-specific component is present in every artifact.
 
 Attestation is ordered to avoid circular hashes. The release manifest records
-the platform payloads, release status, and SBOM that exist before it, but not
+the source-derived release class, platform payloads, release status, and SBOM
+that exist before it, but not
 the manifest itself or `SHA256SUMS`. `SHA256SUMS` is generated last over every
 final published file except itself, so later modification of the SBOM or
 manifest fails checksum verification. Checksums identify one exact build's
