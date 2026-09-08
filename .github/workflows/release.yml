@@ -506,6 +506,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLICATION_ACTION: ${{ steps.publication.outputs.action }}
+          FORGEJO_CI_STATUS: ${{ github.event_name == 'workflow_dispatch' && inputs.forgejo_ci_status || 'NOT RUN' }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
           RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
           RELEASE_KIND: ${{ needs.preflight.outputs.release_kind }}
@@ -590,7 +591,7 @@ jobs:
             UPDATE_AND_PUBLISH)
               RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="${GITHUB_WORKSPACE}/release" node scripts/release_artifacts.mjs validate-snapshot
               cp -a -- release release-publish-candidate
-              ARTIFACT_DIR="${GITHUB_WORKSPACE}/release-publish-candidate" node scripts/release_artifacts.mjs publication-status PASS
+              FORGEJO_CI_STATUS="${FORGEJO_CI_STATUS}" ARTIFACT_DIR="${GITHUB_WORKSPACE}/release-publish-candidate" node scripts/release_artifacts.mjs publication-status PASS
               (cd release-publish-candidate && sha256sum --check SHA256SUMS)
               RELEASE_PUBLICATION_STATUS=PASS ARTIFACT_DIR="${GITHUB_WORKSPACE}/release-publish-candidate" node scripts/release_artifacts.mjs validate-snapshot
               mapfile -t publication_metadata < <(ARTIFACT_DIR="${GITHUB_WORKSPACE}/release" PUBLICATION_CANDIDATE_DIR="${GITHUB_WORKSPACE}/release-publish-candidate" node scripts/release_artifacts.mjs publication-candidate)

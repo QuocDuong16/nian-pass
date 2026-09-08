@@ -147,7 +147,10 @@ test("publication PASS candidate preserves the exact validated DRAFT snapshot", 
       version: "0.1.0-rc.4",
       tag: "v0.1.0-rc.4",
       commit: "a".repeat(40),
-      validation: { "GitHub Release publication": "DRAFT" },
+      validation: {
+        "Forgejo canonical CI": "NOT RUN",
+        "GitHub Release publication": "DRAFT",
+      },
       artifacts: [],
     })}\n`,
   );
@@ -160,7 +163,7 @@ test("publication PASS candidate preserves the exact validated DRAFT snapshot", 
   );
 
   cpSync(draft, candidate, { recursive: true });
-  finalizePublicationStatus(candidate, "PASS");
+  finalizePublicationStatus(candidate, "PASS", { forgejoCiStatus: "PASS" });
   assert.deepEqual(publicationCandidateChangedFiles(draft, candidate), [
     "release-manifest.json",
     "release-status.md",
@@ -186,6 +189,15 @@ test("publication PASS candidate preserves the exact validated DRAFT snapshot", 
   assert.match(
     readFileSync(join(candidate, "release-status.md"), "utf8"),
     /GitHub Release publication\s+PASS/,
+  );
+  assert.match(
+    readFileSync(join(candidate, "release-status.md"), "utf8"),
+    /Forgejo canonical CI\s+PASS/,
+  );
+  assert.equal(
+    JSON.parse(readFileSync(join(candidate, "release-manifest.json"), "utf8"))
+      .validation["Forgejo canonical CI"],
+    "PASS",
   );
   assert.match(
     readFileSync(join(draft, "release-status.md"), "utf8"),
@@ -218,7 +230,10 @@ test("publication snapshot validation binds downloaded draft assets to the exact
       tag: "v0.1.0-rc.4",
       commit: "a".repeat(40),
       releaseKind: "prerelease",
-      validation: { "GitHub Release publication": "DRAFT" },
+      validation: {
+        "Forgejo canonical CI": "NOT RUN",
+        "GitHub Release publication": "DRAFT",
+      },
       artifacts: [
         artifact("app-universal-release.apk", "android"),
         artifact("release-status.md", "release-metadata"),
@@ -235,16 +250,62 @@ test("publication snapshot validation binds downloaded draft assets to the exact
     publicationStatus: "DRAFT",
   };
   assert.equal(validateReleaseSnapshot(root, expected).tag, expected.tag);
+  const snapshotNames = readdirSync(root);
+  const copySnapshot = (destination) => {
+    mkdirSync(destination);
+    for (const name of snapshotNames) {
+      cpSync(join(root, name), join(destination, name), { recursive: true });
+    }
+  };
+  const draft = join(root, "release-draft");
+  copySnapshot(draft);
+  const candidate = join(root, "release-publish-candidate");
+  copySnapshot(candidate);
+  finalizePublicationStatus(candidate, "PASS", { forgejoCiStatus: "PASS" });
+  assert.equal(
+    validateReleaseSnapshot(candidate, {
+      ...expected,
+      publicationStatus: "PASS",
+    }).validation["Forgejo canonical CI"],
+    "PASS",
+  );
+  assert.deepEqual(publicationCandidateChangedFiles(draft, candidate), [
+    "release-manifest.json",
+    "release-status.md",
+    "SHA256SUMS",
+  ]);
+
+  for (const forgejoCiStatus of [undefined, "NOT RUN", "FAIL", "invalid"]) {
+    const rejected = join(root, `rejected-${String(forgejoCiStatus)}`);
+    copySnapshot(rejected);
+    assert.throws(
+      () => finalizePublicationStatus(rejected, "PASS", { forgejoCiStatus }),
+      /requires observed Forgejo canonical CI PASS/,
+    );
+  }
+  const passWithStaleForgejo = JSON.parse(
+    readFileSync(join(candidate, "release-manifest.json"), "utf8"),
+  );
+  passWithStaleForgejo.validation["Forgejo canonical CI"] = "NOT RUN";
+  writeFileSync(
+    join(candidate, "release-manifest.json"),
+    `${JSON.stringify(passWithStaleForgejo, null, 2)}\n`,
+  );
+  writeFileSync(join(candidate, "SHA256SUMS"), `${checksumLines(candidate).join("\n")}\n`);
+  assert.throws(
+    () => validateReleaseSnapshot(candidate, { ...expected, publicationStatus: "PASS" }),
+    /requires Forgejo canonical CI PASS/,
+  );
   for (const key of ["version", "tag", "commit", "releaseKind"]) {
     assert.throws(
-      () => validateReleaseSnapshot(root, { ...expected, [key]: `wrong-${key}` }),
+      () => validateReleaseSnapshot(draft, { ...expected, [key]: `wrong-${key}` }),
       new RegExp(`release manifest ${key}`),
     );
   }
-  writeFileSync(join(root, "app-universal-release.apk"), "tampered payload");
-  assert.throws(() => validateReleaseSnapshot(root, expected), /SHA256SUMS verification failed/);
-  rmSync(join(root, "sbom.cdx.json"));
-  assert.throws(() => validateReleaseSnapshot(root, expected), /missing sbom\.cdx\.json/);
+  writeFileSync(join(draft, "app-universal-release.apk"), "tampered payload");
+  assert.throws(() => validateReleaseSnapshot(draft, expected), /SHA256SUMS verification failed/);
+  rmSync(join(draft, "sbom.cdx.json"));
+  assert.throws(() => validateReleaseSnapshot(draft, expected), /missing sbom\.cdx\.json/);
 });
 
 test("artifact scan rejects secret sentinels and forbidden retained files", (t) => {
@@ -592,7 +653,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   writeFileSync(join(output, "release-manifest.json"), originalManifest);
   runArtifactCommand("checksums");
 
-  finalizePublicationStatus(output, "PASS");
+  finalizePublicationStatus(output, "PASS", { forgejoCiStatus: "PASS" });
   const finalized = JSON.parse(
     readFileSync(join(output, "release-manifest.json"), "utf8"),
   );

@@ -350,6 +350,15 @@ export function validateReleaseSnapshot(root, expected) {
   if (expected.publicationStatus !== undefined && manifest.validation?.["GitHub Release publication"] !== expected.publicationStatus) {
     throw new Error(`release manifest publication status is not ${expected.publicationStatus}`);
   }
+  if (expected.publicationStatus === "PASS" && manifest.validation?.["Forgejo canonical CI"] !== "PASS") {
+    throw new Error("PASS release snapshot requires Forgejo canonical CI PASS");
+  }
+  if (
+    expected.publicationStatus === "DRAFT" &&
+    !["PASS", "NOT RUN"].includes(manifest.validation?.["Forgejo canonical CI"])
+  ) {
+    throw new Error("DRAFT release snapshot requires Forgejo canonical CI PASS or NOT RUN");
+  }
 
   const files = releaseFileNames(root);
   const checksum = checksumEntries(root);
@@ -558,7 +567,7 @@ function writeManifest(root) {
   writeFileSync(resolve(root, "release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-export function finalizePublicationStatus(root, status) {
+export function finalizePublicationStatus(root, status, { forgejoCiStatus } = {}) {
   if (status !== "DRAFT" && status !== "PASS") {
     throw new Error(`publication status must be DRAFT or PASS, received ${String(status)}`);
   }
@@ -574,9 +583,13 @@ export function finalizePublicationStatus(root, status) {
   ) {
     throw new Error("release manifest is missing publication status inputs");
   }
+  if (status === "PASS" && forgejoCiStatus !== "PASS") {
+    throw new Error("PASS publication status requires observed Forgejo canonical CI PASS");
+  }
 
   const validation = {
     ...manifest.validation,
+    ...(status === "PASS" ? { "Forgejo canonical CI": forgejoCiStatus } : {}),
     "GitHub Release publication": status,
   };
   writeFileSync(
@@ -623,7 +636,11 @@ function main() {
   } else if (command === "checksums") writeChecksums(root);
   else if (command === "manifest") writeManifest(root);
   else if (command === "sbom") writeSbom(root);
-  else if (command === "publication-status") finalizePublicationStatus(root, process.argv[3]);
+  else if (command === "publication-status") {
+    finalizePublicationStatus(root, process.argv[3], {
+      forgejoCiStatus: process.env.FORGEJO_CI_STATUS,
+    });
+  }
   else if (command === "validate-snapshot") {
     validateReleaseSnapshot(root, {
       version: process.env.RELEASE_VERSION,

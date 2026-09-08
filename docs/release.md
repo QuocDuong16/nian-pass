@@ -121,6 +121,10 @@ tag, commit, release class, and canonical inventory before any mutation. Only
 `release-status.md`, `release-manifest.json`, and `SHA256SUMS` may transition
 from DRAFT to PASS; platform payloads and the SBOM are byte-preserved and are
 never uploaded or clobbered during publication.
+Draft staging may record Forgejo canonical CI as `NOT RUN`. During manual
+publication, the already-required operator-observed `forgejo_ci_status=PASS`
+updates that controlled metadata together with GitHub Release publication to
+`PASS`; GitHub does not manufacture or replace Forgejo CI evidence.
 
 Signing is optional only when credentials are unavailable, not implicit. The
 Windows job can import a PFX from its two job-scoped GitHub secrets, sign and

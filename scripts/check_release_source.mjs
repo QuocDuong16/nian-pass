@@ -120,7 +120,7 @@ export function githubReleaseWorkflowViolations(root) {
   require(/Download current-run canonical release set for draft staging\n\s+if: \$\{\{ needs\.preflight\.outputs\.build_mode == 'true' \}\}[\s\S]*?actions\/download-artifact@/, "only build/stage mode may use current-run Actions artifacts");
   require(/Download existing validated GitHub draft assets for publication\n\s+if: \$\{\{ steps\.publication\.outputs\.action == 'UPDATE_AND_PUBLISH' \}\}[\s\S]*?gh release download "\$\{RELEASE_TAG\}" --dir release/, "publish=true must download assets from the existing GitHub draft");
   require(/cp -a -- release release-publish-candidate/, "publication must retain an exact local DRAFT snapshot before PASS candidate generation");
-  require(/RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release" node scripts\/release_artifacts\.mjs validate-snapshot[\s\S]*?ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release-publish-candidate" node scripts\/release_artifacts\.mjs publication-status PASS[\s\S]*?RELEASE_PUBLICATION_STATUS=PASS[\s\S]*?validate-snapshot[\s\S]*?publication-candidate/, "publication must validate the downloaded DRAFT and isolated PASS candidate");
+  require(/RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release" node scripts\/release_artifacts\.mjs validate-snapshot[\s\S]*?FORGEJO_CI_STATUS="\$\{FORGEJO_CI_STATUS\}" ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release-publish-candidate" node scripts\/release_artifacts\.mjs publication-status PASS[\s\S]*?RELEASE_PUBLICATION_STATUS=PASS[\s\S]*?validate-snapshot[\s\S]*?publication-candidate/, "publication must validate the downloaded DRAFT and isolated PASS candidate with observed Forgejo PASS");
   require(/read_release_state\)[\s\S]*?pre-mutation[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber "\$\{candidate_metadata\[@\]\}"/, "candidate upload must recheck the observed remote draft state and mutate metadata only");
   require(/gh release edit "\$\{RELEASE_TAG\}" --draft=false[\s\S]*?read_release_state\)[\s\S]*?outcome/, "publication outcome must be determined from a post-publish remote-state observation");
   require(/restore_draft_or_fail\(\)[\s\S]*?read_release_state\)[\s\S]*?rollback[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber release\/release-status\.md release\/release-manifest\.json release\/SHA256SUMS/, "draft rollback must recheck state and restore only the verified DRAFT metadata");
@@ -200,6 +200,19 @@ export function githubReleaseWorkflowViolations(root) {
     )
   ) {
     violations.push(`${executionHelper}: must distinguish tag build and manual publication modes`);
+  }
+
+  const artifactHelper = "scripts/release_artifacts.mjs";
+  if (!existsSync(resolve(root, artifactHelper))) {
+    violations.push(`${artifactHelper}: release metadata helper is missing`);
+  } else {
+    const helper = read(root, artifactHelper);
+    if (!/status === "PASS" && forgejoCiStatus !== "PASS"/.test(helper)) {
+      violations.push(`${artifactHelper}: PASS publication metadata must require observed Forgejo canonical CI PASS`);
+    }
+    if (!/expected\.publicationStatus === "PASS"[\s\S]*?Forgejo canonical CI.*?PASS/.test(helper)) {
+      violations.push(`${artifactHelper}: PASS snapshot validation must require Forgejo canonical CI PASS`);
+    }
   }
 
   if (/^\s+branches:/m.test(workflow))
