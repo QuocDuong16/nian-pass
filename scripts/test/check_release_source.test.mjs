@@ -45,9 +45,9 @@ test("tag must match the authoritative VERSION", (t) => {
 });
 
 test("RC tags must exactly match the authoritative prerelease VERSION", (t) => {
-  const root = repository(t, "0.1.0-rc.2");
-  assert.equal(tagViolation(root, "v0.1.0-rc.2"), null);
-  assert.match(tagViolation(root, "v0.1.0"), /!= v0\.1\.0-rc\.2/);
+  const root = repository(t, "0.1.0-rc.3");
+  assert.equal(tagViolation(root, "v0.1.0-rc.3"), null);
+  assert.match(tagViolation(root, "v0.1.0"), /!= v0\.1\.0-rc\.3/);
 });
 
 test("a final VERSION rejects a prerelease tag", (t) => {
@@ -56,9 +56,9 @@ test("a final VERSION rejects a prerelease tag", (t) => {
 });
 
 test("an RC tag ref pointing to HEAD passes exact identity", (t) => {
-  const root = repository(t, "0.1.0-rc.2");
-  git(root, "tag", "v0.1.0-rc.2");
-  assert.equal(tagIdentityViolation(root, "v0.1.0-rc.2"), null);
+  const root = repository(t, "0.1.0-rc.3");
+  git(root, "tag", "v0.1.0-rc.3");
+  assert.equal(tagIdentityViolation(root, "v0.1.0-rc.3"), null);
 });
 
 test("lightweight release tag pointing to HEAD is accepted", (t) => {
@@ -117,6 +117,32 @@ test("release dependency policy accepts exact versions only", () => {
 test("GitHub is release-only authority and Forgejo has no competing packager", () => {
   const projectRoot = resolve(import.meta.dirname, "../..");
   assert.deepEqual(githubReleaseWorkflowViolations(projectRoot), []);
+});
+
+test("GitHub attestation verifies basename-only checksums from the release directory", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-attestation-cwd-workflow-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  writeFileSync(
+    join(root, ".github/workflows/release.yml"),
+    readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8").replace(
+      "(cd artifacts/release && sha256sum --check SHA256SUMS)",
+      "sha256sum --check artifacts/release/SHA256SUMS",
+    ),
+  );
+  writeFileSync(
+    join(root, "scripts/release_publication.mjs"),
+    readFileSync(join(projectRoot, "scripts/release_publication.mjs"), "utf8"),
+  );
+
+  assert.match(
+    githubReleaseWorkflowViolations(root).join("\n"),
+    /attestation must verify basename-only checksums from the canonical release directory/,
+  );
 });
 
 test("GitHub release workflow policy rejects floating actions and branch triggers", (t) => {

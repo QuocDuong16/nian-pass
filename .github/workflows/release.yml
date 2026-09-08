@@ -421,7 +421,7 @@ jobs:
           node scripts/release_artifacts.mjs sbom
           node scripts/release_artifacts.mjs manifest
           node scripts/release_artifacts.mjs checksums
-          sha256sum --check artifacts/release/SHA256SUMS
+          (cd artifacts/release && sha256sum --check SHA256SUMS)
       - name: Upload canonical release set
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

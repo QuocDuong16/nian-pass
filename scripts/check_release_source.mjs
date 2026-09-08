@@ -78,6 +78,10 @@ export function githubReleaseWorkflowViolations(root) {
     /node scripts\/assemble_release\.mjs[\s\S]*?release_artifacts\.mjs scan[\s\S]*?release_status\.mjs[\s\S]*?release_artifacts\.mjs sbom[\s\S]*?release_artifacts\.mjs manifest[\s\S]*?release_artifacts\.mjs checksums/,
     "attestation metadata must be generated in non-circular integrity order",
   );
+  require(
+    /release_artifacts\.mjs checksums\s*\n\s*\(cd artifacts\/release && sha256sum --check SHA256SUMS\)/,
+    "attestation must verify basename-only checksums from the canonical release directory",
+  );
   require(/node scripts\/release_publication\.mjs/, "publish job must use the behavioral publication policy helper");
   require(/EXISTING_RELEASE_STATE="\$\{release_state\}"/, "publication policy must receive observed GitHub Release state");
   require(/EXISTING_RELEASE_PRERELEASE="\$\{existing_prerelease\}"/, "publication policy must receive observed draft classification");

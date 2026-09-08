@@ -6,7 +6,7 @@ RUN cargo build --locked --release -p nian-pass-sync-gateway
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
-ARG NIAN_PASS_VERSION=0.1.0-rc.2
+ARG NIAN_PASS_VERSION=0.1.0-rc.3
 ARG NIAN_PASS_COMMIT=unknown
 LABEL org.opencontainers.image.title="Nian Pass Sync Gateway" \
       org.opencontainers.image.version="${NIAN_PASS_VERSION}" \

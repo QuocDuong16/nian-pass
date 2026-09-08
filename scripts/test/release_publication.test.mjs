@@ -18,7 +18,7 @@ function action(
     publishRequested,
     forgejoCiStatus,
     eventName,
-    releaseTag: releaseKind === "prerelease" ? "v0.1.0-rc.2" : "v0.1.0",
+    releaseTag: releaseKind === "prerelease" ? "v0.1.0-rc.3" : "v0.1.0",
   });
 }
 
