@@ -58,3 +58,8 @@ bytes; a rebuild of the same source may differ because hosted runners, native
 packagers, or timestamped signing are not bit-for-bit reproducible. For that
 reason draft assets are replaceable staging material, while published assets
 are immutable and corrections require a new version/tag.
+
+Draft staging is the only release mode that builds native artifacts. Manual
+publication downloads the reviewed draft for its exact tag, verifies its
+manifest and `SHA256SUMS`, and transitions only controlled publication metadata.
+It never rebuilds or replaces the platform payload bytes being approved.

@@ -21,7 +21,9 @@
 - [ ] Linux/Windows/Android/browser/gateway runtime statuses use PASS, FAIL, or NOT RUN without conversion
 - [ ] Backup, restore, rollback, lost-password, and lost-token notes included in release notes
 - [ ] GitHub Release remains draft until explicit artifact review and operator approval; prerelease flag matches `VERSION`
-- [ ] Tag-push run stages draft only; `publish=true` is a manual dispatch with observed Forgejo PASS
+- [ ] Tag-push or `publish=false` runs the full build and stages draft only; `publish=true` is a manual dispatch with observed Forgejo PASS
+- [ ] `publish=true` downloads and validates the existing draft; it does not rebuild or replace reviewed platform payload bytes
+- [ ] Publication changes only `release-status.md`, `release-manifest.json`, and `SHA256SUMS`; payload/SBOM hashes remain identical
 - [ ] Existing GitHub Release is missing or draft; never replace assets or notes on a published tag
 - [ ] Existing draft prerelease flag matches source before any asset replacement
 - [ ] Corrections after publication use a new `VERSION` and tag

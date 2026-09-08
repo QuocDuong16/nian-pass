@@ -21,7 +21,9 @@ import {
   checksumLines,
   deduplicateComponents,
   finalizePublicationStatus,
+  publicationCandidateChangedFiles,
   productionCargoPackages,
+  validateReleaseSnapshot,
   writeSbom,
 } from "../release_artifacts.mjs";
 import { assembleReleaseSet } from "../assemble_release.mjs";
@@ -159,7 +161,11 @@ test("publication PASS candidate preserves the exact validated DRAFT snapshot", 
 
   cpSync(draft, candidate, { recursive: true });
   finalizePublicationStatus(candidate, "PASS");
-
+  assert.deepEqual(publicationCandidateChangedFiles(draft, candidate), [
+    "release-manifest.json",
+    "release-status.md",
+    "SHA256SUMS",
+  ]);
   const candidateCheck = spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
     cwd: candidate,
     encoding: "utf8",
@@ -185,6 +191,60 @@ test("publication PASS candidate preserves the exact validated DRAFT snapshot", 
     readFileSync(join(draft, "release-status.md"), "utf8"),
     /^DRAFT\n$/,
   );
+  writeFileSync(join(candidate, "sbom.cdx.json"), "publication must not replace SBOM bytes\n");
+  assert.throws(
+    () => publicationCandidateChangedFiles(draft, candidate),
+    /outside the allowed metadata set/,
+  );
+});
+
+test("publication snapshot validation binds downloaded draft assets to the exact source", (t) => {
+  const root = directory(t);
+  writeFileSync(join(root, "app-universal-release.apk"), "reviewed payload");
+  writeFileSync(join(root, "release-status.md"), "DRAFT\n");
+  writeFileSync(join(root, "sbom.cdx.json"), "{}\n");
+  const artifact = (name, platform) => ({
+    name,
+    platform,
+    sha256: checksumLines(root)
+      .find((line) => line.endsWith(`  ${name}`))
+      .slice(0, 64),
+    size: readFileSync(join(root, name)).length,
+  });
+  writeFileSync(
+    join(root, "release-manifest.json"),
+    `${JSON.stringify({
+      version: "0.1.0-rc.4",
+      tag: "v0.1.0-rc.4",
+      commit: "a".repeat(40),
+      releaseKind: "prerelease",
+      validation: { "GitHub Release publication": "DRAFT" },
+      artifacts: [
+        artifact("app-universal-release.apk", "android"),
+        artifact("release-status.md", "release-metadata"),
+        artifact("sbom.cdx.json", "release-metadata"),
+      ],
+    })}\n`,
+  );
+  writeFileSync(join(root, "SHA256SUMS"), `${checksumLines(root).join("\n")}\n`);
+  const expected = {
+    version: "0.1.0-rc.4",
+    tag: "v0.1.0-rc.4",
+    commit: "a".repeat(40),
+    releaseKind: "prerelease",
+    publicationStatus: "DRAFT",
+  };
+  assert.equal(validateReleaseSnapshot(root, expected).tag, expected.tag);
+  for (const key of ["version", "tag", "commit", "releaseKind"]) {
+    assert.throws(
+      () => validateReleaseSnapshot(root, { ...expected, [key]: `wrong-${key}` }),
+      new RegExp(`release manifest ${key}`),
+    );
+  }
+  writeFileSync(join(root, "app-universal-release.apk"), "tampered payload");
+  assert.throws(() => validateReleaseSnapshot(root, expected), /SHA256SUMS verification failed/);
+  rmSync(join(root, "sbom.cdx.json"));
+  assert.throws(() => validateReleaseSnapshot(root, expected), /missing sbom\.cdx\.json/);
 });
 
 test("artifact scan rejects secret sentinels and forbidden retained files", (t) => {

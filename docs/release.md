@@ -45,6 +45,14 @@ existing release tag, `publish=true`, and an operator-observed
 validated draft; it never creates and publishes a release in one operation.
 `NOT RUN` is sufficient only for a draft dry-run.
 
+`publish=false` (including a tag push) runs the full native build and
+attestation path, then creates or updates a draft. In contrast,
+`workflow_dispatch` with `publish=true` performs only preflight and
+publication validation: it downloads the assets attached to the existing draft
+for the exact tag and never rebuilds platform payloads. This preserves the
+reviewed bytes; lower Actions usage is a consequence, not the reason for the
+split.
+
 ## Platform builds
 
 - Linux: on pinned Linux tooling, `make release-linux-build`. It creates the
@@ -108,6 +116,11 @@ uses the observed remote release state—not the client exit code alone—to dec
 whether publication succeeded. A still-draft release is restored from the
 verified DRAFT snapshot only after a second matching-draft observation. Unknown,
 mismatched, or already-published state is ambiguous and fails without rollback.
+The manifest and checksums must bind the downloaded draft to the exact version,
+tag, commit, release class, and canonical inventory before any mutation. Only
+`release-status.md`, `release-manifest.json`, and `SHA256SUMS` may transition
+from DRAFT to PASS; platform payloads and the SBOM are byte-preserved and are
+never uploaded or clobbered during publication.
 
 Signing is optional only when credentials are unavailable, not implicit. The
 Windows job can import a PFX from its two job-scoped GitHub secrets, sign and

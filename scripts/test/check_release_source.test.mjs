@@ -217,14 +217,14 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
       'publication_action="$(EXISTING_RELEASE_STATE="${release_state}" EXISTING_RELEASE_PRERELEASE="${existing_prerelease}" node scripts/release_publication.mjs)"',
       'publication_action="UPDATE_DRAFT"',
     )
-    .replace(
+    .replaceAll(
       "PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}",
       "PUBLISH_RELEASE: ${{ inputs.publish }}",
     )
     .replace('if test "${existing_draft}" != "true"; then', "if false; then")
     .replace(
-      "(cd release && sha256sum --check SHA256SUMS)",
-      ": skip downloaded checksum verification",
+      'RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="${GITHUB_WORKSPACE}/release" node scripts/release_artifacts.mjs validate-snapshot',
+      ": skip downloaded manifest and checksum verification",
     )
     .replace(
       "cp -a -- release release-publish-candidate",
@@ -247,7 +247,7 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
   const violations = githubReleaseWorkflowViolations(root).join("\n");
   assert.match(violations, /behavioral publication policy helper/);
   assert.match(violations, /tag-push release runs must remain draft-only/);
-  assert.match(violations, /downloaded checksums before publication policy/);
+  assert.match(violations, /validate the downloaded DRAFT and isolated PASS candidate/);
   assert.match(
     violations,
     /publication must retain an exact local DRAFT snapshot/,
@@ -256,6 +256,41 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
     violations,
     /publish=true must require Forgejo canonical CI PASS/,
   );
+});
+
+test("GitHub release workflow policy rejects publish-only rebuilds and broad payload mutation", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-publish-only-workflow-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8")
+    .replaceAll("if: ${{ needs.preflight.outputs.build_mode == 'true' }}", "")
+    .replace(
+      'gh release download "${RELEASE_TAG}" --dir release',
+      ': current-run artifacts are enough',
+    )
+    .replace(
+      'gh release upload "${RELEASE_TAG}" --clobber "${candidate_metadata[@]}"',
+      'gh release upload "${RELEASE_TAG}" --clobber release-publish-candidate/*',
+    );
+  writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
+  for (const name of [
+    "release_publication.mjs",
+    "release_publish_transaction.mjs",
+  ]) {
+    writeFileSync(
+      join(root, "scripts", name),
+      readFileSync(join(projectRoot, "scripts", name), "utf8"),
+    );
+  }
+  const violations = githubReleaseWorkflowViolations(root).join("\n");
+  assert.match(violations, /linux must run only in build\/stage mode/);
+  assert.match(violations, /attest must run only in build\/stage mode/);
+  assert.match(violations, /publish=true must download assets from the existing GitHub draft/);
+  assert.match(violations, /candidate upload must recheck the observed remote draft state and mutate metadata only/);
 });
 
 test("GitHub release workflow policy rejects hard-coded prerelease metadata", (t) => {

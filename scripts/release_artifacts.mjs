@@ -20,6 +20,11 @@ const defaultArtifactRoot = resolve(repositoryRoot, "artifacts/release");
 const payloadMetadataNames = new Set(["SHA256SUMS", "release-manifest.json", "sbom.cdx.json"]);
 const manifestExcludedNames = new Set(["SHA256SUMS", "release-manifest.json"]);
 const checksumExcludedNames = new Set(["SHA256SUMS"]);
+const publicationMetadataNames = new Set([
+  "release-status.md",
+  "release-manifest.json",
+  "SHA256SUMS",
+]);
 const forbiddenNames = /(?:^|\/)(?:\.env(?:\..*)?|coverage(?:\/|$)|[^/]+\.(?:kdbx|pem|p12|pfx|key|map))$/i;
 const secretSentinels = [
   "M8_RELEASE_SECRET",
@@ -302,6 +307,98 @@ export function checksumLines(root) {
   });
 }
 
+function releaseFileNames(root) {
+  return walk(root)
+    .map((path) => relative(root, path).replaceAll("\\", "/"))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function checksumEntries(root) {
+  const path = resolve(root, "SHA256SUMS");
+  if (!existsSync(path)) throw new Error("SHA256SUMS is required");
+  const entries = readFileSync(path, "utf8")
+    .trimEnd()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^([0-9a-f]{64})  ([^/\\\r\n]+)$/);
+      if (!match) throw new Error(`SHA256SUMS contains an invalid entry ${line}`);
+      return { sha256: match[1], name: match[2] };
+    });
+  if (entries.length === 0) throw new Error("SHA256SUMS contains no entries");
+  if (new Set(entries.map((entry) => entry.name)).size !== entries.length) {
+    throw new Error("SHA256SUMS contains duplicate file entries");
+  }
+  return entries;
+}
+
+function sameNames(left, right) {
+  return left.length === right.length && left.every((name, index) => name === right[index]);
+}
+
+/** Validate a standalone canonical release directory before publication. */
+export function validateReleaseSnapshot(root, expected) {
+  for (const name of ["SHA256SUMS", "release-manifest.json", "release-status.md", "sbom.cdx.json"]) {
+    if (!existsSync(resolve(root, name))) throw new Error(`release snapshot is missing ${name}`);
+  }
+  const manifest = JSON.parse(readFileSync(resolve(root, "release-manifest.json"), "utf8"));
+  for (const key of ["version", "tag", "commit", "releaseKind"]) {
+    if (manifest[key] !== expected[key]) {
+      throw new Error(`release manifest ${key} ${String(manifest[key])} != ${expected[key]}`);
+    }
+  }
+  if (expected.publicationStatus !== undefined && manifest.validation?.["GitHub Release publication"] !== expected.publicationStatus) {
+    throw new Error(`release manifest publication status is not ${expected.publicationStatus}`);
+  }
+
+  const files = releaseFileNames(root);
+  const checksum = checksumEntries(root);
+  const checksumNames = checksum.map((entry) => entry.name).sort((left, right) => left.localeCompare(right));
+  const expectedChecksumNames = files.filter((name) => name !== "SHA256SUMS");
+  if (!sameNames(checksumNames, expectedChecksumNames)) {
+    throw new Error("SHA256SUMS does not cover exactly the canonical release files");
+  }
+  for (const entry of checksum) {
+    if (digest(readFileSync(resolve(root, entry.name))) !== entry.sha256) {
+      throw new Error(`SHA256SUMS verification failed for ${entry.name}`);
+    }
+  }
+
+  if (!Array.isArray(manifest.artifacts)) throw new Error("release manifest artifacts are required");
+  const manifestNames = manifest.artifacts.map((artifact) => artifact?.name).sort((left, right) => String(left).localeCompare(String(right)));
+  const expectedManifestNames = files.filter((name) => !manifestExcludedNames.has(name));
+  if (!sameNames(manifestNames, expectedManifestNames)) {
+    throw new Error("release manifest does not inventory exactly the canonical payload and metadata files");
+  }
+  for (const artifact of manifest.artifacts) {
+    const path = resolve(root, artifact.name);
+    if (typeof artifact?.sha256 !== "string" || artifact.sha256 !== digest(readFileSync(path)) || artifact.size !== statSync(path).size) {
+      throw new Error(`release manifest hash or size verification failed for ${artifact.name}`);
+    }
+    if (artifact.platform !== artifactPlatform(artifact.name)) {
+      throw new Error(`release manifest platform verification failed for ${artifact.name}`);
+    }
+  }
+  return manifest;
+}
+
+/** Only state-dependent metadata may differ between a reviewed draft and PASS candidate. */
+export function publicationCandidateChangedFiles(draftRoot, candidateRoot) {
+  const draftNames = releaseFileNames(draftRoot);
+  const candidateNames = releaseFileNames(candidateRoot);
+  if (!sameNames(draftNames, candidateNames)) {
+    throw new Error("publication candidate changed the canonical release file inventory");
+  }
+  const changed = draftNames.filter(
+    (name) => !readFileSync(resolve(draftRoot, name)).equals(readFileSync(resolve(candidateRoot, name))),
+  );
+  const allowed = [...publicationMetadataNames].sort((left, right) => left.localeCompare(right));
+  if (!sameNames(changed, allowed)) {
+    throw new Error(`publication candidate changed files outside the allowed metadata set: ${changed.join(", ")}`);
+  }
+  return changed;
+}
+
 function cargoComponents(root) {
   const result = spawnSync("cargo", ["metadata", "--locked", "--format-version", "1"], {
     cwd: root,
@@ -527,7 +624,20 @@ function main() {
   else if (command === "manifest") writeManifest(root);
   else if (command === "sbom") writeSbom(root);
   else if (command === "publication-status") finalizePublicationStatus(root, process.argv[3]);
-  else throw new Error("usage: release_artifacts.mjs scan|checksums|manifest|sbom|publication-status <DRAFT|PASS>");
+  else if (command === "validate-snapshot") {
+    validateReleaseSnapshot(root, {
+      version: process.env.RELEASE_VERSION,
+      tag: process.env.RELEASE_TAG,
+      commit: process.env.RELEASE_COMMIT,
+      releaseKind: process.env.RELEASE_KIND,
+      publicationStatus: process.env.RELEASE_PUBLICATION_STATUS,
+    });
+    process.stdout.write("Canonical release snapshot validation passed.\n");
+  } else if (command === "publication-candidate") {
+    const candidate = process.env.PUBLICATION_CANDIDATE_DIR;
+    if (!candidate) throw new Error("PUBLICATION_CANDIDATE_DIR is required");
+    process.stdout.write(`${publicationCandidateChangedFiles(root, resolve(candidate)).join("\n")}\n`);
+  } else throw new Error("usage: release_artifacts.mjs scan|checksums|manifest|sbom|publication-status|validate-snapshot|publication-candidate");
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

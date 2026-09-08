@@ -105,17 +105,25 @@ export function githubReleaseWorkflowViolations(root) {
   require(/EXISTING_RELEASE_STATE="\$\{release_state\}"/, "publication policy must receive observed GitHub Release state");
   require(/EXISTING_RELEASE_PRERELEASE="\$\{existing_prerelease\}"/, "publication policy must receive observed draft classification");
   require(/release_kind:\s*\$\{\{ steps\.source\.outputs\.release_kind \}\}/, "preflight must classify the release version once");
+  require(/build_mode:\s*\$\{\{ steps\.source\.outputs\.build_mode \}\}/, "preflight must resolve build versus publish-only mode once");
+  require(/RELEASE_EVENT_NAME="\$\{GITHUB_EVENT_NAME\}" PUBLISH_RELEASE="\$\{PUBLISH_RELEASE\}" node scripts\/release_execution_mode\.mjs/, "preflight must use the tested build/publish execution-mode helper");
+  for (const job of ["linux", "windows", "browser", "android", "gateway", "attest"]) {
+    require(new RegExp(`^  ${job}:\\n[\\s\\S]*?^    if: \\$\\{\\{ needs\\.preflight\\.outputs\\.build_mode == 'true' \\}\\}`, "m"), `${job} must run only in build/stage mode`);
+  }
+  require(/^  publish:[\s\S]*?^    needs: \[preflight, linux, windows, browser, android, gateway, attest\][\s\S]*?^    if: \$\{\{ always\(\) && needs\.preflight\.result == 'success' && \(needs\.preflight\.outputs\.build_mode == 'false' \|\| needs\.attest\.result == 'success'\) \}\}/m, "publish-only mode must not be skipped because build jobs are intentionally skipped");
   require(/RELEASE_KIND:\s*\$\{\{ needs\.preflight\.outputs\.release_kind \}\}/, "publish job must use the preflight release classification");
   require(/if test "\$\{RELEASE_IS_PRERELEASE\}" = "true"; then[\s\S]*?create_args\+=\(--prerelease\)/, "draft creation must mark only source-classified prereleases");
   require(/--draft=false "--prerelease=\$\{RELEASE_IS_PRERELEASE\}"/, "publication must preserve the source-derived prerelease flag");
-  require(/test "\$\(git rev-parse HEAD\)" = "\$\{RELEASE_COMMIT\}"[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?node scripts\/release_publication\.mjs/, "publish job must verify the preflight commit and downloaded checksums before publication policy");
+  require(/test "\$\(git rev-parse HEAD\)" = "\$\{RELEASE_COMMIT\}"[\s\S]*?node scripts\/release_publication\.mjs/, "publish job must verify the preflight commit before publication policy");
   require(/PUBLISH_RELEASE:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.publish \|\| false \}\}/, "tag-push release runs must remain draft-only");
   require(/FORGEJO_CI_STATUS:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.forgejo_ci_status \|\| 'NOT RUN' \}\}/, "publication policy must receive the operator-observed Forgejo CI status");
+  require(/Download current-run canonical release set for draft staging\n\s+if: \$\{\{ needs\.preflight\.outputs\.build_mode == 'true' \}\}[\s\S]*?actions\/download-artifact@/, "only build/stage mode may use current-run Actions artifacts");
+  require(/Download existing validated GitHub draft assets for publication\n\s+if: \$\{\{ steps\.publication\.outputs\.action == 'UPDATE_AND_PUBLISH' \}\}[\s\S]*?gh release download "\$\{RELEASE_TAG\}" --dir release/, "publish=true must download assets from the existing GitHub draft");
   require(/cp -a -- release release-publish-candidate/, "publication must retain an exact local DRAFT snapshot before PASS candidate generation");
-  require(/ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release-publish-candidate"[\s\S]*?publication-status PASS[\s\S]*?\(cd release-publish-candidate && sha256sum --check SHA256SUMS\)/, "PASS candidate metadata must be isolated and checksum-verified before upload");
-  require(/read_release_state\)[\s\S]*?pre-mutation[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber release-publish-candidate\/\*/, "candidate upload must recheck the observed remote draft state immediately before mutation");
+  require(/RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release" node scripts\/release_artifacts\.mjs validate-snapshot[\s\S]*?ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release-publish-candidate" node scripts\/release_artifacts\.mjs publication-status PASS[\s\S]*?RELEASE_PUBLICATION_STATUS=PASS[\s\S]*?validate-snapshot[\s\S]*?publication-candidate/, "publication must validate the downloaded DRAFT and isolated PASS candidate");
+  require(/read_release_state\)[\s\S]*?pre-mutation[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber "\$\{candidate_metadata\[@\]\}"/, "candidate upload must recheck the observed remote draft state and mutate metadata only");
   require(/gh release edit "\$\{RELEASE_TAG\}" --draft=false[\s\S]*?read_release_state\)[\s\S]*?outcome/, "publication outcome must be determined from a post-publish remote-state observation");
-  require(/restore_draft_or_fail\(\)[\s\S]*?read_release_state\)[\s\S]*?rollback[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber release\/\*/, "draft rollback must recheck state and restore the verified DRAFT snapshot");
+  require(/restore_draft_or_fail\(\)[\s\S]*?read_release_state\)[\s\S]*?rollback[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber release\/release-status\.md release\/release-manifest\.json release\/SHA256SUMS/, "draft rollback must recheck state and restore only the verified DRAFT metadata");
   require(/candidate_stage_exit[\s\S]*?restore_draft_or_fail[\s\S]*?PASS candidate staging failed/, "partial PASS candidate staging must restore the DRAFT snapshot or fail without further mutation");
 
   const publicationHelper = "scripts/release_publication.mjs";
@@ -181,6 +189,17 @@ export function githubReleaseWorkflowViolations(root) {
         `${transactionHelper}: rollback must require a second observed matching draft state`,
       );
     }
+  }
+
+  const executionHelper = "scripts/release_execution_mode.mjs";
+  if (!existsSync(resolve(root, executionHelper))) {
+    violations.push(`${executionHelper}: release build/publish mode helper is missing`);
+  } else if (
+    !/eventName === "push"[\s\S]*?eventName === "workflow_dispatch"/.test(
+      read(root, executionHelper),
+    )
+  ) {
+    violations.push(`${executionHelper}: must distinguish tag build and manual publication modes`);
   }
 
   if (/^\s+branches:/m.test(workflow))
