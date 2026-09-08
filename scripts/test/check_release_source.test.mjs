@@ -16,6 +16,7 @@ import {
   githubReleaseWorkflowViolations,
   isExactVersion,
   normalizePolicyText,
+  postBuildSourceViolations,
   tagIdentityViolation,
   tagViolation,
 } from "../check_release_source.mjs";
@@ -140,6 +141,80 @@ test("dirty-tree rejection exercises Git state", (t) => {
   mkdirSync(join(root, "source"));
   writeFileSync(join(root, "source/change.txt"), "dirty\n");
   assert.match(dirtyTreeViolation(root), /uncommitted changes/);
+  assert.match(dirtyTreeViolation(root), /\?\? source\/change\.txt/);
+});
+
+test("post-build validation permits ignored Android build state but rejects source changes", (t) => {
+  const root = repository(t);
+  git(root, "tag", "v0.1.0");
+  writeFileSync(join(root, ".gitignore"), "generated/android-build-state\n");
+  git(root, "add", ".gitignore");
+  git(root, ...identity, "commit", "--quiet", "-m", "ignore generated state");
+  git(root, "tag", "-d", "v0.1.0");
+  git(root, "tag", "v0.1.0");
+  mkdirSync(join(root, "generated"));
+  writeFileSync(join(root, "generated/android-build-state"), "generated\n");
+  const expected = {
+    tag: "v0.1.0",
+    commit: git(root, "rev-parse", "HEAD"),
+    version: "0.1.0",
+  };
+  assert.deepEqual(postBuildSourceViolations(root, expected), []);
+
+  mkdirSync(join(root, "apps", "desktop", "src"), { recursive: true });
+  writeFileSync(join(root, "apps/desktop/src/main.ts"), "unexpected\n");
+  assert.match(
+    postBuildSourceViolations(root, expected).join("\n"),
+    /post-build mutation rejected:[\s\S]*apps\/desktop\/src\/main\.ts/,
+  );
+});
+
+test("post-build validation keeps tag, HEAD, and VERSION bound to pre-build identity", (t) => {
+  const root = repository(t);
+  git(root, "tag", "v0.1.0");
+  const expected = {
+    tag: "v0.1.0",
+    commit: git(root, "rev-parse", "HEAD"),
+    version: "0.1.0",
+  };
+  assert.deepEqual(postBuildSourceViolations(root, expected), []);
+
+  commitChange(root);
+  assert.match(
+    postBuildSourceViolations(root, expected).join("\n"),
+    /not HEAD|expected commit/,
+  );
+  writeFileSync(join(root, "VERSION"), "0.1.1\n");
+  assert.match(
+    postBuildSourceViolations(root, expected).join("\n"),
+    /expected version 0\.1\.0/,
+  );
+});
+
+test("Android release staging uses pre-build clean verification and post-build mutation validation", () => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const makefile = readFileSync(join(projectRoot, "Makefile"), "utf8");
+  assert.match(
+    makefile,
+    /release-android-build: release-source-check mobile-android-check[\s\S]*?\$\(MAKE\) release-stage/,
+  );
+  assert.match(
+    makefile,
+    /release-stage: release-source-postbuild-check\n\tnode scripts\/stage_release\.mjs/,
+  );
+  assert.doesNotMatch(makefile, /release-stage: release-source-check/);
+  assert.match(
+    makefile,
+    /release-browser-package: release-source-check[\s\S]*?release-source-postbuild-check/,
+  );
+  assert.match(
+    makefile,
+    /release-linux-build: release-source-check[\s\S]*?\$\(MAKE\) release-stage/,
+  );
+  assert.match(
+    makefile,
+    /release-gateway-image: release-source-check[\s\S]*?release-source-postbuild-check/,
+  );
 });
 
 test("release dependency policy accepts exact versions only", () => {

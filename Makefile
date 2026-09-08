@@ -42,7 +42,7 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 	sync-source-check sync-core-check sync-provider-check sync-integration-check \
 	gateway-source-check gateway-server-check gateway-provider-check gateway-integration-check \
 	gateway-container-check \
-	security-hardening-check release-policy-check release-source-check node-license-check \
+	security-hardening-check release-policy-check release-source-check release-source-prebuild-check release-source-postbuild-check node-license-check \
 	release-browser-package release-linux-build release-windows-build release-android-build \
 	release-gateway-image release-stage release-assemble release-artifact-check release-check
 
@@ -375,26 +375,33 @@ security-hardening-check:
 	$(MAKE) gateway-source-check
 	$(MAKE) release-policy-check
 
-release-source-check:
-	@echo "Require an exact tag and clean committed release source tree..."
-	node scripts/check_release_source.mjs --clean --tag
+release-source-prebuild-check:
+	@echo "Require clean, exact tagged source before a native release build..."
+	node scripts/check_release_source.mjs --prebuild
+
+release-source-postbuild-check:
+	@echo "Verify release identity and reject unexpected post-build source mutations..."
+	RELEASE_COMMIT="$(RELEASE_COMMIT)" RELEASE_VERSION="$(RELEASE_VERSION)" node scripts/check_release_source.mjs --postbuild
+
+release-source-check: release-source-prebuild-check
 
 release-browser-package: release-source-check
 	$(MAKE) browser-build browser-artifact-check
 	pnpm --filter @nian-pass/browser-extension package
+	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-source-postbuild-check
 
 release-linux-build: release-source-check
 	pnpm install --frozen-lockfile
 	NIAN_PASS_COMMIT="$$(git rev-parse HEAD)" pnpm --filter @nian-pass/desktop tauri build --ci --bundles appimage,deb
 	cargo build --locked --release -p nian-pass-browser-host
 	node scripts/package_native_host.mjs linux-x86_64 target/release/nian-pass-browser-host
-	$(MAKE) release-stage
+	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-stage
 
 release-windows-build:
 	pwsh -NoProfile -NonInteractive -File scripts/release_windows.ps1
 
 release-android-build: release-source-check mobile-android-check
-	$(MAKE) release-stage
+	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-stage
 
 release-gateway-image: release-source-check
 	@mkdir -p artifacts/release
@@ -407,8 +414,9 @@ release-gateway-image: release-source-check
 		"nian-pass-sync-gateway:$$(cat VERSION)" > artifacts/release/gateway-image.json
 	@docker image save "nian-pass-sync-gateway:$$(cat VERSION)" | gzip -n \
 		> "artifacts/release/nian-pass-sync-gateway-$$(cat VERSION).tar.gz"
+	RELEASE_COMMIT="$$(git rev-parse HEAD)" RELEASE_VERSION="$$(cat VERSION)" $(MAKE) release-source-postbuild-check
 
-release-stage: release-source-check
+release-stage: release-source-postbuild-check
 	node scripts/stage_release.mjs
 
 release-assemble:

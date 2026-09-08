@@ -31,6 +31,8 @@ if ((pnpm --version).Trim() -ne $expectedPnpm) { throw "Pinned pnpm $expectedPnp
 if (((rustc --version) -split ' ')[1] -ne $expectedRust) { throw "Pinned Rust $expectedRust is required" }
 Invoke-Checked "node" @("scripts/check_release_source.mjs", "--clean", "--tag")
 $env:NIAN_PASS_COMMIT = (git rev-parse HEAD).Trim()
+$env:RELEASE_COMMIT = $env:NIAN_PASS_COMMIT
+$env:RELEASE_VERSION = (Get-Content -LiteralPath "VERSION" -Raw).Trim()
 Invoke-Checked "pnpm" @("--filter", "@nian-pass/desktop", "tauri", "build", "--ci", "--bundles", "nsis", "--target", "x86_64-pc-windows-msvc")
 Invoke-Checked "cargo" @("build", "--locked", "--release", "--target", "x86_64-pc-windows-msvc", "-p", "nian-pass-browser-host")
 
@@ -74,5 +76,6 @@ if ($configuredSigningValues.Count -eq 0) {
 }
 
 Invoke-Checked "node" @("scripts/package_native_host.mjs", "windows-x86_64", $hostBinary)
+Invoke-Checked "node" @("scripts/check_release_source.mjs", "--postbuild")
 Invoke-Checked "node" @("scripts/stage_release.mjs")
 Set-ReleaseOutput "build" "PASS"

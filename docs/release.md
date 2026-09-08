@@ -32,9 +32,12 @@ Release preflight runs `release-source-check`, `release-policy-check`, and
 full routine `quality-check`; it does not duplicate that expensive development
 pipeline merely to obtain another badge.
 
-From the clean checkout, `release-source-check` precedes artifact assembly;
-record SHA-256 checksums for the canonical release directory and record every
-unavailable runtime validation honestly as `NOT RUN`.
+`release-source-check` is the pre-build gate: it requires a clean tree and the
+exact tag before native tooling runs. `release-source-postbuild-check` then
+binds staging to the pre-build commit/version/tag and rejects any non-ignored
+source mutation while allowing ignored Android/Tauri build state. Record
+SHA-256 checksums for the canonical release directory and every unavailable
+runtime validation honestly as `NOT RUN`.
 
 A tag push builds and stages a draft only; it never publishes. GitHub marks the
 draft prerelease or final solely from `VERSION`, and an existing draft whose
@@ -175,7 +178,8 @@ Release candidates are immutable generations, not mutable labels:
 0.1.0-rc.2 -> native platform payloads assembled, but attestation checksum verification used the repository cwd
 0.1.0-rc.3 -> full multi-platform build, attestation, and draft prerelease passed
 0.1.0-rc.4 -> Windows CRLF checkout exposed LF-only release-policy regex assumptions
-0.1.0-rc.5 -> line-ending-independent release-policy remediation
+0.1.0-rc.5 -> Android build and APK validation passed; post-build generic clean-tree gate rejected build-generated working-tree state
+0.1.0-rc.6 -> post-build source-state and release-stage remediation
 0.1.0      -> final only after the accepted RC
 ```
 

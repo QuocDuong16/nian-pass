@@ -581,7 +581,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     readFileSync(join(output, "release-manifest.json"), "utf8"),
   );
   assert.equal(manifest.artifacts.length, 12);
-  assert.equal(manifest.version, "0.1.0-rc.5");
+  assert.equal(manifest.version, "0.1.0-rc.6");
   assert.equal(manifest.releaseKind, "prerelease");
   assert.equal(manifest.tag, "v0.1.0-rc.5");
   assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
@@ -602,7 +602,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     !manifest.artifacts.some((artifact) => artifact.name === "SHA256SUMS"),
   );
   const sbom = JSON.parse(readFileSync(join(output, "sbom.cdx.json"), "utf8"));
-  assert.equal(sbom.metadata.component.version, "0.1.0-rc.5");
+  assert.equal(sbom.metadata.component.version, "0.1.0-rc.6");
   assert.deepEqual(
     sbom.components.map((component) => component.name),
     ["fixture-runtime"],

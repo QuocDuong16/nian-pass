@@ -526,26 +526,60 @@ export function dirtyTreeViolation(root) {
     },
   );
   if (result.status !== 0) return "could not inspect the Git working tree";
-  return result.stdout.trim() === ""
+  const status = result.stdout.trim();
+  return status === ""
     ? null
-    : "release source tree contains uncommitted changes";
+    : `release source tree contains uncommitted changes:\n${status}`;
+}
+
+export function releaseIdentityViolations(root, {
+  tag = process.env.RELEASE_TAG ?? "",
+  commit = process.env.RELEASE_COMMIT,
+  version = process.env.RELEASE_VERSION,
+} = {}) {
+  const violations = [];
+  const mismatch = tagViolation(root, tag);
+  if (mismatch) {
+    violations.push(mismatch);
+  } else {
+    const identity = tagIdentityViolation(root, tag);
+    if (identity) violations.push(identity);
+  }
+  const head = gitCommit(root, "HEAD");
+  if (commit && head !== commit) {
+    violations.push(`release HEAD ${String(head)} != expected commit ${commit}`);
+  }
+  const actualVersion = releaseVersion(root);
+  if (version && actualVersion !== version) {
+    violations.push(`release VERSION ${actualVersion} != expected version ${version}`);
+  }
+  return violations;
+}
+
+export function postBuildSourceViolations(root, identity = {}) {
+  const violations = releaseIdentityViolations(root, identity);
+  const dirty = dirtyTreeViolation(root);
+  if (dirty) violations.push(`post-build mutation rejected: ${dirty}`);
+  return violations;
 }
 
 function main() {
   const modes = new Set(process.argv.slice(2));
   const violations = sourcePolicyViolations(repositoryRoot);
-  if (modes.has("--clean")) {
+  const prebuild = modes.has("--prebuild");
+  const postbuild = modes.has("--postbuild");
+  if (prebuild && postbuild) {
+    violations.push("release source check modes --prebuild and --postbuild are mutually exclusive");
+  }
+  if (modes.has("--clean") || prebuild) {
     const dirty = dirtyTreeViolation(repositoryRoot);
     if (dirty) violations.push(dirty);
   }
-  if (modes.has("--tag")) {
-    const tag = process.env.RELEASE_TAG ?? "";
-    const mismatch = tagViolation(repositoryRoot, tag);
-    if (mismatch) violations.push(mismatch);
-    else {
-      const identity = tagIdentityViolation(repositoryRoot, tag);
-      if (identity) violations.push(identity);
-    }
+  if ((modes.has("--tag") || prebuild) && !postbuild) {
+    violations.push(...releaseIdentityViolations(repositoryRoot));
+  }
+  if (postbuild) {
+    violations.push(...postBuildSourceViolations(repositoryRoot));
   }
   if (violations.length > 0) {
     process.stderr.write(
