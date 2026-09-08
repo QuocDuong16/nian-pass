@@ -1,5 +1,3 @@
-# Tauri/Wry generates this package during Android builds.  Keep the committed
-# dev/nian/pass sources outside this narrowly scoped build output protected.
 /src/main/**/generated
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json

@@ -178,8 +178,8 @@ Release candidates are immutable generations, not mutable labels:
 0.1.0-rc.2 -> native platform payloads assembled, but attestation checksum verification used the repository cwd
 0.1.0-rc.3 -> full multi-platform build, attestation, and draft prerelease passed
 0.1.0-rc.4 -> Windows CRLF checkout exposed LF-only release-policy regex assumptions
-0.1.0-rc.5 -> Android build and APK validation passed; post-build generic clean-tree gate rejected build-generated working-tree state
-0.1.0-rc.6 -> post-build source-state and release-stage remediation
+0.1.0-rc.5 -> Android build and APK validation passed, but the GitHub runner reported a non-clean working tree before staging.
+0.1.0-rc.6 -> Clean local reproduction did not reproduce that runner-specific condition; pre/post-build verification captures immutable source identity and reports exact dirty paths if it recurs.
 0.1.0      -> final only after the accepted RC
 ```
 
