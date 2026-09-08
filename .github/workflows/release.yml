@@ -492,52 +492,145 @@ jobs:
           RELEASE_IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
         run: |
           set -Eeuo pipefail
+          (cd release && sha256sum --check SHA256SUMS)
+
+          read_release_state() {
+            local metadata draft prerelease
+            if ! metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv')"; then
+              return 1
+            fi
+            IFS=$'\t' read -r draft prerelease <<< "${metadata}"
+            case "${draft}:${prerelease}" in
+              true:true|true:false|false:true|false:false) printf '%s\t%s\n' "${draft}" "${prerelease}" ;;
+              *) return 1 ;;
+            esac
+          }
+
+          transaction_action() {
+            OBSERVED_RELEASE_DRAFT="$1" OBSERVED_RELEASE_PRERELEASE="$2" \
+              EXPECTED_RELEASE_PRERELEASE="${RELEASE_IS_PRERELEASE}" \
+              node scripts/release_publish_transaction.mjs "$3"
+          }
+
+          restore_draft_or_fail() {
+            local rollback_metadata rollback_draft rollback_prerelease
+            if ! rollback_metadata="$(read_release_state)"; then
+              echo "Rollback state for ${RELEASE_TAG} is ambiguous; manual inspection required. No rollback was attempted." >&2
+              return 1
+            fi
+            IFS=$'\t' read -r rollback_draft rollback_prerelease <<< "${rollback_metadata}"
+            if test "$(transaction_action "${rollback_draft}" "${rollback_prerelease}" rollback)" != "RESTORE_DRAFT"; then
+              echo "Release ${RELEASE_TAG} changed before rollback; manual inspection required. No rollback was attempted." >&2
+              return 1
+            fi
+            if ! (cd release && sha256sum --check SHA256SUMS); then
+              echo "Validated DRAFT snapshot checksum verification failed; refusing rollback." >&2
+              return 1
+            fi
+            if ! gh release upload "${RELEASE_TAG}" --clobber release/*; then
+              echo "DRAFT snapshot asset restore failed; manual inspection required." >&2
+              return 1
+            fi
+            if ! gh release edit "${RELEASE_TAG}" --notes-file release/release-status.md; then
+              echo "DRAFT snapshot notes restore failed; manual inspection required." >&2
+              return 1
+            fi
+            return 0
+          }
+
           case "${PUBLICATION_ACTION}" in
-            CREATE_AND_PUBLISH|UPDATE_AND_PUBLISH) publication_status="PASS" ;;
-            CREATE_DRAFT|UPDATE_DRAFT) publication_status="DRAFT" ;;
-            *) echo "Unknown publication action: ${PUBLICATION_ACTION}" >&2; exit 1 ;;
-          esac
-          ARTIFACT_DIR="${GITHUB_WORKSPACE}/release" node scripts/release_artifacts.mjs publication-status "${publication_status}"
-          cd release
-          sha256sum --check SHA256SUMS
-          case "${PUBLICATION_ACTION}" in
-            CREATE_DRAFT|CREATE_AND_PUBLISH)
-              create_args=("${RELEASE_TAG}" --verify-tag --target "${RELEASE_COMMIT}" --draft --title "Nian Pass ${RELEASE_TAG}" --notes-file release-status.md)
+            CREATE_DRAFT)
+              create_args=("${RELEASE_TAG}" --verify-tag --target "${RELEASE_COMMIT}" --draft --title "Nian Pass ${RELEASE_TAG}" --notes-file release/release-status.md)
               if test "${RELEASE_IS_PRERELEASE}" = "true"; then
                 create_args+=(--prerelease)
               fi
-              gh release create "${create_args[@]}" ./*
+              gh release create "${create_args[@]}" release/*
               ;;
-            UPDATE_DRAFT|UPDATE_AND_PUBLISH)
-              existing_metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv')"
+            UPDATE_DRAFT)
+              if ! existing_metadata="$(read_release_state)"; then
+                echo "Could not observe GitHub Release ${RELEASE_TAG}; refusing draft mutation." >&2
+                exit 1
+              fi
               IFS=$'\t' read -r existing_draft existing_prerelease <<< "${existing_metadata}"
-              if test "${existing_draft}" != "true"; then
-                echo "Release ${RELEASE_TAG} is already published; published release artifacts are immutable. Create a new version/tag instead." >&2
-                exit 1
-              fi
-              if test "${existing_prerelease}" != "${RELEASE_IS_PRERELEASE}"; then
-                echo "Release ${RELEASE_TAG} draft prerelease state does not match source release kind ${RELEASE_KIND}." >&2
-                exit 1
-              fi
-              gh release upload "${RELEASE_TAG}" --clobber ./*
-              gh release edit "${RELEASE_TAG}" --notes-file release-status.md
+              case "$(transaction_action "${existing_draft}" "${existing_prerelease}" pre-mutation)" in
+                UPLOAD_CANDIDATE) ;;
+                REFUSE_PUBLISHED)
+                  echo "Release ${RELEASE_TAG} is already published; published release artifacts are immutable. Create a new version/tag instead." >&2
+                  exit 1
+                  ;;
+                AMBIGUOUS)
+                  echo "Release ${RELEASE_TAG} state or classification is ambiguous; refusing draft mutation." >&2
+                  exit 1
+                  ;;
+                *) exit 1 ;;
+              esac
+              gh release upload "${RELEASE_TAG}" --clobber release/*
+              gh release edit "${RELEASE_TAG}" --notes-file release/release-status.md
               ;;
-          esac
-          case "${PUBLICATION_ACTION}" in
-            CREATE_AND_PUBLISH|UPDATE_AND_PUBLISH)
-              existing_metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv')"
+            UPDATE_AND_PUBLISH)
+              cp -a -- release release-publish-candidate
+              ARTIFACT_DIR="${GITHUB_WORKSPACE}/release-publish-candidate" node scripts/release_artifacts.mjs publication-status PASS
+              (cd release-publish-candidate && sha256sum --check SHA256SUMS)
+
+              if ! existing_metadata="$(read_release_state)"; then
+                echo "Could not observe GitHub Release ${RELEASE_TAG} before candidate upload; refusing mutation." >&2
+                exit 1
+              fi
               IFS=$'\t' read -r existing_draft existing_prerelease <<< "${existing_metadata}"
-              if test "${existing_draft}" != "true"; then
-                echo "Release ${RELEASE_TAG} left draft state before publication; refusing mutation." >&2
+              case "$(transaction_action "${existing_draft}" "${existing_prerelease}" pre-mutation)" in
+                UPLOAD_CANDIDATE) ;;
+                REFUSE_PUBLISHED)
+                  echo "Release ${RELEASE_TAG} is already published; published release artifacts are immutable. Create a new version/tag instead." >&2
+                  exit 1
+                  ;;
+                AMBIGUOUS)
+                  echo "Release ${RELEASE_TAG} state or classification is ambiguous; refusing candidate upload." >&2
+                  exit 1
+                  ;;
+                *) exit 1 ;;
+              esac
+
+              set +e
+              gh release upload "${RELEASE_TAG}" --clobber release-publish-candidate/*
+              candidate_stage_exit=$?
+              if test "${candidate_stage_exit}" -eq 0; then
+                gh release edit "${RELEASE_TAG}" --notes-file release-publish-candidate/release-status.md
+                candidate_stage_exit=$?
+              fi
+              set -e
+              if test "${candidate_stage_exit}" -ne 0; then
+                if restore_draft_or_fail; then
+                  echo "PASS candidate staging failed; the validated DRAFT snapshot was restored." >&2
+                fi
                 exit 1
               fi
-              if test "${existing_prerelease}" != "${RELEASE_IS_PRERELEASE}"; then
-                echo "Release ${RELEASE_TAG} classification changed before publication; refusing mutation." >&2
-                exit 1
-              fi
+              set +e
               gh release edit "${RELEASE_TAG}" --draft=false "--prerelease=${RELEASE_IS_PRERELEASE}"
-              ;;
-            CREATE_DRAFT|UPDATE_DRAFT)
+              publish_exit=$?
+              set -e
+
+              if ! observed_metadata="$(read_release_state)"; then
+                echo "Publication outcome for ${RELEASE_TAG} is ambiguous; manual inspection required. No rollback was attempted." >&2
+                exit 1
+              fi
+              IFS=$'\t' read -r observed_draft observed_prerelease <<< "${observed_metadata}"
+              case "$(transaction_action "${observed_draft}" "${observed_prerelease}" outcome)" in
+                SUCCESS)
+                  if test "${publish_exit}" -ne 0; then
+                    echo "GitHub observed ${RELEASE_TAG} as published despite a client publish error." >&2
+                  fi
+                  ;;
+                ROLLBACK_REQUIRED)
+                  restore_draft_or_fail
+                  echo "Publication of ${RELEASE_TAG} failed; the validated DRAFT snapshot was restored." >&2
+                  exit 1
+                  ;;
+                AMBIGUOUS)
+                  echo "Publication outcome for ${RELEASE_TAG} is ambiguous; manual inspection required. No rollback was attempted." >&2
+                  exit 1
+                  ;;
+                *) exit 1 ;;
+              esac
               ;;
             *)
               exit 1

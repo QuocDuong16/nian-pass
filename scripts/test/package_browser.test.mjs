@@ -19,7 +19,9 @@ function centralDirectoryEntries(bytes) {
     const nameSize = bytes.readUInt16LE(offset + 28);
     const extraSize = bytes.readUInt16LE(offset + 30);
     const commentSize = bytes.readUInt16LE(offset + 32);
-    const name = bytes.subarray(offset + 46, offset + 46 + nameSize).toString("utf8");
+    const name = bytes
+      .subarray(offset + 46, offset + 46 + nameSize)
+      .toString("utf8");
     entries.set(name, {
       creatorSystem: bytes.readUInt16LE(offset + 4) >>> 8,
       unixMode: bytes.readUInt32LE(offset + 38) >>> 16,
@@ -54,19 +56,42 @@ test("browser ZIP entries default to regular files with mode 0644", () => {
 });
 
 test("Linux native host ZIP preserves only the requested executable mode", () => {
-  const archive = buildNativeHostArchive("linux-x86_64", Buffer.from("synthetic host"), "0.1.0-rc.3");
+  const archive = buildNativeHostArchive(
+    "linux-x86_64",
+    Buffer.from("synthetic host"),
+    "0.1.0-rc.4",
+  );
   const entries = centralDirectoryEntries(archive);
-  assert.deepEqual([...entries.keys()], ["nian-pass-browser-host", "INSTALL.txt"]);
-  assert.equal(entries.get("nian-pass-browser-host").unixMode & 0o170000, 0o100000);
+  assert.deepEqual(
+    [...entries.keys()],
+    ["nian-pass-browser-host", "INSTALL.txt"],
+  );
+  assert.equal(
+    entries.get("nian-pass-browser-host").unixMode & 0o170000,
+    0o100000,
+  );
   assert.equal(entries.get("nian-pass-browser-host").unixMode & 0o777, 0o755);
   assert.equal(entries.get("INSTALL.txt").unixMode & 0o170000, 0o100000);
   assert.equal(entries.get("INSTALL.txt").unixMode & 0o777, 0o644);
-  assert.deepEqual(archive, buildNativeHostArchive("linux-x86_64", Buffer.from("synthetic host"), "0.1.0-rc.3"));
+  assert.deepEqual(
+    archive,
+    buildNativeHostArchive(
+      "linux-x86_64",
+      Buffer.from("synthetic host"),
+      "0.1.0-rc.4",
+    ),
+  );
 });
 
 test("Windows native host ZIP keeps conservative Unix mode metadata", () => {
-  const archive = buildNativeHostArchive("windows-x86_64", Buffer.from("synthetic host"), "0.1.0-rc.3");
-  const metadata = centralDirectoryEntries(archive).get("nian-pass-browser-host.exe");
+  const archive = buildNativeHostArchive(
+    "windows-x86_64",
+    Buffer.from("synthetic host"),
+    "0.1.0-rc.4",
+  );
+  const metadata = centralDirectoryEntries(archive).get(
+    "nian-pass-browser-host.exe",
+  );
   assert.equal(metadata.unixMode & 0o170000, 0o100000);
   assert.equal(metadata.unixMode & 0o777, 0o644);
 });
@@ -81,9 +106,19 @@ test(
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const archivePath = join(root, "host.zip");
     const output = join(root, "output");
-    writeFileSync(archivePath, buildNativeHostArchive("linux-x86_64", Buffer.from("synthetic host"), "0.1.0-rc.3"));
+    writeFileSync(
+      archivePath,
+      buildNativeHostArchive(
+        "linux-x86_64",
+        Buffer.from("synthetic host"),
+        "0.1.0-rc.4",
+      ),
+    );
     execFileSync("unzip", ["-qq", archivePath, "-d", output]);
-    assert.notEqual(statSync(join(output, "nian-pass-browser-host")).mode & 0o111, 0);
+    assert.notEqual(
+      statSync(join(output, "nian-pass-browser-host")).mode & 0o111,
+      0,
+    );
     assert.equal(statSync(join(output, "INSTALL.txt")).mode & 0o111, 0);
   },
 );

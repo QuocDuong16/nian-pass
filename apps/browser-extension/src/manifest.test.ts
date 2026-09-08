@@ -7,6 +7,7 @@ describe("Manifest V3 generation", () => {
     expect(browserManifestVersion("0.1.0-rc.1")).toBe("0.1.0.30001");
     expect(browserManifestVersion("0.1.0-rc.2")).toBe("0.1.0.30002");
     expect(browserManifestVersion("0.1.0-rc.3")).toBe("0.1.0.30003");
+    expect(browserManifestVersion("0.1.0-rc.4")).toBe("0.1.0.30004");
     expect(browserManifestVersion("0.1.0")).toBe("0.1.0.65535");
   });
 
@@ -36,8 +37,8 @@ describe("Manifest V3 generation", () => {
     const manifest = generateManifest("chromium");
     expect(manifest).toMatchObject({
       manifest_version: 3,
-      version: "0.1.0.30003",
-      version_name: "0.1.0-rc.3",
+      version: "0.1.0.30004",
+      version_name: "0.1.0-rc.4",
       permissions: ["activeTab", "scripting", "nativeMessaging"],
       optional_host_permissions: ["http://*/*", "https://*/*"],
       background: { service_worker: "background.js" },

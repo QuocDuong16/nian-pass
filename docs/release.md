@@ -37,7 +37,9 @@ draft prerelease or final solely from `VERSION`, and an existing draft whose
 classification differs from source fails closed. An
 actual publication is permitted only through `workflow_dispatch` with the same
 existing release tag, `publish=true`, and an operator-observed
-`forgejo_ci_status=PASS`. `NOT RUN` is sufficient only for a draft dry-run.
+`forgejo_ci_status=PASS`. Publication additionally requires an existing
+validated draft; it never creates and publishes a release in one operation.
+`NOT RUN` is sufficient only for a draft dry-run.
 
 ## Platform builds
 
@@ -94,6 +96,15 @@ only itself. This scan is a regression defense, not proof of total secret
 absence, and it does not claim coverage of opaque proprietary installer
 formats.
 
+For publication, the downloaded `release/` directory remains the exact
+validated DRAFT snapshot. The workflow copies it into a separate PASS candidate,
+regenerates and verifies the candidate metadata/checksums, then rechecks the
+remote GitHub Release before upload. After the draft-to-published attempt it
+uses the observed remote release state—not the client exit code alone—to decide
+whether publication succeeded. A still-draft release is restored from the
+verified DRAFT snapshot only after a second matching-draft observation. Unknown,
+mismatched, or already-published state is ambiguous and fails without rollback.
+
 Signing is optional only when credentials are unavailable, not implicit. The
 Windows job can import a PFX from its two job-scoped GitHub secrets, sign and
 verify the native host/NSIS output with SHA-256 Authenticode, then remove the
@@ -141,7 +152,8 @@ Release candidates are immutable generations, not mutable labels:
 ```text
 0.1.0-rc.1 -> Windows dry-run stopped before native validation because the Rust pin parser was CRLF-sensitive
 0.1.0-rc.2 -> native platform payloads assembled, but attestation checksum verification used the repository cwd
-0.1.0-rc.3 -> test the corrected attestation verification path
+0.1.0-rc.3 -> full multi-platform build, attestation, and draft prerelease passed
+0.1.0-rc.4 -> publication transaction hardening before real publish validation
 0.1.0      -> final only after the accepted RC
 ```
 

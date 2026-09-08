@@ -18,7 +18,7 @@ function action(
     publishRequested,
     forgejoCiStatus,
     eventName,
-    releaseTag: releaseKind === "prerelease" ? "v0.1.0-rc.3" : "v0.1.0",
+    releaseTag: releaseKind === "prerelease" ? "v0.1.0-rc.4" : "v0.1.0",
   });
 }
 
@@ -30,8 +30,11 @@ test("missing and draft releases remain mutable staging material", () => {
 });
 
 test("publication requires observed Forgejo PASS", () => {
-  assert.equal(action("none", true, "PASS"), "CREATE_AND_PUBLISH");
   assert.equal(action("draft", true, "PASS"), "UPDATE_AND_PUBLISH");
+  assert.throws(
+    () => action("none", true, "PASS"),
+    /requires an existing validated draft release/,
+  );
   assert.throws(
     () => action("none", true, "NOT RUN"),
     /requires observed Forgejo/,
@@ -69,7 +72,8 @@ test("existing drafts must retain the source-derived release classification", ()
     "UPDATE_DRAFT",
   );
   assert.throws(
-    () => action("draft", false, "PASS", "workflow_dispatch", "prerelease", false),
+    () =>
+      action("draft", false, "PASS", "workflow_dispatch", "prerelease", false),
     /does not match source release kind prerelease/,
   );
   assert.throws(
@@ -79,14 +83,16 @@ test("existing drafts must retain the source-derived release classification", ()
 });
 
 test("RC and final publication actions preserve independent draft semantics", () => {
-  assert.equal(action("none", false, "NOT RUN", "push", "prerelease"), "CREATE_DRAFT");
   assert.equal(
-    action("none", true, "PASS", "workflow_dispatch", "prerelease"),
-    "CREATE_AND_PUBLISH",
+    action("none", false, "NOT RUN", "push", "prerelease"),
+    "CREATE_DRAFT",
   );
-  assert.equal(action("none", false, "NOT RUN", "push", "final"), "CREATE_DRAFT");
   assert.equal(
-    action("none", true, "PASS", "workflow_dispatch", "final"),
-    "CREATE_AND_PUBLISH",
+    action("none", false, "NOT RUN", "push", "final"),
+    "CREATE_DRAFT",
+  );
+  assert.equal(
+    action("draft", true, "PASS", "workflow_dispatch", "final", false),
+    "UPDATE_AND_PUBLISH",
   );
 });

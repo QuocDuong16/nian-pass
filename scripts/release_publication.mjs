@@ -59,7 +59,12 @@ export function publicationAction({
   }
 
   if (releaseState === "none") {
-    return publish ? "CREATE_AND_PUBLISH" : "CREATE_DRAFT";
+    if (publish) {
+      throw new Error(
+        "publish=true requires an existing validated draft release",
+      );
+    }
+    return "CREATE_DRAFT";
   }
   return publish ? "UPDATE_AND_PUBLISH" : "UPDATE_DRAFT";
 }

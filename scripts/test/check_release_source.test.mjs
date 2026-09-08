@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -13,7 +19,12 @@ import {
   tagViolation,
 } from "../check_release_source.mjs";
 
-const identity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"];
+const identity = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
 
 function git(root, ...arguments_) {
   return execFileSync("git", arguments_, {
@@ -45,9 +56,9 @@ test("tag must match the authoritative VERSION", (t) => {
 });
 
 test("RC tags must exactly match the authoritative prerelease VERSION", (t) => {
-  const root = repository(t, "0.1.0-rc.3");
-  assert.equal(tagViolation(root, "v0.1.0-rc.3"), null);
-  assert.match(tagViolation(root, "v0.1.0"), /!= v0\.1\.0-rc\.3/);
+  const root = repository(t, "0.1.0-rc.4");
+  assert.equal(tagViolation(root, "v0.1.0-rc.4"), null);
+  assert.match(tagViolation(root, "v0.1.0"), /!= v0\.1\.0-rc\.4/);
 });
 
 test("a final VERSION rejects a prerelease tag", (t) => {
@@ -56,9 +67,9 @@ test("a final VERSION rejects a prerelease tag", (t) => {
 });
 
 test("an RC tag ref pointing to HEAD passes exact identity", (t) => {
-  const root = repository(t, "0.1.0-rc.3");
-  git(root, "tag", "v0.1.0-rc.3");
-  assert.equal(tagIdentityViolation(root, "v0.1.0-rc.3"), null);
+  const root = repository(t, "0.1.0-rc.4");
+  git(root, "tag", "v0.1.0-rc.4");
+  assert.equal(tagIdentityViolation(root, "v0.1.0-rc.4"), null);
 });
 
 test("lightweight release tag pointing to HEAD is accepted", (t) => {
@@ -109,7 +120,12 @@ test("dirty-tree rejection exercises Git state", (t) => {
 
 test("release dependency policy accepts exact versions only", () => {
   assert.equal(isExactVersion("2.11.4"), true);
-  for (const value of ["latest", "^2.11.4", "~2.11.4", "git+https://example.invalid/x"]) {
+  for (const value of [
+    "latest",
+    "^2.11.4",
+    "~2.11.4",
+    "git+https://example.invalid/x",
+  ]) {
     assert.equal(isExactVersion(value), false);
   }
 });
@@ -121,15 +137,23 @@ test("GitHub is release-only authority and Forgejo has no competing packager", (
 
 test("GitHub attestation verifies basename-only checksums from the release directory", (t) => {
   const projectRoot = resolve(import.meta.dirname, "../..");
-  const root = mkdtempSync(join(tmpdir(), "nian-pass-attestation-cwd-workflow-"));
+  const root = mkdtempSync(
+    join(tmpdir(), "nian-pass-attestation-cwd-workflow-"),
+  );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
   mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
   mkdirSync(join(root, "scripts"), { recursive: true });
-  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  writeFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "name: Quality\n",
+  );
   writeFileSync(
     join(root, ".github/workflows/release.yml"),
-    readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8").replace(
+    readFileSync(
+      join(projectRoot, ".github/workflows/release.yml"),
+      "utf8",
+    ).replace(
       "(cd artifacts/release && sha256sum --check SHA256SUMS)",
       "sha256sum --check artifacts/release/SHA256SUMS",
     ),
@@ -155,11 +179,17 @@ test("GitHub release workflow policy rejects floating actions and branch trigger
     join(root, ".forgejo/workflows/quality.yml"),
     "name: Quality\n",
   );
-  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  );
   writeFileSync(
     join(root, ".github/workflows/release.yml"),
     workflow
-      .replace("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", "actions/checkout@v4")
+      .replace(
+        "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+        "actions/checkout@v4",
+      )
       .replace("    tags:\n", "    branches:\n"),
   );
   const violations = githubReleaseWorkflowViolations(root).join("\n");
@@ -175,7 +205,10 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
   mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
   mkdirSync(join(root, "scripts"), { recursive: true });
-  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  writeFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "name: Quality\n",
+  );
   const workflow = readFileSync(
     join(projectRoot, ".github/workflows/release.yml"),
     "utf8",
@@ -188,13 +221,14 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
       "PUBLISH_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}",
       "PUBLISH_RELEASE: ${{ inputs.publish }}",
     )
+    .replace('if test "${existing_draft}" != "true"; then', "if false; then")
     .replace(
-      'if test "${existing_draft}" != "true"; then',
-      "if false; then",
+      "(cd release && sha256sum --check SHA256SUMS)",
+      ": skip downloaded checksum verification",
     )
     .replace(
-      '(cd release && sha256sum --check SHA256SUMS)',
-      ": skip downloaded checksum verification",
+      "cp -a -- release release-publish-candidate",
+      ": mutate the only downloaded snapshot",
     );
   writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
   const helper = readFileSync(
@@ -202,12 +236,22 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
     "utf8",
   ).replace('publish && forgejoCiStatus !== "PASS"', "false");
   writeFileSync(join(root, "scripts/release_publication.mjs"), helper);
+  writeFileSync(
+    join(root, "scripts/release_publish_transaction.mjs"),
+    readFileSync(
+      join(projectRoot, "scripts/release_publish_transaction.mjs"),
+      "utf8",
+    ),
+  );
 
   const violations = githubReleaseWorkflowViolations(root).join("\n");
   assert.match(violations, /behavioral publication policy helper/);
   assert.match(violations, /tag-push release runs must remain draft-only/);
   assert.match(violations, /downloaded checksums before publication policy/);
-  assert.match(violations, /draft asset replacement must recheck/);
+  assert.match(
+    violations,
+    /publication must retain an exact local DRAFT snapshot/,
+  );
   assert.match(
     violations,
     /publish=true must require Forgejo canonical CI PASS/,
@@ -221,7 +265,10 @@ test("GitHub release workflow policy rejects hard-coded prerelease metadata", (t
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
   mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
   mkdirSync(join(root, "scripts"), { recursive: true });
-  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  writeFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "name: Quality\n",
+  );
   const workflow = readFileSync(
     join(projectRoot, ".github/workflows/release.yml"),
     "utf8",
@@ -241,6 +288,12 @@ test("GitHub release workflow policy rejects hard-coded prerelease metadata", (t
   );
 
   const violations = githubReleaseWorkflowViolations(root).join("\n");
-  assert.match(violations, /draft creation must mark only source-classified prereleases/);
-  assert.match(violations, /publication must preserve the source-derived prerelease flag/);
+  assert.match(
+    violations,
+    /draft creation must mark only source-classified prereleases/,
+  );
+  assert.match(
+    violations,
+    /publication must preserve the source-derived prerelease flag/,
+  );
 });
