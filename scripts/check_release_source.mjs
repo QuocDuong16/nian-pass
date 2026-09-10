@@ -421,6 +421,54 @@ export function sourcePolicyViolations(root) {
       "apps/browser-extension/src/manifest.ts: displayed version must come from package.json",
     );
   }
+  const desktopBuild = read(root, "apps/desktop/src-tauri/build.rs");
+  if (
+    !/CARGO_CFG_TARGET_OS/.test(desktopBuild) ||
+    !/CARGO_CFG_TARGET_ENV/.test(desktopBuild) ||
+    !/cargo:rustc-link-arg-bin=nian-pass-desktop=\/STACK:8388608/.test(desktopBuild) ||
+    /RUST_MIN_STACK/.test(desktopBuild)
+  ) {
+    violations.push(
+      "apps/desktop/src-tauri/build.rs: Windows/MSVC desktop-only 8 MiB stack linker policy is required",
+    );
+  }
+  const desktopMain = read(root, "apps/desktop/src-tauri/src/main.rs");
+  if (
+    !/cfg_attr\(\s*all\(not\(debug_assertions\), target_os = "windows"\),\s*windows_subsystem = "windows"/s.test(
+      desktopMain,
+    )
+  ) {
+    violations.push(
+      "apps/desktop/src-tauri/src/main.rs: Windows release console suppression is required",
+    );
+  }
+  const windowsRelease = read(root, "scripts/release_windows.ps1");
+  if (
+    !/Get-PeStackReserve/.test(windowsRelease) ||
+    !/SizeOfStackReserve/.test(windowsRelease) ||
+    !/\[UInt64\]8388608/.test(windowsRelease) ||
+    !/Test-DesktopStartup/.test(windowsRelease) ||
+    !/Start-Process -FilePath \$Binary -PassThru/.test(windowsRelease) ||
+    !/STATUS_STACK_OVERFLOW \(0xC00000FD\)/.test(windowsRelease) ||
+    !/native_messaging_host_smoke/.test(windowsRelease) ||
+    /Set-ReleaseOutput "process_smoke"/.test(windowsRelease)
+  ) {
+    violations.push(
+      "scripts/release_windows.ps1: PE reserve verification and distinct desktop/native-host smoke evidence are required",
+    );
+  }
+  const releaseWorkflow = read(root, ".github/workflows/release.yml");
+  if (
+    !/desktop_startup_smoke/.test(releaseWorkflow) ||
+    !/native_messaging_host_smoke/.test(releaseWorkflow) ||
+    !/WINDOWS_DESKTOP_STARTUP_STATUS/.test(releaseWorkflow) ||
+    !/WINDOWS_NATIVE_MESSAGING_HOST_STATUS/.test(releaseWorkflow) ||
+    !/WINDOWS_GUI_STATUS: NOT RUN/.test(releaseWorkflow)
+  ) {
+    violations.push(
+      ".github/workflows/release.yml: Windows desktop and Native Messaging smoke evidence must remain distinct from full GUI runtime",
+    );
+  }
   const gatewayImageVersion = read(root, "apps/sync-gateway/Dockerfile").match(
     /^ARG NIAN_PASS_VERSION=(\S+)$/m,
   )?.[1];

@@ -141,9 +141,11 @@ base64 key material in Git, command arguments, logs, or artifacts. Record
 
 ## Runtime smoke and report
 
-Use only copied synthetic fixtures. Linux and Windows desktop smoke is: launch,
-select, unlock, browse, mutate, Save, Lock, reopen, explicit test-gateway sync,
-and browser-host handshake. Android verifies APK permissions/declarations and,
+Use only copied synthetic fixtures. The Windows release desktop smoke starts the
+raw desktop executable and requires it to remain alive for its bounded startup
+interval; it is not full interactive GUI/runtime validation. Linux desktop
+smoke is: launch, select, unlock, browse, mutate, Save, Lock, reopen, explicit
+test-gateway sync, and browser-host handshake. Android verifies APK permissions/declarations and,
 when a device exists, unlock/browse/Save/Lock, Credential Provider, Autofill,
 and Activity privacy lifecycle. Browser smoke loads each package, grants one
 test origin, approves one connection, fills without submit, reconnects, and
@@ -184,7 +186,8 @@ Release candidates are immutable generations, not mutable labels:
 0.1.0-rc.8 -> all platform builds and draft staging passed; manual publication failed because GitHub Release normalized space-containing native asset filenames from `Nian Pass_...` to `Nian.Pass_...` while SHA256SUMS retained the original names.
 0.1.0-rc.9 -> all platform builds, canonical filename handling, draft validation, PASS candidate generation, and metadata upload passed. The GitHub Release metadata PATCH caused the numeric release object's `tag_name` to drift from `v0.1.0-rc.9` to an `untagged-*` synthetic name. The following publish PATCH did publish the release, but post-publication identity verification correctly refused to classify the wrong-tag release as valid.
 0.1.0-rc.10 -> full multi-platform build and draft staging passed. The manual publish-only transaction also passed, preserving the exact numeric release identity, tag, commit, prerelease classification and reviewed payload bytes through publication. RC10 is the accepted M8 release candidate.
-0.1.0      -> final source promotion after accepted RC10; must receive its own immutable v0.1.0 tag, full GitHub draft build, artifact review and manual publish-only transaction before it may be called published stable.
+0.1.0      -> publication and integrity pipeline passed, but real Windows runtime validation after publication revealed an immediate main-thread stack overflow, making the Windows desktop application unusable.
+0.1.1      -> Windows startup hotfix: bounded desktop-specific PE stack reserve, real desktop startup release smoke, and PE stack-policy verification.
 ```
 
 Every step requires a new source commit, matching `VERSION`, matching tag, and

@@ -10,7 +10,7 @@ describe("Manifest V3 generation", () => {
     expect(browserManifestVersion("0.1.0-rc.4")).toBe("0.1.0.30004");
     expect(browserManifestVersion("0.1.0-rc.5")).toBe("0.1.0.30005");
     expect(browserManifestVersion("0.1.0-rc.10")).toBe("0.1.0.30010");
-    expect(browserManifestVersion("0.1.0")).toBe("0.1.0.65535");
+    expect(browserManifestVersion("0.1.1")).toBe("0.1.1.65535");
   });
 
   test("browser store version mapping fails closed on invalid or unrepresentable input", () => {
@@ -39,8 +39,8 @@ describe("Manifest V3 generation", () => {
     const manifest = generateManifest("chromium");
     expect(manifest).toMatchObject({
       manifest_version: 3,
-      version: "0.1.0.65535",
-      version_name: "0.1.0",
+      version: "0.1.1.65535",
+      version_name: "0.1.1",
       permissions: ["activeTab", "scripting", "nativeMessaging"],
       optional_host_permissions: ["http://*/*", "https://*/*"],
       background: { service_worker: "background.js" },

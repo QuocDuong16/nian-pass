@@ -15,7 +15,8 @@ Forgejo canonical CI                   PASS / FAIL / NOT RUN
 GitHub release preflight              PASS / FAIL / NOT RUN
 
 Windows release build                 PASS / FAIL / NOT RUN
-Windows native process smoke          PASS / FAIL / NOT RUN
+Windows desktop startup smoke         PASS / FAIL / NOT RUN
+Windows Native Messaging host         PASS / FAIL / NOT RUN
 Windows full GUI runtime              PASS / FAIL / NOT RUN
 Windows Authenticode                  PASS / NOT CONFIGURED / NOT RUN
 

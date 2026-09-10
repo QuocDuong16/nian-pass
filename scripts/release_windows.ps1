@@ -14,6 +14,64 @@ function Set-ReleaseOutput([string] $Name, [string] $Value) {
     }
 }
 
+function Convert-PeInteger([string] $Value) {
+    $trimmed = $Value.Trim()
+    if ($trimmed -match '^0x([0-9a-fA-F]+)$') {
+        return [Convert]::ToUInt64($Matches[1], 16)
+    }
+    if ($trimmed -match '^[0-9]+$') {
+        return [Convert]::ToUInt64($trimmed, 10)
+    }
+    if ($trimmed -match '^[0-9a-fA-F]+$') {
+        return [Convert]::ToUInt64($trimmed, 16)
+    }
+    throw "Could not parse PE integer '$Value'"
+}
+
+function Get-PeStackReserve([string] $Binary) {
+    $dumpbin = Get-Command "dumpbin.exe" -ErrorAction SilentlyContinue
+    if ($dumpbin) {
+        $headers = (& $dumpbin.Source /headers $Binary 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw "dumpbin /headers failed with exit code $LASTEXITCODE" }
+        $match = [regex]::Match($headers, '(?im)^\s*([0-9a-f]+)\s+size of stack reserve\s*$')
+        if ($match.Success) { return Convert-PeInteger $match.Groups[1].Value }
+        throw "dumpbin /headers did not report SizeOfStackReserve for $Binary"
+    }
+
+    $llvmReadobj = Get-Command "llvm-readobj.exe" -ErrorAction SilentlyContinue
+    if (-not $llvmReadobj) { $llvmReadobj = Get-Command "llvm-readobj" -ErrorAction SilentlyContinue }
+    if (-not $llvmReadobj) { throw "Neither dumpbin nor llvm-readobj is available to inspect the Windows PE header" }
+    $headers = (& $llvmReadobj.Source --file-headers $Binary 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "llvm-readobj --file-headers failed with exit code $LASTEXITCODE" }
+    $match = [regex]::Match($headers, '(?im)^\s*SizeOfStackReserve:\s*(0x[0-9a-f]+|[0-9]+)\s*$')
+    if (-not $match.Success) { throw "llvm-readobj --file-headers did not report SizeOfStackReserve for $Binary" }
+    return Convert-PeInteger $match.Groups[1].Value
+}
+
+function Format-WindowsExitCode([int] $ExitCode) {
+    $raw = [BitConverter]::ToUInt32([BitConverter]::GetBytes($ExitCode), 0)
+    return "decimal $ExitCode (0x$($raw.ToString('X8')))"
+}
+
+function Test-DesktopStartup([string] $Binary) {
+    $process = Start-Process -FilePath $Binary -PassThru
+    Start-Sleep -Seconds 8
+    if ($process.HasExited) {
+        $formatted = Format-WindowsExitCode $process.ExitCode
+        $raw = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int] $process.ExitCode), 0)
+        if ($raw -eq 0xC00000FD) {
+            throw "Windows desktop startup failed with STATUS_STACK_OVERFLOW (0xC00000FD); exit code $formatted"
+        }
+        throw "Windows desktop startup failed unexpectedly; exit code $formatted"
+    }
+
+    [void] $process.CloseMainWindow()
+    if (-not $process.WaitForExit(5000)) {
+        Stop-Process -Id $process.Id -ErrorAction Stop
+        Wait-Process -Id $process.Id -ErrorAction Stop
+    }
+}
+
 function Show-PostBuildSourceDiagnostics {
     $status = (& git status --porcelain=v1 --untracked-files=all | Out-String).TrimEnd()
     if ($LASTEXITCODE -ne 0) {
@@ -58,9 +116,21 @@ $env:RELEASE_VERSION = (Get-Content -LiteralPath "VERSION" -Raw).Trim()
 Invoke-Checked "pnpm" @("--filter", "@nian-pass/desktop", "tauri", "build", "--ci", "--bundles", "nsis", "--target", "x86_64-pc-windows-msvc")
 Invoke-Checked "cargo" @("build", "--locked", "--release", "--target", "x86_64-pc-windows-msvc", "-p", "nian-pass-browser-host")
 
+$desktopBinary = Resolve-Path "target/x86_64-pc-windows-msvc/release/nian-pass-desktop.exe"
+$minimumDesktopStackReserve = [UInt64]8388608
+$actualDesktopStackReserve = Get-PeStackReserve $desktopBinary
+Write-Host "nian-pass-desktop.exe SizeOfStackReserve: $actualDesktopStackReserve bytes"
+if ($actualDesktopStackReserve -lt $minimumDesktopStackReserve) {
+    throw "nian-pass-desktop.exe SizeOfStackReserve $actualDesktopStackReserve bytes is below required $minimumDesktopStackReserve bytes"
+}
+Set-ReleaseOutput "desktop_pe_stack_reserve" "PASS"
+
+Test-DesktopStartup $desktopBinary
+Set-ReleaseOutput "desktop_startup_smoke" "PASS"
+
 $hostBinary = Resolve-Path "target/x86_64-pc-windows-msvc/release/nian-pass-browser-host.exe"
 Invoke-Checked $hostBinary @("--version")
-Set-ReleaseOutput "process_smoke" "PASS"
+Set-ReleaseOutput "native_messaging_host_smoke" "PASS"
 
 $signingValues = @(
     $windowsPfxBase64,

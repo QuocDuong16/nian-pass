@@ -584,7 +584,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     readFileSync(join(output, "release-manifest.json"), "utf8"),
   );
   assert.equal(manifest.artifacts.length, 12);
-  assert.equal(manifest.version, "0.1.0");
+  assert.equal(manifest.version, "0.1.1");
   assert.equal(manifest.releaseKind, "final");
   assert.equal(manifest.tag, "v0.1.0");
   assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
@@ -605,7 +605,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     !manifest.artifacts.some((artifact) => artifact.name === "SHA256SUMS"),
   );
   const sbom = JSON.parse(readFileSync(join(output, "sbom.cdx.json"), "utf8"));
-  assert.equal(sbom.metadata.component.version, "0.1.0");
+  assert.equal(sbom.metadata.component.version, "0.1.1");
   assert.deepEqual(
     sbom.components.map((component) => component.name),
     ["fixture-runtime"],
@@ -739,6 +739,8 @@ test("release assembly rejects canonical filename collisions", (t) => {
 test("release status keeps runtime and signing evidence distinct", () => {
   const statuses = releaseStatuses({
     WINDOWS_BUILD_STATUS: "PASS",
+    WINDOWS_DESKTOP_STARTUP_STATUS: "PASS",
+    WINDOWS_NATIVE_MESSAGING_HOST_STATUS: "PASS",
     WINDOWS_GUI_STATUS: "NOT RUN",
     WINDOWS_SIGNING_STATUS: "NOT CONFIGURED",
   });
@@ -749,6 +751,8 @@ test("release status keeps runtime and signing evidence distinct", () => {
     statuses,
   });
   assert.match(report, /Windows release build\s+PASS/);
+  assert.match(report, /Windows desktop startup smoke\s+PASS/);
+  assert.match(report, /Windows Native Messaging host\s+PASS/);
   assert.match(report, /Windows full GUI runtime\s+NOT RUN/);
   assert.match(report, /Windows Authenticode\s+NOT CONFIGURED/);
   assert.match(report, /Apple: M9\+ DEFERRED/);

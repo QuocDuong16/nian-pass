@@ -58,3 +58,41 @@ test("Windows release script emits bounded diagnostics before post-build rejecti
     /Show-PostBuildSourceDiagnostics\s*\r?\nInvoke-Checked "node" @\("scripts\/check_release_source\.mjs", "--postbuild"\)/,
   );
 });
+
+test("Windows release source verifies the desktop PE reserve and bounded startup", () => {
+  const repositoryRoot = resolve(import.meta.dirname, "../..");
+  const buildScript = readFileSync(
+    join(repositoryRoot, "apps/desktop/src-tauri/build.rs"),
+    "utf8",
+  );
+  const desktopMain = readFileSync(
+    join(repositoryRoot, "apps/desktop/src-tauri/src/main.rs"),
+    "utf8",
+  );
+  const script = readFileSync(join(repositoryRoot, "scripts/release_windows.ps1"), "utf8");
+
+  assert.match(buildScript, /CARGO_CFG_TARGET_OS/);
+  assert.match(buildScript, /CARGO_CFG_TARGET_ENV/);
+  assert.match(buildScript, /cargo:rustc-link-arg-bin=nian-pass-desktop=\/STACK:8388608/);
+  assert.doesNotMatch(buildScript, /RUST_MIN_STACK/);
+  assert.match(buildScript, /tauri_build::build\(\)/);
+  assert.match(desktopMain, /not\(debug_assertions\), target_os = "windows"/);
+  assert.match(desktopMain, /windows_subsystem = "windows"/);
+
+  assert.match(script, /Resolve-Path "target\/x86_64-pc-windows-msvc\/release\/nian-pass-desktop\.exe"/);
+  assert.match(script, /dumpbin/);
+  assert.match(script, /llvm-readobj/);
+  assert.match(script, /SizeOfStackReserve/);
+  assert.match(script, /\[UInt64\]8388608/);
+  assert.match(script, /Start-Process -FilePath \$Binary -PassThru/);
+  assert.match(script, /Start-Sleep -Seconds 8/);
+  assert.match(script, /STATUS_STACK_OVERFLOW \(0xC00000FD\)/);
+  assert.match(script, /decimal \$ExitCode \(0x\$\(\$raw\.ToString\('X8'\)\)\)/);
+  assert.match(script, /native_messaging_host_smoke/);
+  assert.doesNotMatch(script, /Set-ReleaseOutput "process_smoke"/);
+
+  const workflow = readFileSync(join(repositoryRoot, ".github/workflows/release.yml"), "utf8");
+  assert.match(workflow, /desktop_startup_smoke: \$\{\{ steps\.build\.outputs\.desktop_startup_smoke \}\}/);
+  assert.match(workflow, /native_messaging_host_smoke: \$\{\{ steps\.build\.outputs\.native_messaging_host_smoke \}\}/);
+  assert.match(workflow, /WINDOWS_GUI_STATUS: NOT RUN/);
+});
