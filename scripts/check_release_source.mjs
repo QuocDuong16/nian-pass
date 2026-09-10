@@ -336,6 +336,20 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/^permissions:\s*\n\s+contents:\s*read\s*$/m, "default permissions must be contents: read");
   require(/^    runs-on:\s*windows-2025\s*$/m, "must use windows-2025");
   require(/ref:\s*\$\{\{ inputs\.source_ref \}\}/, "checkout must use the selected source_ref");
+  require(/actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020[\s\S]*?node-version:\s*\$\{\{ env\.NODE_VERSION \}\}/, "must install NODE_VERSION with the production-pinned setup-node action");
+  const checkoutIndex = workflow.indexOf("uses: actions/checkout@");
+  const setupNodeIndex = workflow.indexOf("uses: actions/setup-node@");
+  const corepackIndex = workflow.indexOf("npm install --global");
+  const frozenLockfileIndex = workflow.indexOf("pnpm install --frozen-lockfile");
+  if (
+    checkoutIndex < 0 ||
+    setupNodeIndex < checkoutIndex ||
+    setupNodeIndex > corepackIndex ||
+    setupNodeIndex > frozenLockfileIndex
+  ) {
+    violations.push(`${workflowPath}: setup-node must run after checkout and before Corepack/pnpm use`);
+  }
+  require(/if \(\(node --version\)\.Trim\(\) -ne "v\$env:NODE_VERSION"\) \{ throw "Pinned Node is required" \}/, "must retain the exact Node version assertion");
   require(/git rev-parse HEAD/, "must record the checked-out commit SHA");
   require(/Get-Content -LiteralPath "VERSION"[\s\S]*?\$version -ne "0\.1\.1"/, "must record and require VERSION 0.1.1");
   require(/pnpm install --frozen-lockfile/, "must install the frozen lockfile");

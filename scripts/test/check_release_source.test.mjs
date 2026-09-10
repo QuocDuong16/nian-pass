@@ -442,6 +442,38 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
     /contents: read/,
   );
+  writeFileSync(
+    workflowPath,
+    workflow.replace(
+      '      - name: Install pinned Node\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: ${{ env.NODE_VERSION }}\n',
+      "",
+    ),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /production-pinned setup-node action/,
+  );
+  const setupNodeStep =
+    '      - name: Install pinned Node\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: ${{ env.NODE_VERSION }}\n';
+  writeFileSync(
+    workflowPath,
+    `${workflow.replace(setupNodeStep, "")}\n${setupNodeStep}`,
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /setup-node must run after checkout and before Corepack\/pnpm use/,
+  );
+  writeFileSync(
+    workflowPath,
+    workflow.replace(
+      "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+      "actions/setup-node@v4",
+    ),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /production-pinned setup-node action/,
+  );
   writeFileSync(workflowPath, workflow.replace("  workflow_dispatch:", "  push:\n    branches: [main]\n  workflow_dispatch:"));
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
