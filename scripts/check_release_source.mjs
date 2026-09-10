@@ -443,6 +443,11 @@ export function sourcePolicyViolations(root) {
     );
   }
   const windowsRelease = read(root, "scripts/release_windows.ps1");
+  const peStackReserveParser = existsSync(
+    resolve(root, "scripts/pe_stack_reserve.mjs"),
+  )
+    ? read(root, "scripts/pe_stack_reserve.mjs")
+    : "";
   if (
     !/Get-PeStackReserve/.test(windowsRelease) ||
     !/SizeOfStackReserve/.test(windowsRelease) ||
@@ -450,6 +455,11 @@ export function sourcePolicyViolations(root) {
     !/Test-DesktopStartup/.test(windowsRelease) ||
     !/Start-Process -FilePath \$Binary -PassThru/.test(windowsRelease) ||
     !/STATUS_STACK_OVERFLOW \(0xC00000FD\)/.test(windowsRelease) ||
+    !/Convert-PeStackReserve "dumpbin"/.test(windowsRelease) ||
+    !/Convert-PeStackReserve "llvm-readobj"/.test(windowsRelease) ||
+    !/parseDumpbinStackReserve/.test(peStackReserveParser) ||
+    !/BigInt\(`0x\$\{encoded\}`\)/.test(peStackReserveParser) ||
+    !/parseLlvmStackReserve/.test(peStackReserveParser) ||
     !/native_messaging_host_smoke/.test(windowsRelease) ||
     /Set-ReleaseOutput "process_smoke"/.test(windowsRelease)
   ) {

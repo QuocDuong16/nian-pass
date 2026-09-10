@@ -6,6 +6,17 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 
 import { pinnedRustVersion } from "../release_toolchain.mjs";
+import {
+  parseDumpbinStackReserve,
+  parseLlvmStackReserve,
+} from "../pe_stack_reserve.mjs";
+
+test("PE stack reserve parsers keep dumpbin hexadecimal distinct from LLVM formats", () => {
+  assert.equal(parseDumpbinStackReserve("100000"), 1048576n);
+  assert.equal(parseDumpbinStackReserve("800000"), 8388608n);
+  assert.equal(parseLlvmStackReserve("0x800000"), 8388608n);
+  assert.equal(parseLlvmStackReserve("8388608"), 8388608n);
+});
 
 test("Windows release Rust pin parser accepts LF, CRLF, and trailing horizontal whitespace", () => {
   for (const mise of [
@@ -82,6 +93,9 @@ test("Windows release source verifies the desktop PE reserve and bounded startup
   assert.match(script, /Resolve-Path "target\/x86_64-pc-windows-msvc\/release\/nian-pass-desktop\.exe"/);
   assert.match(script, /dumpbin/);
   assert.match(script, /llvm-readobj/);
+  assert.match(script, /Convert-PeStackReserve "dumpbin"/);
+  assert.match(script, /Convert-PeStackReserve "llvm-readobj"/);
+  assert.doesNotMatch(script, /function Convert-PeInteger/);
   assert.match(script, /SizeOfStackReserve/);
   assert.match(script, /\[UInt64\]8388608/);
   assert.match(script, /Start-Process -FilePath \$Binary -PassThru/);

@@ -14,18 +14,12 @@ function Set-ReleaseOutput([string] $Name, [string] $Value) {
     }
 }
 
-function Convert-PeInteger([string] $Value) {
-    $trimmed = $Value.Trim()
-    if ($trimmed -match '^0x([0-9a-fA-F]+)$') {
-        return [Convert]::ToUInt64($Matches[1], 16)
+function Convert-PeStackReserve([ValidateSet("dumpbin", "llvm-readobj")] [string] $Source, [string] $Value) {
+    $decoded = (& node "scripts/pe_stack_reserve.mjs" $Source $Value | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not ($decoded -match '^[0-9]+$')) {
+        throw "Could not parse $Source SizeOfStackReserve '$Value'"
     }
-    if ($trimmed -match '^[0-9]+$') {
-        return [Convert]::ToUInt64($trimmed, 10)
-    }
-    if ($trimmed -match '^[0-9a-fA-F]+$') {
-        return [Convert]::ToUInt64($trimmed, 16)
-    }
-    throw "Could not parse PE integer '$Value'"
+    return [Convert]::ToUInt64($decoded, 10)
 }
 
 function Get-PeStackReserve([string] $Binary) {
@@ -34,7 +28,7 @@ function Get-PeStackReserve([string] $Binary) {
         $headers = (& $dumpbin.Source /headers $Binary 2>&1 | Out-String)
         if ($LASTEXITCODE -ne 0) { throw "dumpbin /headers failed with exit code $LASTEXITCODE" }
         $match = [regex]::Match($headers, '(?im)^\s*([0-9a-f]+)\s+size of stack reserve\s*$')
-        if ($match.Success) { return Convert-PeInteger $match.Groups[1].Value }
+        if ($match.Success) { return Convert-PeStackReserve "dumpbin" $match.Groups[1].Value }
         throw "dumpbin /headers did not report SizeOfStackReserve for $Binary"
     }
 
@@ -45,7 +39,7 @@ function Get-PeStackReserve([string] $Binary) {
     if ($LASTEXITCODE -ne 0) { throw "llvm-readobj --file-headers failed with exit code $LASTEXITCODE" }
     $match = [regex]::Match($headers, '(?im)^\s*SizeOfStackReserve:\s*(0x[0-9a-f]+|[0-9]+)\s*$')
     if (-not $match.Success) { throw "llvm-readobj --file-headers did not report SizeOfStackReserve for $Binary" }
-    return Convert-PeInteger $match.Groups[1].Value
+    return Convert-PeStackReserve "llvm-readobj" $match.Groups[1].Value
 }
 
 function Format-WindowsExitCode([int] $ExitCode) {
@@ -67,8 +61,11 @@ function Test-DesktopStartup([string] $Binary) {
 
     [void] $process.CloseMainWindow()
     if (-not $process.WaitForExit(5000)) {
-        Stop-Process -Id $process.Id -ErrorAction Stop
-        Wait-Process -Id $process.Id -ErrorAction Stop
+        $process.Refresh()
+        if (-not $process.HasExited) {
+            Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
+            Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
+        }
     }
 }
 
