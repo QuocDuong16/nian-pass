@@ -101,6 +101,7 @@ function workflowFixture(t, workflow, prefix = "nian-pass-workflow-policy-") {
     "release_publish_transaction.mjs",
     "release_execution_mode.mjs",
     "release_artifacts.mjs",
+    "github_release_state.mjs",
   ]) {
     writeFileSync(
       join(root, "scripts", name),
@@ -533,6 +534,20 @@ test("GitHub release workflow policy rejects floating actions and branch trigger
   assert.match(violations, /must trigger on v\* tags/);
 });
 
+test("GitHub release workflow policy rejects published-release-by-tag draft discovery", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  ).replace(
+    'gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | node scripts/github_release_state.mjs tsv',
+    'gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"',
+  );
+  const root = workflowFixture(t, workflow, "nian-pass-draft-discovery-policy-");
+  const violations = githubReleaseWorkflowViolations(root).join("\n");
+  assert.match(violations, /published-release-by-tag discovery cannot resolve drafts/);
+});
+
 test("GitHub release workflow policy rejects publication authority bypasses", (t) => {
   const projectRoot = resolve(import.meta.dirname, "../..");
   const root = mkdtempSync(join(tmpdir(), "nian-pass-publication-workflow-"));
@@ -604,17 +619,18 @@ test("GitHub release workflow policy rejects publish-only rebuilds and broad pay
   const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8")
     .replaceAll("if: ${{ needs.preflight.outputs.build_mode == 'true' }}", "")
     .replace(
-      'gh release download "${RELEASE_TAG}" --dir release',
+      'gh api -H \'Accept: application/octet-stream\' "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"',
       ': current-run artifacts are enough',
     )
     .replace(
-      'gh release upload "${RELEASE_TAG}" --clobber "${candidate_metadata[@]}"',
-      'gh release upload "${RELEASE_TAG}" --clobber release-publish-candidate/*',
+      'release_upload "${candidate_metadata[@]}"',
+      'release_upload release-publish-candidate/*',
     );
   writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
   for (const name of [
     "release_publication.mjs",
     "release_publish_transaction.mjs",
+    "github_release_state.mjs",
   ]) {
     writeFileSync(
       join(root, "scripts", name),
@@ -648,13 +664,17 @@ test("GitHub release workflow policy rejects hard-coded prerelease metadata", (t
       "if true; then",
     )
     .replace(
-      'gh release edit "${RELEASE_TAG}" --draft=false "--prerelease=${RELEASE_IS_PRERELEASE}"',
-      'gh release edit "${RELEASE_TAG}" --draft=false --prerelease=true',
+      'draft: false, prerelease: process.argv[1] === "true"',
+      'draft: false, prerelease: true',
     );
   writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
   writeFileSync(
     join(root, "scripts/release_publication.mjs"),
     readFileSync(join(projectRoot, "scripts/release_publication.mjs"), "utf8"),
+  );
+  writeFileSync(
+    join(root, "scripts/github_release_state.mjs"),
+    readFileSync(join(projectRoot, "scripts/github_release_state.mjs"), "utf8"),
   );
 
   const violations = githubReleaseWorkflowViolations(root).join("\n");

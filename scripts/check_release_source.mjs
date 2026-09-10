@@ -137,17 +137,21 @@ export function githubReleaseWorkflowViolations(root) {
   require(/^  publish:[\s\S]*?^    needs: \[preflight, linux, windows, browser, android, gateway, attest\][\s\S]*?^    if: \$\{\{ always\(\) && needs\.preflight\.result == 'success' && \(needs\.preflight\.outputs\.build_mode == 'false' \|\| needs\.attest\.result == 'success'\) \}\}/m, "publish-only mode must not be skipped because build jobs are intentionally skipped");
   require(/RELEASE_KIND:\s*\$\{\{ needs\.preflight\.outputs\.release_kind \}\}/, "publish job must use the preflight release classification");
   require(/if test "\$\{RELEASE_IS_PRERELEASE\}" = "true"; then[\s\S]*?create_args\+=\(--prerelease\)/, "draft creation must mark only source-classified prereleases");
-  require(/--draft=false "--prerelease=\$\{RELEASE_IS_PRERELEASE\}"/, "publication must preserve the source-derived prerelease flag");
+  require(/release_publish\(\)[\s\S]*?draft: false, prerelease: process\.argv\[1\] === "true"/, "publication must preserve the source-derived prerelease flag");
   require(/test "\$\(git rev-parse HEAD\)" = "\$\{RELEASE_COMMIT\}"[\s\S]*?node scripts\/release_publication\.mjs/, "publish job must verify the preflight commit before publication policy");
   require(/PUBLISH_RELEASE:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.publish \|\| false \}\}/, "tag-push release runs must remain draft-only");
   require(/FORGEJO_CI_STATUS:\s*\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.forgejo_ci_status \|\| 'NOT RUN' \}\}/, "publication policy must receive the operator-observed Forgejo CI status");
   require(/Download current-run canonical release set for draft staging\n\s+if: \$\{\{ needs\.preflight\.outputs\.build_mode == 'true' \}\}[\s\S]*?actions\/download-artifact@/, "only build/stage mode may use current-run Actions artifacts");
-  require(/Download existing validated GitHub draft assets for publication\n\s+if: \$\{\{ steps\.publication\.outputs\.action == 'UPDATE_AND_PUBLISH' \}\}[\s\S]*?gh release download "\$\{RELEASE_TAG\}" --dir release/, "publish=true must download assets from the existing GitHub draft");
+  require(/Download existing validated GitHub draft assets for publication\n\s+if: \$\{\{ steps\.publication\.outputs\.action == 'UPDATE_AND_PUBLISH' \}\}[\s\S]*?RELEASE_ID: \$\{\{ steps\.publication\.outputs\.release_id \}\}[\s\S]*?gh api -H 'Accept: application\/octet-stream' "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/assets\/\$\{asset_id\}"/, "publish=true must download assets from the existing GitHub draft by resolved release ID");
   require(/cp -a -- release release-publish-candidate/, "publication must retain an exact local DRAFT snapshot before PASS candidate generation");
   require(/RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release" node scripts\/release_artifacts\.mjs validate-snapshot[\s\S]*?FORGEJO_CI_STATUS="\$\{FORGEJO_CI_STATUS\}" ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release-publish-candidate" node scripts\/release_artifacts\.mjs publication-status PASS[\s\S]*?RELEASE_PUBLICATION_STATUS=PASS[\s\S]*?validate-snapshot[\s\S]*?publication-candidate/, "publication must validate the downloaded DRAFT and isolated PASS candidate with observed Forgejo PASS");
-  require(/read_release_state\)[\s\S]*?pre-mutation[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber "\$\{candidate_metadata\[@\]\}"/, "candidate upload must recheck the observed remote draft state and mutate metadata only");
-  require(/gh release edit "\$\{RELEASE_TAG\}" --draft=false[\s\S]*?read_release_state\)[\s\S]*?outcome/, "publication outcome must be determined from a post-publish remote-state observation");
-  require(/restore_draft_or_fail\(\)[\s\S]*?read_release_state\)[\s\S]*?rollback[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?gh release upload "\$\{RELEASE_TAG\}" --clobber release\/release-status\.md release\/release-manifest\.json release\/SHA256SUMS/, "draft rollback must recheck state and restore only the verified DRAFT metadata");
+  require(/read_release_state\)[\s\S]*?pre-mutation[\s\S]*?release_upload "\$\{candidate_metadata\[@\]\}"/, "candidate upload must recheck the observed remote draft state and mutate metadata only");
+  require(/release_publish[\s\S]*?read_release_state\)[\s\S]*?outcome/, "publication outcome must be determined from a post-publish remote-state observation");
+  require(/restore_draft_or_fail\(\)[\s\S]*?read_release_state\)[\s\S]*?rollback[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?release_upload release\/release-status\.md release\/release-manifest\.json release\/SHA256SUMS/, "draft rollback must recheck state and restore only the verified DRAFT metadata");
+  require(/gh api --paginate --slurp "repos\/\$\{GITHUB_REPOSITORY\}\/releases" \| node scripts\/github_release_state\.mjs tsv/, "publication discovery must list paginated releases through the tested draft-aware resolver");
+  if (/releases\/tags\/\$\{RELEASE_TAG\}/.test(workflow)) {
+    violations.push(`${githubWorkflow}: published-release-by-tag discovery cannot resolve drafts`);
+  }
   require(/candidate_stage_exit[\s\S]*?restore_draft_or_fail[\s\S]*?PASS candidate staging failed/, "partial PASS candidate staging must restore the DRAFT snapshot or fail without further mutation");
 
   const publicationHelper = "scripts/release_publication.mjs";
@@ -187,6 +191,19 @@ export function githubReleaseWorkflowViolations(root) {
       violations.push(
         `${publicationHelper}: publish=true must require an existing validated draft release`,
       );
+    }
+  }
+
+  const githubReleaseStateHelper = "scripts/github_release_state.mjs";
+  if (!existsSync(resolve(root, githubReleaseStateHelper))) {
+    violations.push(`${githubReleaseStateHelper}: draft-aware release resolver is missing`);
+  } else {
+    const helper = read(root, githubReleaseStateHelper);
+    if (!/tag_name === tag/.test(helper) || !/matches\.length !== 1/.test(helper)) {
+      violations.push(`${githubReleaseStateHelper}: exact release tag matching must fail closed`);
+    }
+    if (!/target_commitish !== commit/.test(helper) || !/prerelease !== prerelease/.test(helper)) {
+      violations.push(`${githubReleaseStateHelper}: release target and prerelease must bind to the source`);
     }
   }
 

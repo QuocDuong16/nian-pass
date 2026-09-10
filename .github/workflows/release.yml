@@ -477,31 +477,34 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "${RELEASE_COMMIT}"
-          error_file="$(mktemp)"
-          trap 'rm -f -- "${error_file}"' EXIT
-          if existing_metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv' 2>"${error_file}")"; then
-            IFS=$'\t' read -r existing_draft existing_prerelease <<< "${existing_metadata}"
-            if test "${existing_draft}" = "true"; then
-              release_state="draft"
-            else
-              release_state="published"
-            fi
-          elif grep -Fq '(HTTP 404)' "${error_file}"; then
-            release_state="none"
-            existing_prerelease=""
-          else
-            cat "${error_file}" >&2
-            exit 1
-          fi
+          existing_metadata="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | node scripts/github_release_state.mjs tsv)"
+          IFS=$'\t' read -r release_state existing_prerelease release_id release_target_commitish <<< "${existing_metadata}"
           publication_action="$(EXISTING_RELEASE_STATE="${release_state}" EXISTING_RELEASE_PRERELEASE="${existing_prerelease}" node scripts/release_publication.mjs)"
           printf 'action=%s\n' "${publication_action}" >> "${GITHUB_OUTPUT}"
+          printf 'release_id=%s\n' "${release_id}" >> "${GITHUB_OUTPUT}"
       - name: Download existing validated GitHub draft assets for publication
         if: ${{ steps.publication.outputs.action == 'UPDATE_AND_PUBLISH' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.publication.outputs.release_id }}
         run: |
           set -Eeuo pipefail
-          gh release download "${RELEASE_TAG}" --dir release
+          test -n "${RELEASE_ID}"
+          mkdir -p release
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" |
+            node -e '
+              const pages = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+              const assets = pages.every(Array.isArray) ? pages.flat() : pages;
+              if (!Array.isArray(assets)) throw new Error("release assets response is malformed");
+              for (const asset of assets) {
+                if (!Number.isSafeInteger(asset?.id) || asset.id <= 0 || typeof asset.name !== "string" || !asset.name || asset.name.includes("/") || asset.name === "." || asset.name === "..") throw new Error("release asset metadata is malformed");
+                process.stdout.write(`${asset.id}\t${Buffer.from(asset.name).toString("base64")}\n`);
+              }
+            ' |
+            while IFS=$'\t' read -r asset_id encoded_name; do
+              asset_name="$(node -e 'process.stdout.write(Buffer.from(process.argv[1], "base64").toString("utf8"))' "${encoded_name}")"
+              gh api -H 'Accept: application/octet-stream' "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "release/${asset_name}"
+            done
       - name: Verify and stage GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -511,20 +514,53 @@ jobs:
           RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
           RELEASE_KIND: ${{ needs.preflight.outputs.release_kind }}
           RELEASE_IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
+          RELEASE_ID: ${{ steps.publication.outputs.release_id }}
         run: |
           set -Eeuo pipefail
           (cd release && sha256sum --check SHA256SUMS)
 
           read_release_state() {
-            local metadata draft prerelease
-            if ! metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '[.draft, .prerelease] | @tsv')"; then
-              return 1
-            fi
-            IFS=$'\t' read -r draft prerelease <<< "${metadata}"
-            case "${draft}:${prerelease}" in
-              true:true|true:false|false:true|false:false) printf '%s\t%s\n' "${draft}" "${prerelease}" ;;
+            local metadata state prerelease release_id target_commitish draft
+            metadata="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | node scripts/github_release_state.mjs tsv)"
+            IFS=$'\t' read -r state prerelease release_id target_commitish <<< "${metadata}"
+            test "${release_id}" = "${RELEASE_ID}"
+            case "${state}:${prerelease}" in
+              draft:true|draft:false) printf 'true\t%s\n' "${prerelease}" ;;
+              published:true|published:false) printf 'false\t%s\n' "${prerelease}" ;;
               *) return 1 ;;
             esac
+          }
+
+          release_upload() {
+            local asset asset_name encoded_name existing_asset_id
+            for asset in "$@"; do
+              test -f "${asset}"
+              asset_name="$(basename -- "${asset}")"
+              existing_asset_id="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" | node -e '
+                const name = process.argv[1];
+                const pages = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+                const assets = pages.every(Array.isArray) ? pages.flat() : pages;
+                if (!Array.isArray(assets)) throw new Error("release assets response is malformed");
+                const matches = assets.filter((asset) => asset?.name === name);
+                if (matches.length > 1 || matches.some((asset) => !Number.isSafeInteger(asset.id) || asset.id <= 0)) throw new Error("release asset identity is ambiguous");
+                if (matches.length === 1) process.stdout.write(String(matches[0].id));
+              ' "${asset_name}")"
+              if test -n "${existing_asset_id}"; then
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}"
+              fi
+              encoded_name="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "${asset_name}")"
+              gh api --method POST "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" --input "${asset}"
+            done
+          }
+
+          release_edit_notes() {
+            node -e 'process.stdout.write(JSON.stringify({ body: require("node:fs").readFileSync(process.argv[1], "utf8") }))' "$1" |
+              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --input -
+          }
+
+          release_publish() {
+            node -e 'process.stdout.write(JSON.stringify({ draft: false, prerelease: process.argv[1] === "true" }))' "${RELEASE_IS_PRERELEASE}" |
+              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --input -
           }
 
           transaction_action() {
@@ -548,11 +584,11 @@ jobs:
               echo "Validated DRAFT snapshot checksum verification failed; refusing rollback." >&2
               return 1
             fi
-            if ! gh release upload "${RELEASE_TAG}" --clobber release/release-status.md release/release-manifest.json release/SHA256SUMS; then
+            if ! release_upload release/release-status.md release/release-manifest.json release/SHA256SUMS; then
               echo "DRAFT snapshot metadata restore failed; manual inspection required." >&2
               return 1
             fi
-            if ! gh release edit "${RELEASE_TAG}" --notes-file release/release-status.md; then
+            if ! release_edit_notes release/release-status.md; then
               echo "DRAFT snapshot notes restore failed; manual inspection required." >&2
               return 1
             fi
@@ -585,8 +621,8 @@ jobs:
                   ;;
                 *) exit 1 ;;
               esac
-              gh release upload "${RELEASE_TAG}" --clobber release/*
-              gh release edit "${RELEASE_TAG}" --notes-file release/release-status.md
+              release_upload release/*
+              release_edit_notes release/release-status.md
               ;;
             UPDATE_AND_PUBLISH)
               RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="${GITHUB_WORKSPACE}/release" node scripts/release_artifacts.mjs validate-snapshot
@@ -620,10 +656,10 @@ jobs:
               esac
 
               set +e
-              gh release upload "${RELEASE_TAG}" --clobber "${candidate_metadata[@]}"
+              release_upload "${candidate_metadata[@]}"
               candidate_stage_exit=$?
               if test "${candidate_stage_exit}" -eq 0; then
-                gh release edit "${RELEASE_TAG}" --notes-file release-publish-candidate/release-status.md
+                release_edit_notes release-publish-candidate/release-status.md
                 candidate_stage_exit=$?
               fi
               set -e
@@ -634,7 +670,7 @@ jobs:
                 exit 1
               fi
               set +e
-              gh release edit "${RELEASE_TAG}" --draft=false "--prerelease=${RELEASE_IS_PRERELEASE}"
+              release_publish
               publish_exit=$?
               set -e
 
