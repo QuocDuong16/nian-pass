@@ -317,6 +317,44 @@ function checkCargoPins(root, violations) {
   }
 }
 
+const desktopCargoManifest = "apps/desktop/src-tauri/Cargo.toml";
+
+export function cargoTomlEolPolicyViolations(root) {
+  if (!existsSync(resolve(root, ".gitattributes"))) {
+    return [".gitattributes: deterministic Cargo.toml LF policy is missing"];
+  }
+  const result = spawnSync(
+    "git",
+    ["check-attr", "text", "eol", "--", desktopCargoManifest],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    return ["could not inspect Git attributes for apps/desktop/src-tauri/Cargo.toml"];
+  }
+  const attributes = new Map(
+    result.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const match = /^.+: (text|eol): (.+)$/.exec(line);
+        return match ? [match[1], match[2]] : ["", ""];
+      }),
+  );
+  const violations = [];
+  if (attributes.get("text") !== "set") {
+    violations.push(
+      "apps/desktop/src-tauri/Cargo.toml: Git text attribute must be set",
+    );
+  }
+  if (attributes.get("eol") !== "lf") {
+    violations.push(
+      "apps/desktop/src-tauri/Cargo.toml: Git eol attribute must be lf",
+    );
+  }
+  return violations;
+}
+
 export function sourcePolicyViolations(root) {
   const violations = [];
   let version;
@@ -426,6 +464,7 @@ export function sourcePolicyViolations(root) {
     if (!existsSync(resolve(root, lockfile)))
       violations.push(`${lockfile}: release lockfile is missing`);
   }
+  violations.push(...cargoTomlEolPolicyViolations(root));
   const androidBuild = read(
     root,
     "apps/desktop/src-tauri/gen/android/app/build.gradle.kts",

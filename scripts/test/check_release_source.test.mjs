@@ -13,10 +13,12 @@ import { test } from "node:test";
 
 import {
   dirtyTreeViolation,
+  cargoTomlEolPolicyViolations,
   githubReleaseWorkflowViolations,
   isExactVersion,
   normalizePolicyText,
   postBuildSourceViolations,
+  sourcePolicyViolations,
   tagIdentityViolation,
   tagViolation,
 } from "../check_release_source.mjs";
@@ -74,6 +76,15 @@ function checkoutWithAutocrlf(root) {
   git(checkout, "config", "core.autocrlf", "true");
   git(checkout, "config", "core.eol", "crlf");
   return checkout;
+}
+
+function sourcePolicyFixture(t) {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-source-policy-"));
+  rmSync(root, { recursive: true, force: true });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(projectRoot, "clone", "--quiet", projectRoot, root);
+  return root;
 }
 
 function workflowFixture(t, workflow, prefix = "nian-pass-workflow-policy-") {
@@ -167,6 +178,33 @@ test("dirty-tree rejection exercises Git state", (t) => {
   writeFileSync(join(root, "source/change.txt"), "dirty\n");
   assert.match(dirtyTreeViolation(root), /uncommitted changes/);
   assert.match(dirtyTreeViolation(root), /\?\? source\/change\.txt/);
+});
+
+test("actual repository has the effective deterministic Cargo.toml LF policy", () => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  assert.deepEqual(cargoTomlEolPolicyViolations(projectRoot), []);
+  assert.deepEqual(
+    git(projectRoot, "check-attr", "text", "eol", "--", "apps/desktop/src-tauri/Cargo.toml").split("\n"),
+    [
+      "apps/desktop/src-tauri/Cargo.toml: text: set",
+      "apps/desktop/src-tauri/Cargo.toml: eol: lf",
+    ],
+  );
+});
+
+test("source policy rejects absent or non-LF Cargo.toml attributes", (t) => {
+  const cases = [
+    ["missing attributes", null, /\.gitattributes: deterministic Cargo\.toml LF policy is missing/],
+    ["CRLF attribute", "apps/desktop/src-tauri/Cargo.toml text eol=crlf\n", /Git eol attribute must be lf/],
+    ["missing EOL attribute", "apps/desktop/src-tauri/Cargo.toml text\n", /Git eol attribute must be lf/],
+  ];
+  for (const [name, attributes, expected] of cases) {
+    const root = sourcePolicyFixture(t);
+    const path = join(root, ".gitattributes");
+    if (attributes === null) rmSync(path);
+    else writeFileSync(path, attributes);
+    assert.match(sourcePolicyViolations(root).join("\n"), expected, name);
+  }
 });
 
 test("Cargo.toml has a deterministic LF checkout under Windows autocrlf", (t) => {
