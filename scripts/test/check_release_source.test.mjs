@@ -102,6 +102,7 @@ function workflowFixture(t, workflow, prefix = "nian-pass-workflow-policy-") {
     "release_execution_mode.mjs",
     "release_artifacts.mjs",
     "github_release_state.mjs",
+    "github_release_identity.mjs",
   ]) {
     writeFileSync(
       join(root, "scripts", name),
@@ -562,9 +563,23 @@ test("GitHub release workflow policy rejects unsafe release asset and metadata H
     );
   const root = workflowFixture(t, workflow, "nian-pass-release-http-policy-");
   const violations = githubReleaseWorkflowViolations(root).join("\n");
-  assert.match(violations, /explicit binary Content-Type and raw body/);
-  assert.match(violations, /release notes PATCH must use typed JSON fields/);
-  assert.match(violations, /release publication PATCH must use typed JSON fields/);
+  assert.match(violations, /explicit binary Content-Type, raw body, and suppress successful response noise/);
+  assert.match(violations, /release notes PATCH must bind source tag\/commit and validate its draft response/);
+  assert.match(violations, /release publication PATCH must bind source tag\/commit and validate its published response/);
+});
+
+test("GitHub release workflow policy rejects unpinned mutation and tag rediscovery", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8")
+    .replace('-F "tag_name=${RELEASE_TAG}" \\\n              -F "target_commitish=${RELEASE_COMMIT}" \\\n              -F "body=@$1"', '-F "body=@$1"')
+    .replace(
+      'gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" | node scripts/github_release_identity.mjs tsv',
+      'gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | node scripts/github_release_state.mjs tsv',
+    );
+  const root = workflowFixture(t, workflow, "nian-pass-release-identity-policy-");
+  const violations = githubReleaseWorkflowViolations(root).join("\n");
+  assert.match(violations, /release notes PATCH must bind source tag\/commit and validate its draft response/);
+  assert.match(violations, /transactional release observation must use the resolved numeric release ID and validate exact identity/);
 });
 
 test("GitHub release workflow policy rejects publication authority bypasses", (t) => {

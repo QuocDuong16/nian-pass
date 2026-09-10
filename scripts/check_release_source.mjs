@@ -146,12 +146,13 @@ export function githubReleaseWorkflowViolations(root) {
   require(/cp -a -- release release-publish-candidate/, "publication must retain an exact local DRAFT snapshot before PASS candidate generation");
   require(/RELEASE_PUBLICATION_STATUS=DRAFT ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release" node scripts\/release_artifacts\.mjs validate-snapshot[\s\S]*?FORGEJO_CI_STATUS="\$\{FORGEJO_CI_STATUS\}" ARTIFACT_DIR="\$\{GITHUB_WORKSPACE\}\/release-publish-candidate" node scripts\/release_artifacts\.mjs publication-status PASS[\s\S]*?RELEASE_PUBLICATION_STATUS=PASS[\s\S]*?validate-snapshot[\s\S]*?publication-candidate/, "publication must validate the downloaded DRAFT and isolated PASS candidate with observed Forgejo PASS");
   require(/read_release_state\)[\s\S]*?pre-mutation[\s\S]*?release_upload "\$\{candidate_metadata\[@\]\}"/, "candidate upload must recheck the observed remote draft state and mutate metadata only");
-  require(/release_upload\(\)[\s\S]*?gh api --method POST[\s\S]*?-H 'Accept: application\/vnd\.github\+json'[\s\S]*?-H 'Content-Type: application\/octet-stream'[\s\S]*?uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}[\s\S]*?--input "\$\{asset\}"/, "release asset upload must send an explicit binary Content-Type and raw body by release ID");
-  require(/release_edit_notes\(\)[\s\S]*?gh api --method PATCH[\s\S]*?-H 'Accept: application\/vnd\.github\+json'[\s\S]*?-F "body=@\$1"/, "release notes PATCH must use typed JSON fields");
-  require(/release_publish\(\)[\s\S]*?gh api --method PATCH[\s\S]*?-H 'Accept: application\/vnd\.github\+json'[\s\S]*?-F draft=false[\s\S]*?-F "prerelease=\$\{RELEASE_IS_PRERELEASE\}"/, "release publication PATCH must use typed JSON fields");
+  require(/release_upload\(\)[\s\S]*?gh api --method POST[\s\S]*?--silent[\s\S]*?-H 'Accept: application\/vnd\.github\+json'[\s\S]*?-H 'Content-Type: application\/octet-stream'[\s\S]*?uploads\.github\.com\/repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}\/assets\?name=\$\{encoded_name\}[\s\S]*?--input "\$\{asset\}"/, "release asset upload must send an explicit binary Content-Type, raw body, and suppress successful response noise by release ID");
+  require(/release_edit_notes\(\)[\s\S]*?response="\$\(gh api --method PATCH[\s\S]*?-H 'Accept: application\/vnd\.github\+json'[\s\S]*?-F "tag_name=\$\{RELEASE_TAG\}"[\s\S]*?-F "target_commitish=\$\{RELEASE_COMMIT\}"[\s\S]*?-F "body=@\$1"\)"[\s\S]*?EXPECTED_RELEASE_DRAFT=true node scripts\/github_release_identity\.mjs/, "release notes PATCH must bind source tag/commit and validate its draft response");
+  require(/release_publish\(\)[\s\S]*?response="\$\(gh api --method PATCH[\s\S]*?-H 'Accept: application\/vnd\.github\+json'[\s\S]*?-F "tag_name=\$\{RELEASE_TAG\}"[\s\S]*?-F "target_commitish=\$\{RELEASE_COMMIT\}"[\s\S]*?-F draft=false[\s\S]*?-F "prerelease=\$\{RELEASE_IS_PRERELEASE\}"\)"[\s\S]*?EXPECTED_RELEASE_DRAFT=false REQUIRE_PUBLISHED_AT=true node scripts\/github_release_identity\.mjs/, "release publication PATCH must bind source tag/commit and validate its published response");
   require(/release_publish[\s\S]*?read_release_state\)[\s\S]*?outcome/, "publication outcome must be determined from a post-publish remote-state observation");
   require(/restore_draft_or_fail\(\)[\s\S]*?read_release_state\)[\s\S]*?rollback[\s\S]*?\(cd release && sha256sum --check SHA256SUMS\)[\s\S]*?release_upload release\/release-status\.md release\/release-manifest\.json release\/SHA256SUMS/, "draft rollback must recheck state and restore only the verified DRAFT metadata");
   require(/gh api --paginate --slurp "repos\/\$\{GITHUB_REPOSITORY\}\/releases" \| node scripts\/github_release_state\.mjs tsv/, "publication discovery must list paginated releases through the tested draft-aware resolver");
+  require(/read_release_state\(\)[\s\S]*?gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}" \| node scripts\/github_release_identity\.mjs tsv/, "transactional release observation must use the resolved numeric release ID and validate exact identity");
   if (/releases\/tags\/\$\{RELEASE_TAG\}/.test(workflow)) {
     violations.push(`${githubWorkflow}: published-release-by-tag discovery cannot resolve drafts`);
   }
@@ -207,6 +208,19 @@ export function githubReleaseWorkflowViolations(root) {
     }
     if (!/target_commitish !== commit/.test(helper) || !/prerelease !== prerelease/.test(helper)) {
       violations.push(`${githubReleaseStateHelper}: release target and prerelease must bind to the source`);
+    }
+  }
+
+  const githubReleaseIdentityHelper = "scripts/github_release_identity.mjs";
+  if (!existsSync(resolve(root, githubReleaseIdentityHelper))) {
+    violations.push(`${githubReleaseIdentityHelper}: release-ID identity resolver is missing`);
+  } else {
+    const helper = read(root, githubReleaseIdentityHelper);
+    if (!/release tag identity drift/.test(helper) || !/release commit identity drift/.test(helper)) {
+      violations.push(`${githubReleaseIdentityHelper}: release-ID observation must fail closed on tag or commit drift`);
+    }
+    if (!/release ID identity drift/.test(helper) || !/release prerelease identity drift/.test(helper)) {
+      violations.push(`${githubReleaseIdentityHelper}: release-ID observation must validate numeric ID and prerelease class`);
     }
   }
 

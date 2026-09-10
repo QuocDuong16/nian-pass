@@ -182,7 +182,8 @@ Release candidates are immutable generations, not mutable labels:
 0.1.0-rc.6 -> Kotlin transient state fixed and Android path hardened; Windows completed NSIS/native-host generation, but post-build validation detected a tracked `apps/desktop/src-tauri/Cargo.toml` mutation.
 0.1.0-rc.7 -> all platform builds and draft staging passed; manual publication failed because discovery used GitHub's published-release-by-tag endpoint and classified the existing draft as absent.
 0.1.0-rc.8 -> all platform builds and draft staging passed; manual publication failed because GitHub Release normalized space-containing native asset filenames from `Nian Pass_...` to `Nian.Pass_...` while SHA256SUMS retained the original names.
-0.1.0-rc.9 -> canonical GitHub-stable release asset filenames before integrity metadata generation and upload.
+0.1.0-rc.9 -> all platform builds, canonical filename handling, draft validation, PASS candidate generation, and metadata upload passed. The GitHub Release metadata PATCH caused the numeric release object's `tag_name` to drift from `v0.1.0-rc.9` to an `untagged-*` synthetic name. The following publish PATCH did publish the release, but post-publication identity verification correctly refused to classify the wrong-tag release as valid.
+0.1.0-rc.10 -> explicit release tag/commit binding on every metadata PATCH and release-ID-authoritative transactional state observation.
 0.1.0      -> final only after the accepted RC
 ```
 

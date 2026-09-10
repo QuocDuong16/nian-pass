@@ -520,15 +520,13 @@ jobs:
           (cd release && sha256sum --check SHA256SUMS)
 
           read_release_state() {
-            local metadata state prerelease release_id target_commitish draft
-            metadata="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | node scripts/github_release_state.mjs tsv)"
-            IFS=$'\t' read -r state prerelease release_id target_commitish <<< "${metadata}"
+            local metadata draft prerelease release_id tag target_commitish
+            metadata="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" | node scripts/github_release_identity.mjs tsv)"
+            IFS=$'\t' read -r draft prerelease release_id tag target_commitish <<< "${metadata}"
             test "${release_id}" = "${RELEASE_ID}"
-            case "${state}:${prerelease}" in
-              draft:true|draft:false) printf 'true\t%s\n' "${prerelease}" ;;
-              published:true|published:false) printf 'false\t%s\n' "${prerelease}" ;;
-              *) return 1 ;;
-            esac
+            test "${tag}" = "${RELEASE_TAG}"
+            test "${target_commitish}" = "${RELEASE_COMMIT}"
+            printf '%s\t%s\n' "${draft}" "${prerelease}"
           }
 
           release_upload() {
@@ -546,10 +544,11 @@ jobs:
                 if (matches.length === 1) process.stdout.write(String(matches[0].id));
               ' "${asset_name}")"
               if test -n "${existing_asset_id}"; then
-                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}"
+                gh api --method DELETE --silent "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}"
               fi
               encoded_name="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "${asset_name}")"
               gh api --method POST \
+                --silent \
                 -H 'Accept: application/vnd.github+json' \
                 -H 'Content-Type: application/octet-stream' \
                 "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" \
@@ -558,18 +557,26 @@ jobs:
           }
 
           release_edit_notes() {
-            gh api --method PATCH \
+            local response
+            response="$(gh api --method PATCH \
               -H 'Accept: application/vnd.github+json' \
               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-              -F "body=@$1"
+              -F "tag_name=${RELEASE_TAG}" \
+              -F "target_commitish=${RELEASE_COMMIT}" \
+              -F "body=@$1")"
+            printf '%s' "${response}" | EXPECTED_RELEASE_DRAFT=true node scripts/github_release_identity.mjs >/dev/null
           }
 
           release_publish() {
-            gh api --method PATCH \
+            local response
+            response="$(gh api --method PATCH \
               -H 'Accept: application/vnd.github+json' \
               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -F "tag_name=${RELEASE_TAG}" \
+              -F "target_commitish=${RELEASE_COMMIT}" \
               -F draft=false \
-              -F "prerelease=${RELEASE_IS_PRERELEASE}"
+              -F "prerelease=${RELEASE_IS_PRERELEASE}")"
+            printf '%s' "${response}" | EXPECTED_RELEASE_DRAFT=false REQUIRE_PUBLISHED_AT=true node scripts/github_release_identity.mjs >/dev/null
           }
 
           transaction_action() {
