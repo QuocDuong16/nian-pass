@@ -1,0 +1,130 @@
+name: Windows runtime diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch, commit, or tag to validate
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "26.7.0"
+  PNPM_VERSION: "11.22.0"
+  COREPACK_VERSION: "0.35.0"
+  RUST_VERSION: "1.98.0"
+
+jobs:
+  diagnostic:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Check out selected source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.source_ref }}
+      - name: Install production-pinned tools
+        shell: pwsh
+        run: |
+          npm install --global "corepack@$env:COREPACK_VERSION"
+          corepack enable
+          corepack install --global "pnpm@$env:PNPM_VERSION"
+          rustup toolchain install $env:RUST_VERSION --profile minimal
+          rustup default $env:RUST_VERSION
+          rustup target add x86_64-pc-windows-msvc --toolchain $env:RUST_VERSION
+          pnpm install --frozen-lockfile
+          if ((node --version).Trim() -ne "v$env:NODE_VERSION") { throw "Pinned Node is required" }
+          if ((pnpm --version).Trim() -ne $env:PNPM_VERSION) { throw "Pinned pnpm is required" }
+          if (((rustc --version) -split ' ')[1] -ne $env:RUST_VERSION) { throw "Pinned Rust is required" }
+      - name: Build and validate Windows desktop runtime
+        shell: pwsh
+        run: |
+          function Convert-PeStackReserve([ValidateSet("dumpbin", "llvm-readobj")] [string] $Source, [string] $Value) {
+            $decoded = (& node "scripts/pe_stack_reserve.mjs" $Source $Value | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or -not ($decoded -match '^[0-9]+$')) {
+              throw "Could not parse $Source SizeOfStackReserve '$Value'"
+            }
+            return [Convert]::ToUInt64($decoded, 10)
+          }
+
+          function Get-PeStackReserve([string] $Binary) {
+            $dumpbin = Get-Command "dumpbin.exe" -ErrorAction SilentlyContinue
+            if ($dumpbin) {
+              $headers = (& $dumpbin.Source /headers $Binary 2>&1 | Out-String)
+              if ($LASTEXITCODE -ne 0) { throw "dumpbin /headers failed with exit code $LASTEXITCODE" }
+              $match = [regex]::Match($headers, '(?im)^\s*([0-9a-f]+)\s+size of stack reserve\s*$')
+              if ($match.Success) { return Convert-PeStackReserve "dumpbin" $match.Groups[1].Value }
+              throw "dumpbin /headers did not report SizeOfStackReserve for $Binary"
+            }
+
+            $llvmReadobj = Get-Command "llvm-readobj.exe" -ErrorAction SilentlyContinue
+            if (-not $llvmReadobj) { $llvmReadobj = Get-Command "llvm-readobj" -ErrorAction SilentlyContinue }
+            if (-not $llvmReadobj) { throw "Neither dumpbin nor llvm-readobj is available to inspect the Windows PE header" }
+            $headers = (& $llvmReadobj.Source --file-headers $Binary 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw "llvm-readobj --file-headers failed with exit code $LASTEXITCODE" }
+            $match = [regex]::Match($headers, '(?im)^\s*SizeOfStackReserve:\s*(0x[0-9a-f]+|[0-9]+)\s*$')
+            if (-not $match.Success) { throw "llvm-readobj --file-headers did not report SizeOfStackReserve for $Binary" }
+            return Convert-PeStackReserve "llvm-readobj" $match.Groups[1].Value
+          }
+
+          function Format-WindowsExitCode([int] $ExitCode) {
+            $raw = [BitConverter]::ToUInt32([BitConverter]::GetBytes($ExitCode), 0)
+            return "decimal $ExitCode (0x$($raw.ToString('X8')))"
+          }
+
+          function Test-DesktopStartup([string] $Binary) {
+            $process = Start-Process -FilePath $Binary -PassThru
+            Start-Sleep -Seconds 8
+            if ($process.HasExited) {
+              $formatted = Format-WindowsExitCode $process.ExitCode
+              $raw = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int] $process.ExitCode), 0)
+              if ($raw -eq 0xC00000FD) {
+                throw "Windows desktop startup failed with STATUS_STACK_OVERFLOW (0xC00000FD); exit code $formatted"
+              }
+              throw "Windows desktop startup failed unexpectedly; exit code $formatted"
+            }
+            [void] $process.CloseMainWindow()
+            if (-not $process.WaitForExit(5000)) {
+              $process.Refresh()
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
+                Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
+              }
+            }
+          }
+
+          $commit = (git rev-parse HEAD).Trim()
+          $version = (Get-Content -LiteralPath "VERSION" -Raw).Trim()
+          Write-Host "commit SHA: $commit"
+          Write-Host "VERSION: $version"
+          if ($version -ne "0.1.1") { throw "Windows runtime diagnostic requires VERSION 0.1.1" }
+
+          pnpm --filter @nian-pass/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc
+          $desktopBinary = Resolve-Path "target/x86_64-pc-windows-msvc/release/nian-pass-desktop.exe"
+          if ((Get-Item -LiteralPath $desktopBinary).Length -le 0) { throw "nian-pass-desktop.exe is empty" }
+          $stackReserve = Get-PeStackReserve $desktopBinary
+          Write-Host "nian-pass-desktop.exe SizeOfStackReserve: $stackReserve bytes"
+          if ($stackReserve -lt [UInt64]8388608) { throw "SizeOfStackReserve $stackReserve bytes is below required 8388608 bytes" }
+
+          Test-DesktopStartup $desktopBinary
+          Write-Host "WINDOWS_DESKTOP_STARTUP_SMOKE=PASS"
+          @(
+            "commit SHA: $commit",
+            "VERSION: $version",
+            "SizeOfStackReserve: $stackReserve",
+            "WINDOWS_DESKTOP_STARTUP_SMOKE=PASS"
+          ) | Set-Content -LiteralPath "windows-runtime-diagnostic-evidence.txt" -Encoding utf8
+      - name: Upload desktop runtime diagnostic
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nian-pass-0.1.1-windows-runtime-diagnostic
+          path: |
+            target/x86_64-pc-windows-msvc/release/nian-pass-desktop.exe
+            windows-runtime-diagnostic-evidence.txt
+          if-no-files-found: error
+          retention-days: 3

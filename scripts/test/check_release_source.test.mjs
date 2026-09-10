@@ -21,6 +21,7 @@ import {
   sourcePolicyViolations,
   tagIdentityViolation,
   tagViolation,
+  windowsRuntimeDiagnosticWorkflowViolations,
 } from "../check_release_source.mjs";
 
 const identity = [
@@ -422,6 +423,30 @@ test("release dependency policy accepts exact versions only", () => {
 test("GitHub is release-only authority and Forgejo has no competing packager", () => {
   const projectRoot = resolve(import.meta.dirname, "../..");
   assert.deepEqual(githubReleaseWorkflowViolations(projectRoot), []);
+});
+
+test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  assert.deepEqual(windowsRuntimeDiagnosticWorkflowViolations(projectRoot), []);
+
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-windows-runtime-diagnostic-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  const workflowPath = join(root, ".github/workflows/windows-runtime-diagnostic.yml");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/windows-runtime-diagnostic.yml"),
+    "utf8",
+  );
+  writeFileSync(workflowPath, workflow.replace("contents: read", "contents: write"));
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /contents: read/,
+  );
+  writeFileSync(workflowPath, workflow.replace("  workflow_dispatch:", "  push:\n    branches: [main]\n  workflow_dispatch:"));
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /push, pull_request, and schedule triggers are forbidden/,
+  );
 });
 
 test("policy text normalization is LF, CRLF, and CR independent", () => {

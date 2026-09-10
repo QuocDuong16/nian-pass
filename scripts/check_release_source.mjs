@@ -319,6 +319,38 @@ export function githubReleaseWorkflowViolations(root) {
   return violations;
 }
 
+export function windowsRuntimeDiagnosticWorkflowViolations(root) {
+  const workflowPath = ".github/workflows/windows-runtime-diagnostic.yml";
+  if (!existsSync(resolve(root, workflowPath))) {
+    return [`${workflowPath}: manual Windows runtime diagnostic workflow is missing`];
+  }
+  const workflow = readPolicyText(root, workflowPath);
+  const violations = [];
+  const require = (pattern, message) => {
+    if (!pattern.test(workflow)) violations.push(`${workflowPath}: ${message}`);
+  };
+  require(/^on:\s*\n\s+workflow_dispatch:\s*\n\s+inputs:\s*\n\s+source_ref:[\s\S]*?required:\s*true[\s\S]*?default:\s*main/m, "must be workflow_dispatch-only with required source_ref defaulting to main");
+  if (/^\s*(push|pull_request|schedule):/m.test(workflow)) {
+    violations.push(`${workflowPath}: push, pull_request, and schedule triggers are forbidden`);
+  }
+  require(/^permissions:\s*\n\s+contents:\s*read\s*$/m, "default permissions must be contents: read");
+  require(/^    runs-on:\s*windows-2025\s*$/m, "must use windows-2025");
+  require(/ref:\s*\$\{\{ inputs\.source_ref \}\}/, "checkout must use the selected source_ref");
+  require(/git rev-parse HEAD/, "must record the checked-out commit SHA");
+  require(/Get-Content -LiteralPath "VERSION"[\s\S]*?\$version -ne "0\.1\.1"/, "must record and require VERSION 0.1.1");
+  require(/pnpm install --frozen-lockfile/, "must install the frozen lockfile");
+  require(/rustup target add x86_64-pc-windows-msvc/, "must install the production Windows target");
+  require(/pnpm --filter @nian-pass\/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc/, "must build the desktop release binary");
+  require(/target\/x86_64-pc-windows-msvc\/release\/nian-pass-desktop\.exe/, "must resolve the raw desktop executable");
+  require(/Get-PeStackReserve[\s\S]*?SizeOfStackReserve[\s\S]*?8388608/, "must inspect the PE reserve and require 8388608 bytes");
+  require(/Start-Process -FilePath \$Binary -PassThru[\s\S]*?Start-Sleep -Seconds 8[\s\S]*?WINDOWS_DESKTOP_STARTUP_SMOKE=PASS/, "must run the bounded desktop startup smoke");
+  require(/actions\/upload-artifact@[0-9a-f]{40}[\s\S]*?name: nian-pass-0\.1\.1-windows-runtime-diagnostic[\s\S]*?retention-days: 3/, "must upload the short-retention diagnostic artifact");
+  if (/\bgit\s+(tag|push)\b|\bgh\s+release\b/i.test(workflow)) {
+    violations.push(`${workflowPath}: tag, push, and GitHub Release mutation are forbidden`);
+  }
+  return violations;
+}
+
 function checkCargoPins(root, violations) {
   const workspace = parseToml(read(root, "Cargo.toml"));
   const manifests = [
@@ -590,10 +622,12 @@ export function sourcePolicyViolations(root) {
 
   checkCargoPins(root, violations);
   violations.push(...githubReleaseWorkflowViolations(root));
+  violations.push(...windowsRuntimeDiagnosticWorkflowViolations(root));
   for (const workflow of [
     ".forgejo/workflows/quality.yml",
     ".forgejo/workflows/openwiki-update.yml",
     ".github/workflows/release.yml",
+    ".github/workflows/windows-runtime-diagnostic.yml",
   ]) {
     if (!existsSync(resolve(root, workflow))) continue;
     for (const match of read(root, workflow).matchAll(/^\s*uses:\s*(\S+)/gm)) {
