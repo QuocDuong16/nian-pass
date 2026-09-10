@@ -144,8 +144,8 @@ test("publication PASS candidate preserves the exact validated DRAFT snapshot", 
   writeFileSync(
     join(draft, "release-manifest.json"),
     `${JSON.stringify({
-      version: "0.1.0-rc.8",
-      tag: "v0.1.0-rc.8",
+      version: "0.1.0-rc.9",
+      tag: "v0.1.0-rc.9",
       commit: "a".repeat(40),
       validation: {
         "Forgejo canonical CI": "NOT RUN",
@@ -226,8 +226,8 @@ test("publication snapshot validation binds downloaded draft assets to the exact
   writeFileSync(
     join(root, "release-manifest.json"),
     `${JSON.stringify({
-      version: "0.1.0-rc.8",
-      tag: "v0.1.0-rc.8",
+      version: "0.1.0-rc.9",
+      tag: "v0.1.0-rc.9",
       commit: "a".repeat(40),
       releaseKind: "prerelease",
       validation: {
@@ -243,8 +243,8 @@ test("publication snapshot validation binds downloaded draft assets to the exact
   );
   writeFileSync(join(root, "SHA256SUMS"), `${checksumLines(root).join("\n")}\n`);
   const expected = {
-    version: "0.1.0-rc.8",
-    tag: "v0.1.0-rc.8",
+    version: "0.1.0-rc.9",
+    tag: "v0.1.0-rc.9",
     commit: "a".repeat(40),
     releaseKind: "prerelease",
     publicationStatus: "DRAFT",
@@ -425,8 +425,8 @@ test("Rust SBOM excludes dependencies reachable only through dev edges", () => {
 
 test("release manifest binds artifacts to source, toolchains, and signing", () => {
   const manifest = buildReleaseManifest({
-    version: "0.1.0-rc.8",
-    tag: "v0.1.0-rc.8",
+    version: "0.1.0-rc.9",
+    tag: "v0.1.0-rc.9",
     commit: "a".repeat(40),
     toolchains: { rust: "1.98.0", node: "26.7.0" },
     signing: { windows: "NOT RUN" },
@@ -446,7 +446,7 @@ test("release manifest binds artifacts to source, toolchains, and signing", () =
 
 test("release payload names map to explicit manifest platforms", () => {
   assert.equal(
-    artifactPlatform("Nian Pass_0.1.0_x64-setup.exe"),
+    artifactPlatform("Nian.Pass_0.1.0_x64-setup.exe"),
     "windows-x86_64",
   );
   assert.equal(
@@ -471,28 +471,31 @@ test("platform payloads assemble into one exact canonical release set", (t) => {
   const output = join(root, "release");
   const payloads = {
     windows: [
-      "Nian Pass_0.1.0-rc.8_x64-setup.exe",
-      "nian-pass-native-host-windows-x86_64-0.1.0-rc.8.zip",
+      "Nian Pass_0.1.0-rc.9_x64-setup.exe",
+      "nian-pass-native-host-windows-x86_64-0.1.0-rc.9.zip",
     ],
     linux: [
-      "Nian_Pass_0.1.0-rc.8_amd64.AppImage",
-      "Nian Pass_0.1.0-rc.8_amd64.deb",
-      "nian-pass-native-host-linux-x86_64-0.1.0-rc.8.zip",
+      "Nian_Pass_0.1.0-rc.9_amd64.AppImage",
+      "Nian Pass_0.1.0-rc.9_amd64.deb",
+      "nian-pass-native-host-linux-x86_64-0.1.0-rc.9.zip",
     ],
     browser: [
-      "nian-pass-browser-chromium-0.1.0-rc.8.zip",
-      "nian-pass-browser-firefox-0.1.0-rc.8.zip",
+      "nian-pass-browser-chromium-0.1.0-rc.9.zip",
+      "nian-pass-browser-firefox-0.1.0-rc.9.zip",
     ],
     android: ["app-universal-release-unsigned.apk"],
-    gateway: ["gateway-image.json", "nian-pass-sync-gateway-0.1.0-rc.8.tar.gz"],
+    gateway: ["gateway-image.json", "nian-pass-sync-gateway-0.1.0-rc.9.tar.gz"],
   };
   for (const [platform, names] of Object.entries(payloads)) {
     mkdirSync(join(input, platform), { recursive: true });
     for (const name of names)
       writeFileSync(join(input, platform, name), `${platform}:${name}`);
   }
-  const staged = assembleReleaseSet(input, output, "0.1.0-rc.8");
-  assert.deepEqual(staged.sort(), Object.values(payloads).flat().sort());
+  const staged = assembleReleaseSet(input, output, "0.1.0-rc.9");
+  const canonical = Object.values(payloads)
+    .flat()
+    .map((name) => name.replaceAll(" ", "."));
+  assert.deepEqual(staged.sort(), canonical.sort());
   assert.deepEqual(readdirSync(output).sort(), staged.sort());
   assert.equal(
     readFileSync(join(output, "gateway-image.json"), "utf8"),
@@ -513,24 +516,24 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   );
   const payloads = {
     windows: {
-      "Nian Pass_0.1.0-rc.8_x64-setup.exe": Buffer.from([0, 1, 2, 3]),
-      "nian-pass-native-host-windows-x86_64-0.1.0-rc.8.zip": safeZip,
+      "Nian Pass_0.1.0-rc.9_x64-setup.exe": Buffer.from([0, 1, 2, 3]),
+      "nian-pass-native-host-windows-x86_64-0.1.0-rc.9.zip": safeZip,
     },
     linux: {
-      "Nian_Pass_0.1.0-rc.8_amd64.AppImage": Buffer.from([0, 1, 2, 3]),
-      "Nian Pass_0.1.0-rc.8_amd64.deb": safeDeb,
-      "nian-pass-native-host-linux-x86_64-0.1.0-rc.8.zip": safeZip,
+      "Nian_Pass_0.1.0-rc.9_amd64.AppImage": Buffer.from([0, 1, 2, 3]),
+      "Nian Pass_0.1.0-rc.9_amd64.deb": safeDeb,
+      "nian-pass-native-host-linux-x86_64-0.1.0-rc.9.zip": safeZip,
     },
     browser: {
-      "nian-pass-browser-chromium-0.1.0-rc.8.zip": safeZip,
-      "nian-pass-browser-firefox-0.1.0-rc.8.zip": safeZip,
+      "nian-pass-browser-chromium-0.1.0-rc.9.zip": safeZip,
+      "nian-pass-browser-firefox-0.1.0-rc.9.zip": safeZip,
     },
     android: {
       "app-universal-release-unsigned.apk": Buffer.from([0, 1, 2, 3]),
     },
     gateway: {
       "gateway-image.json": Buffer.from('{"imageId":"sha256:fixture"}\n'),
-      "nian-pass-sync-gateway-0.1.0-rc.8.tar.gz": gzipSync(
+      "nian-pass-sync-gateway-0.1.0-rc.9.tar.gz": gzipSync(
         tarArchive("usr/local/bin/nian-pass-sync-gateway", "binary"),
       ),
     },
@@ -540,7 +543,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     for (const [name, bytes] of Object.entries(files))
       writeFileSync(join(input, platform, name), bytes);
   }
-  assembleReleaseSet(input, output, "0.1.0-rc.8");
+  assembleReleaseSet(input, output, "0.1.0-rc.9");
   writeFileSync(
     join(output, "release-status.md"),
     "# Release status\n\nExperimental release.\n",
@@ -557,7 +560,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
         env: {
           ...process.env,
           ARTIFACT_DIR: output,
-          RELEASE_TAG: "v0.1.0-rc.8",
+          RELEASE_TAG: "v0.1.0-rc.9",
           RELEASE_STATUS_DATA_FILE: statusData,
         },
       },
@@ -581,9 +584,9 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     readFileSync(join(output, "release-manifest.json"), "utf8"),
   );
   assert.equal(manifest.artifacts.length, 12);
-  assert.equal(manifest.version, "0.1.0-rc.8");
+  assert.equal(manifest.version, "0.1.0-rc.9");
   assert.equal(manifest.releaseKind, "prerelease");
-  assert.equal(manifest.tag, "v0.1.0-rc.8");
+  assert.equal(manifest.tag, "v0.1.0-rc.9");
   assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
   assert.ok(
     manifest.artifacts.some(
@@ -602,7 +605,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     !manifest.artifacts.some((artifact) => artifact.name === "SHA256SUMS"),
   );
   const sbom = JSON.parse(readFileSync(join(output, "sbom.cdx.json"), "utf8"));
-  assert.equal(sbom.metadata.component.version, "0.1.0-rc.8");
+  assert.equal(sbom.metadata.component.version, "0.1.0-rc.9");
   assert.deepEqual(
     sbom.components.map((component) => component.name),
     ["fixture-runtime"],
@@ -615,8 +618,11 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   const sums = readFileSync(join(output, "SHA256SUMS"), "utf8");
   assert.match(
     sums,
-    /^[0-9a-f]{64}  Nian_Pass_0\.1\.0-rc\.8_amd64\.AppImage$/m,
+    /^[0-9a-f]{64}  Nian_Pass_0\.1\.0-rc\.9_amd64\.AppImage$/m,
   );
+  assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0-rc\.9_amd64\.deb$/m);
+  assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0-rc\.9_x64-setup\.exe$/m);
+  assert.doesNotMatch(sums, /Nian Pass_/);
   assert.match(sums, /^[0-9a-f]{64}  gateway-image\.json$/m);
   assert.match(sums, /^[0-9a-f]{64}  release-manifest\.json$/m);
   assert.match(sums, /^[0-9a-f]{64}  release-status\.md$/m);
@@ -664,6 +670,30 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   );
   checksumResult = verifyChecksums();
   assert.equal(checksumResult.status, 0, checksumResult.stderr);
+
+  const roundtrip = join(root, "roundtrip");
+  cpSync(output, roundtrip, { recursive: true });
+  const roundtripManifest = validateReleaseSnapshot(roundtrip, {
+    version: finalized.version,
+    tag: finalized.tag,
+    commit: finalized.commit,
+    releaseKind: finalized.releaseKind,
+    publicationStatus: "PASS",
+  });
+  assert.ok(roundtripManifest.artifacts.every((artifact) => !/\s/u.test(artifact.name)));
+  const roundtripChecksums = spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
+    cwd: roundtrip,
+    encoding: "utf8",
+  });
+  assert.equal(roundtripChecksums.status, 0, roundtripChecksums.stderr);
+});
+
+test("artifact validation rejects whitespace in canonical release payload filenames", (t) => {
+  const root = directory(t);
+  writeFileSync(join(root, "Nian Pass_0.1.0-rc.9_x64-setup.exe"), "payload");
+  assert.deepEqual(artifactViolations(root), [
+    "Nian Pass_0.1.0-rc.9_x64-setup.exe: canonical release filenames may not contain whitespace",
+  ]);
 });
 
 test("release assembly rejects unexpected platform payloads", (t) => {
@@ -681,6 +711,28 @@ test("release assembly rejects unexpected platform payloads", (t) => {
   assert.throws(
     () => assembleReleaseSet(root, join(root, "out"), "0.1.0"),
     /unexpected release payload/,
+  );
+});
+
+test("release assembly rejects canonical filename collisions", (t) => {
+  const root = directory(t);
+  const input = join(root, "platforms");
+  for (const platform of ["windows", "linux", "browser", "android", "gateway"]) {
+    mkdirSync(join(input, platform), { recursive: true });
+  }
+  const required = {
+    windows: ["nian-pass-native-host-windows-x86_64-0.1.0-rc.9.zip", "Nian Pass_test.exe", "Nian.Pass_test.exe"],
+    linux: ["nian-pass-native-host-linux-x86_64-0.1.0-rc.9.zip", "Nian_Pass_0.1.0-rc.9_amd64.AppImage", "Nian.Pass_0.1.0-rc.9_amd64.deb"],
+    browser: ["nian-pass-browser-chromium-0.1.0-rc.9.zip", "nian-pass-browser-firefox-0.1.0-rc.9.zip"],
+    android: ["app-universal-release-unsigned.apk"],
+    gateway: ["gateway-image.json", "nian-pass-sync-gateway-0.1.0-rc.9.tar.gz"],
+  };
+  for (const [platform, names] of Object.entries(required)) {
+    for (const name of names) writeFileSync(join(input, platform, name), "payload");
+  }
+  assert.throws(
+    () => assembleReleaseSet(input, join(root, "release"), "0.1.0-rc.9"),
+    /canonical release payload filename collision Nian\.Pass_test\.exe: windows\/Nian Pass_test\.exe and windows\/Nian\.Pass_test\.exe/,
   );
 });
 
@@ -706,11 +758,11 @@ test("release status keeps runtime and signing evidence distinct", () => {
 
 test("RC release status is explicitly classified as a prerelease", () => {
   const report = releaseStatusMarkdown({
-    version: "0.1.0-rc.8",
-    tag: "v0.1.0-rc.8",
+    version: "0.1.0-rc.9",
+    tag: "v0.1.0-rc.9",
     commit: "a".repeat(40),
     statuses: releaseStatuses({}),
   });
-  assert.match(report, /^# Nian Pass 0\.1\.0-rc\.8 release validation/m);
+  assert.match(report, /^# Nian Pass 0\.1\.0-rc\.9 release validation/m);
   assert.match(report, /Release class: prerelease/);
 });

@@ -59,7 +59,7 @@ test("Linux native host ZIP preserves only the requested executable mode", () =>
   const archive = buildNativeHostArchive(
     "linux-x86_64",
     Buffer.from("synthetic host"),
-    "0.1.0-rc.8",
+    "0.1.0-rc.9",
   );
   const entries = centralDirectoryEntries(archive);
   assert.deepEqual(
@@ -78,7 +78,7 @@ test("Linux native host ZIP preserves only the requested executable mode", () =>
     buildNativeHostArchive(
       "linux-x86_64",
       Buffer.from("synthetic host"),
-      "0.1.0-rc.8",
+      "0.1.0-rc.9",
     ),
   );
 });
@@ -87,7 +87,7 @@ test("Windows native host ZIP keeps conservative Unix mode metadata", () => {
   const archive = buildNativeHostArchive(
     "windows-x86_64",
     Buffer.from("synthetic host"),
-    "0.1.0-rc.8",
+    "0.1.0-rc.9",
   );
   const metadata = centralDirectoryEntries(archive).get(
     "nian-pass-browser-host.exe",
@@ -111,7 +111,7 @@ test(
       buildNativeHostArchive(
         "linux-x86_64",
         Buffer.from("synthetic host"),
-        "0.1.0-rc.8",
+        "0.1.0-rc.9",
       ),
     );
     execFileSync("unzip", ["-qq", archivePath, "-d", output]);

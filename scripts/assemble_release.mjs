@@ -3,6 +3,7 @@ import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { isReleaseVersion } from "./release_version.mjs";
+import { canonicalReleaseAssetName } from "./release_asset_name.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
@@ -45,7 +46,7 @@ export function assembleReleaseSet(inputRoot, outputRoot, version) {
   }
   const policy = platformPolicy(version);
   const staged = [];
-  const seen = new Set();
+  const seen = new Map();
 
   rmSync(outputRoot, { recursive: true, force: true });
   mkdirSync(outputRoot, { recursive: true });
@@ -74,9 +75,11 @@ export function assembleReleaseSet(inputRoot, outputRoot, version) {
       }
     }
     for (const name of files.sort((left, right) => left.localeCompare(right))) {
-      const outputName = basename(name);
-      if (seen.has(outputName)) throw new Error(`duplicate release payload name ${outputName}`);
-      seen.add(outputName);
+      const outputName = canonicalReleaseAssetName(basename(name));
+      const source = `${platform}/${name}`;
+      const existing = seen.get(outputName);
+      if (existing) throw new Error(`canonical release payload filename collision ${outputName}: ${existing} and ${source}`);
+      seen.set(outputName, source);
       copyFileSync(resolve(platformRoot, name), resolve(outputRoot, outputName));
       staged.push(outputName);
     }

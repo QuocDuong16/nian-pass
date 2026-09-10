@@ -262,6 +262,7 @@ export function artifactViolations(root) {
   if (files.length === 0) return ["release artifact directory contains no payload artifacts"];
   for (const path of files) {
     const name = relative(root, path).replaceAll("\\", "/");
+    if (/\s/u.test(name)) violations.push(`${name}: canonical release filenames may not contain whitespace`);
     if (forbiddenNames.test(name)) violations.push(`${name}: forbidden artifact filename`);
     const bytes = readFileSync(path);
     violations.push(...scanBytes(name, bytes, isText(name)));
