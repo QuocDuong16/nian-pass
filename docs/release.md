@@ -179,7 +179,8 @@ Release candidates are immutable generations, not mutable labels:
 0.1.0-rc.3 -> full multi-platform build, attestation, and draft prerelease passed
 0.1.0-rc.4 -> Windows CRLF checkout exposed LF-only release-policy regex assumptions
 0.1.0-rc.5 -> Android payload verification passed, then the GitHub runner reported a non-clean tree before staging. Historical RC5-source reproduction exposed unignored Kotlin compiler `.kotlin/sessions/*.salive` state as a concrete matching transient dirty-tree failure mode.
-0.1.0-rc.6 -> Ignores Kotlin compiler build/session state, separates pre/post-build source verification, captures immutable pre-build identity, and reports exact non-ignored dirty paths if another mutation occurs.
+0.1.0-rc.6 -> Kotlin transient state fixed and Android path hardened; Windows completed NSIS/native-host generation, but post-build validation detected a tracked `apps/desktop/src-tauri/Cargo.toml` mutation.
+0.1.0-rc.7 -> Windows Cargo.toml mutation / deterministic source checkout remediation.
 0.1.0      -> final only after the accepted RC
 ```
 

@@ -135,6 +135,9 @@ test("password reveal is explicit, loading-safe, and times out from state", asyn
   vi.useFakeTimers();
 
   fireEvent.click(screen.getByRole("button", { name: "Reveal password" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
   expect(screen.getByRole("button", { name: "Revealing…" })).toBeDisabled();
   expect(desktop.revealEntryPassword).toHaveBeenCalledOnce();
   await act(async () => {

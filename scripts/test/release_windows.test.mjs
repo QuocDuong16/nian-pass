@@ -43,3 +43,18 @@ test("Windows release script invokes the tested TOML toolchain helper", (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "1.98.0\n");
 });
+
+test("Windows release script emits bounded diagnostics before post-build rejection", () => {
+  const repositoryRoot = resolve(import.meta.dirname, "../..");
+  const script = readFileSync(join(repositoryRoot, "scripts/release_windows.ps1"), "utf8");
+  assert.match(script, /function Show-PostBuildSourceDiagnostics/);
+  assert.match(script, /git status --porcelain=v1 --untracked-files=all/);
+  assert.match(script, /git diff --name-status/);
+  assert.match(script, /git diff --numstat/);
+  assert.match(script, /git ls-files --eol apps\/desktop\/src-tauri\/Cargo\.toml/);
+  assert.match(script, /git diff -- apps\/desktop\/src-tauri\/Cargo\.toml/);
+  assert.match(
+    script,
+    /Show-PostBuildSourceDiagnostics\s*\r?\nInvoke-Checked "node" @\("scripts\/check_release_source\.mjs", "--postbuild"\)/,
+  );
+});

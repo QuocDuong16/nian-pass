@@ -23,7 +23,7 @@ abort globally would weaken that boundary. Browser ZIPs use sorted entries,
 fixed metadata, stored bytes, and 0644 archive modes. Browser manifests derive
 `version_name` directly from the exact package SemVer. Their required numeric
 `version` maps alpha, beta, RC, and final into a deterministic fourth component
-so `0.1.0-rc.6` remains visibly identifiable and an accepted `0.1.0` final
+so `0.1.0-rc.7` remains visibly identifiable and an accepted `0.1.0` final
 compares newer. Build outputs can still
 differ when platform linker, WebView bootstrapper, Android packaging, or native
 installer tooling embeds nondeterministic metadata; checksums identify the

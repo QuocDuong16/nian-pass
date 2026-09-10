@@ -21,9 +21,9 @@ Early development. The project is not ready for real vaults.
 
 M8 — Security Hardening / Release Engineering — IN PROGRESS
 
-Current release candidate source: `0.1.0-rc.6`. After this exact generation is
+Current release candidate source: `0.1.0-rc.7`. After this exact generation is
 reviewed and Forgejo CI is green, an operator may create the matching
-`v0.1.0-rc.6` tag for a GitHub draft prerelease. Source preparation does not
+`v0.1.0-rc.7` tag for a GitHub draft prerelease. Source preparation does not
 create release tags.
 
 M8 now provides pinned release inputs, a single `VERSION`, clean-tree and tag

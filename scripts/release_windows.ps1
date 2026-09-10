@@ -14,6 +14,28 @@ function Set-ReleaseOutput([string] $Name, [string] $Value) {
     }
 }
 
+function Show-PostBuildSourceDiagnostics {
+    $status = (& git status --porcelain=v1 --untracked-files=all | Out-String).TrimEnd()
+    if ($LASTEXITCODE -ne 0) {
+        throw "git status failed with exit code $LASTEXITCODE"
+    }
+    if ([string]::IsNullOrWhiteSpace($status)) { return }
+
+    Write-Host "Post-build source diagnostics (working tree is dirty):"
+    Write-Host $status
+    & git diff --name-status
+    if ($LASTEXITCODE -ne 0) { throw "git diff --name-status failed with exit code $LASTEXITCODE" }
+    & git diff --numstat
+    if ($LASTEXITCODE -ne 0) { throw "git diff --numstat failed with exit code $LASTEXITCODE" }
+    & git ls-files --eol apps/desktop/src-tauri/Cargo.toml
+    if ($LASTEXITCODE -ne 0) { throw "git ls-files --eol failed with exit code $LASTEXITCODE" }
+    if ($status -match '(?m)^.. apps/desktop/src-tauri/Cargo\.toml$') {
+        Write-Host "Post-build apps/desktop/src-tauri/Cargo.toml diff:"
+        & git diff -- apps/desktop/src-tauri/Cargo.toml
+        if ($LASTEXITCODE -ne 0) { throw "git diff Cargo.toml failed with exit code $LASTEXITCODE" }
+    }
+}
+
 $windowsPfxBase64 = $env:NIAN_PASS_WINDOWS_PFX_BASE64
 $windowsPfxPassword = $env:NIAN_PASS_WINDOWS_PFX_PASSWORD
 Remove-Item Env:NIAN_PASS_WINDOWS_PFX_BASE64 -ErrorAction SilentlyContinue
@@ -76,6 +98,7 @@ if ($configuredSigningValues.Count -eq 0) {
 }
 
 Invoke-Checked "node" @("scripts/package_native_host.mjs", "windows-x86_64", $hostBinary)
+Show-PostBuildSourceDiagnostics
 Invoke-Checked "node" @("scripts/check_release_source.mjs", "--postbuild")
 Invoke-Checked "node" @("scripts/stage_release.mjs")
 Set-ReleaseOutput "build" "PASS"

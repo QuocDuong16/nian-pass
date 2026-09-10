@@ -51,6 +51,31 @@ function commitChange(root, name = "change.txt") {
   git(root, ...identity, "commit", "--quiet", "-m", name);
 }
 
+function writeManifest(root, contents) {
+  const manifest = join(root, "apps/desktop/src-tauri/Cargo.toml");
+  mkdirSync(resolve(manifest, ".."), { recursive: true });
+  writeFileSync(manifest, contents);
+  return manifest;
+}
+
+function checkoutWithAutocrlf(root) {
+  const checkout = mkdtempSync(join(tmpdir(), "nian-pass-eol-checkout-"));
+  git(
+    root,
+    "-c",
+    "core.autocrlf=true",
+    "-c",
+    "core.eol=crlf",
+    "clone",
+    "--quiet",
+    root,
+    checkout,
+  );
+  git(checkout, "config", "core.autocrlf", "true");
+  git(checkout, "config", "core.eol", "crlf");
+  return checkout;
+}
+
 function workflowFixture(t, workflow, prefix = "nian-pass-workflow-policy-") {
   const projectRoot = resolve(import.meta.dirname, "../..");
   const root = mkdtempSync(join(tmpdir(), prefix));
@@ -142,6 +167,55 @@ test("dirty-tree rejection exercises Git state", (t) => {
   writeFileSync(join(root, "source/change.txt"), "dirty\n");
   assert.match(dirtyTreeViolation(root), /uncommitted changes/);
   assert.match(dirtyTreeViolation(root), /\?\? source\/change\.txt/);
+});
+
+test("Cargo.toml has a deterministic LF checkout under Windows autocrlf", (t) => {
+  const root = repository(t);
+  const manifest = writeManifest(root, '[package]\nname = "nian-pass-desktop"\n');
+  writeFileSync(
+    join(root, ".gitattributes"),
+    "apps/desktop/src-tauri/Cargo.toml text eol=lf\n",
+  );
+  git(root, "add", ".gitattributes", "apps/desktop/src-tauri/Cargo.toml");
+  git(root, ...identity, "commit", "--quiet", "-m", "canonical manifest eol");
+
+  const checkout = checkoutWithAutocrlf(root);
+  t.after(() => rmSync(checkout, { recursive: true, force: true }));
+  const checkoutManifest = join(checkout, "apps/desktop/src-tauri/Cargo.toml");
+  assert.equal(readFileSync(checkoutManifest, "utf8"), '[package]\nname = "nian-pass-desktop"\n');
+
+  // Simulate the pinned Tauri TOML writer's canonical LF serialization.
+  writeFileSync(checkoutManifest, '[package]\nname = "nian-pass-desktop"\n');
+  assert.equal(dirtyTreeViolation(checkout), null);
+});
+
+test("without the manifest attribute, a canonical LF rewrite dirties a CRLF checkout", (t) => {
+  const root = repository(t);
+  const manifest = writeManifest(root, '[package]\nname = "nian-pass-desktop"\n');
+  git(root, "add", manifest);
+  git(root, ...identity, "commit", "--quiet", "-m", "manifest without eol policy");
+
+  const checkout = checkoutWithAutocrlf(root);
+  t.after(() => rmSync(checkout, { recursive: true, force: true }));
+  const checkoutManifest = join(checkout, "apps/desktop/src-tauri/Cargo.toml");
+  assert.match(readFileSync(checkoutManifest, "utf8"), /\r\n/);
+  writeFileSync(checkoutManifest, '[package]\nname = "nian-pass-desktop"\n');
+  assert.match(dirtyTreeViolation(checkout), /apps\/desktop\/src-tauri\/Cargo\.toml/);
+});
+
+test("post-build validation rejects a semantic Cargo.toml mutation", (t) => {
+  const root = repository(t);
+  const manifest = writeManifest(root, '[package]\nversion = "0.1.0"\n');
+  git(root, "add", manifest);
+  git(root, ...identity, "commit", "--quiet", "-m", "authoritative manifest");
+  git(root, "tag", "v0.1.0");
+  const expected = { tag: "v0.1.0", commit: git(root, "rev-parse", "HEAD"), version: "0.1.0" };
+
+  writeFileSync(manifest, '[package]\nversion = "9.9.9"\n');
+  assert.match(
+    postBuildSourceViolations(root, expected).join("\n"),
+    /post-build mutation rejected:[\s\S]*apps\/desktop\/src-tauri\/Cargo\.toml/,
+  );
 });
 
 function ignoredByGit(root, path) {
