@@ -548,6 +548,25 @@ test("GitHub release workflow policy rejects published-release-by-tag draft disc
   assert.match(violations, /published-release-by-tag discovery cannot resolve drafts/);
 });
 
+test("GitHub release workflow policy rejects unsafe release asset and metadata HTTP semantics", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  )
+    .replace("-H 'Content-Type: application/octet-stream' \\\n                ", "")
+    .replace('-F "body=@$1"', '--input -')
+    .replace(
+      '-F draft=false \\\n              -F "prerelease=${RELEASE_IS_PRERELEASE}"',
+      '--input -',
+    );
+  const root = workflowFixture(t, workflow, "nian-pass-release-http-policy-");
+  const violations = githubReleaseWorkflowViolations(root).join("\n");
+  assert.match(violations, /explicit binary Content-Type and raw body/);
+  assert.match(violations, /release notes PATCH must use typed JSON fields/);
+  assert.match(violations, /release publication PATCH must use typed JSON fields/);
+});
+
 test("GitHub release workflow policy rejects publication authority bypasses", (t) => {
   const projectRoot = resolve(import.meta.dirname, "../..");
   const root = mkdtempSync(join(tmpdir(), "nian-pass-publication-workflow-"));
@@ -664,8 +683,8 @@ test("GitHub release workflow policy rejects hard-coded prerelease metadata", (t
       "if true; then",
     )
     .replace(
-      'draft: false, prerelease: process.argv[1] === "true"',
-      'draft: false, prerelease: true',
+      '-F draft=false \\\n              -F "prerelease=${RELEASE_IS_PRERELEASE}"',
+      '-F draft=false \\\n              -F "prerelease=true"',
     );
   writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
   writeFileSync(

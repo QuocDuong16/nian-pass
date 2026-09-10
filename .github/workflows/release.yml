@@ -549,18 +549,27 @@ jobs:
                 gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}"
               fi
               encoded_name="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "${asset_name}")"
-              gh api --method POST "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" --input "${asset}"
+              gh api --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'Content-Type: application/octet-stream' \
+                "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" \
+                --input "${asset}"
             done
           }
 
           release_edit_notes() {
-            node -e 'process.stdout.write(JSON.stringify({ body: require("node:fs").readFileSync(process.argv[1], "utf8") }))' "$1" |
-              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --input -
+            gh api --method PATCH \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -F "body=@$1"
           }
 
           release_publish() {
-            node -e 'process.stdout.write(JSON.stringify({ draft: false, prerelease: process.argv[1] === "true" }))' "${RELEASE_IS_PRERELEASE}" |
-              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --input -
+            gh api --method PATCH \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -F draft=false \
+              -F "prerelease=${RELEASE_IS_PRERELEASE}"
           }
 
           transaction_action() {
