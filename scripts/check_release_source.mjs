@@ -460,6 +460,9 @@ export function sourcePolicyViolations(root) {
     !/parseDumpbinStackReserve/.test(peStackReserveParser) ||
     !/BigInt\(`0x\$\{encoded\}`\)/.test(peStackReserveParser) ||
     !/parseLlvmStackReserve/.test(peStackReserveParser) ||
+    !/import \{ pathToFileURL \} from "node:url"/.test(peStackReserveParser) ||
+    !/import\.meta\.url === pathToFileURL\(process\.argv\[1\]\)\.href/.test(peStackReserveParser) ||
+    /new URL\(import\.meta\.url\)\.pathname/.test(peStackReserveParser) ||
     !/native_messaging_host_smoke/.test(windowsRelease) ||
     /Set-ReleaseOutput "process_smoke"/.test(windowsRelease)
   ) {

@@ -18,6 +18,41 @@ test("PE stack reserve parsers keep dumpbin hexadecimal distinct from LLVM forma
   assert.equal(parseLlvmStackReserve("8388608"), 8388608n);
 });
 
+test("PE stack reserve helper CLI decodes accepted tool-specific formats", () => {
+  const helperPath = resolve(import.meta.dirname, "../pe_stack_reserve.mjs");
+  for (const [source, value, expected] of [
+    ["dumpbin", "100000", "1048576\n"],
+    ["dumpbin", "800000", "8388608\n"],
+    ["llvm-readobj", "0x800000", "8388608\n"],
+    ["llvm-readobj", "8388608", "8388608\n"],
+  ]) {
+    const result = spawnSync(process.execPath, [helperPath, source, value], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, expected);
+    assert.equal(result.stderr, "");
+  }
+});
+
+test("PE stack reserve helper CLI fails closed on invalid input", () => {
+  const helperPath = resolve(import.meta.dirname, "../pe_stack_reserve.mjs");
+  for (const arguments_ of [
+    ["unknown", "800000"],
+    ["dumpbin"],
+    ["dumpbin", "0x800000"],
+    ["llvm-readobj", "eight-megabytes"],
+  ]) {
+    const result = spawnSync(process.execPath, [helperPath, ...arguments_], {
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /PE stack reserve|SizeOfStackReserve|invalid/i);
+    assert.ok(result.stderr.length < 256);
+  }
+});
+
 test("Windows release Rust pin parser accepts LF, CRLF, and trailing horizontal whitespace", () => {
   for (const mise of [
     '[tools]\nrust = "1.98.0"\n',
@@ -109,4 +144,9 @@ test("Windows release source verifies the desktop PE reserve and bounded startup
   assert.match(workflow, /desktop_startup_smoke: \$\{\{ steps\.build\.outputs\.desktop_startup_smoke \}\}/);
   assert.match(workflow, /native_messaging_host_smoke: \$\{\{ steps\.build\.outputs\.native_messaging_host_smoke \}\}/);
   assert.match(workflow, /WINDOWS_GUI_STATUS: NOT RUN/);
+
+  const helper = readFileSync(join(repositoryRoot, "scripts/pe_stack_reserve.mjs"), "utf8");
+  assert.match(helper, /import \{ pathToFileURL \} from "node:url"/);
+  assert.match(helper, /import\.meta\.url === pathToFileURL\(process\.argv\[1\]\)\.href/);
+  assert.doesNotMatch(helper, /new URL\(import\.meta\.url\)\.pathname/);
 });

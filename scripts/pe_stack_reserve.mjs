@@ -30,7 +30,11 @@ function main() {
   process.stdout.write(`${reserve}\n`);
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
+const isMain =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
   try {
     main();
   } catch (error) {
@@ -38,3 +42,4 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
     process.exitCode = 1;
   }
 }
+import { pathToFileURL } from "node:url";
