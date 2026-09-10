@@ -5,9 +5,9 @@ import { validateGithubReleaseIdentity } from "../github_release_identity.mjs";
 
 const expected = {
   id: 123,
-  tag: "v0.1.0-rc.10",
+  tag: "v0.1.0",
   commit: "0123456789abcdef0123456789abcdef01234567",
-  prerelease: true,
+  prerelease: false,
 };
 
 function release(overrides = {}) {
@@ -24,9 +24,9 @@ function release(overrides = {}) {
 test("release-by-ID resolver accepts an exact draft identity", () => {
   assert.deepEqual(validateGithubReleaseIdentity(release(), { ...expected, draft: true }), {
     draft: true,
-    prerelease: true,
+    prerelease: false,
     id: 123,
-    tag: "v0.1.0-rc.10",
+    tag: "v0.1.0",
     targetCommitish: expected.commit,
   });
 });
@@ -66,7 +66,7 @@ for (const [name, overrides, pattern] of [
   ["ID drift", { id: 124 }, /release ID identity drift/],
   ["tag drift", { tag_name: "untagged-deadbeef" }, /release tag identity drift/],
   ["commit drift", { target_commitish: "different" }, /release commit identity drift/],
-  ["prerelease drift", { prerelease: false }, /release prerelease identity drift/],
+  ["prerelease drift", { prerelease: true }, /release prerelease identity drift/],
   ["notes unexpectedly publishes", { draft: false }, /release draft state drift/],
 ]) {
   test(`notes PATCH response rejects ${name}`, () => {
@@ -96,7 +96,7 @@ for (const [name, overrides, pattern] of [
   ["ID drift", { id: 124 }, /release ID identity drift/],
   ["tag drift", { tag_name: "untagged-deadbeef" }, /release tag identity drift/],
   ["commit drift", { target_commitish: "different" }, /release commit identity drift/],
-  ["prerelease drift", { prerelease: false }, /release prerelease identity drift/],
+  ["prerelease drift", { prerelease: true }, /release prerelease identity drift/],
 ]) {
   test(`publish PATCH response rejects ${name}`, () => {
     assert.throws(

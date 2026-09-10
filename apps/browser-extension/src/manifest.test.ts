@@ -39,8 +39,8 @@ describe("Manifest V3 generation", () => {
     const manifest = generateManifest("chromium");
     expect(manifest).toMatchObject({
       manifest_version: 3,
-      version: "0.1.0.30010",
-      version_name: "0.1.0-rc.10",
+      version: "0.1.0.65535",
+      version_name: "0.1.0",
       permissions: ["activeTab", "scripting", "nativeMessaging"],
       optional_host_permissions: ["http://*/*", "https://*/*"],
       background: { service_worker: "background.js" },

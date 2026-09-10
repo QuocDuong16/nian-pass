@@ -19,12 +19,21 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M8 — Security Hardening / Release Engineering — IN PROGRESS
+M8 — Security Hardening / Release Engineering — DONE
 
-Current release candidate source: `0.1.0-rc.10`. After this exact generation is
-reviewed and Forgejo CI is green, an operator may create the matching
-`v0.1.0-rc.10` tag for a GitHub draft prerelease. Source preparation does not
-create release tags.
+`v0.1.0-rc.10` is the accepted M8 release candidate. It completed the reviewed
+GitHub production release path: exact immutable source/tag binding, Forgejo
+canonical CI authority, native Windows and Linux release builds, Android release
+build/static validation, browser and Native Messaging host packaging, sync
+gateway release build, canonical release assembly, artifact scanning, SBOM,
+release manifest, SHA256SUMS, draft-only tag run, and the publish-only manual
+transaction. Publication preserved the numeric GitHub Release identity, tag,
+commit, prerelease classification, and reviewed payload bytes.
+
+The accepted RC10 completed M8. The current source is promoted to final `0.1.0`
+and is ready for the normal Forgejo review, immutable `v0.1.0` tag, GitHub draft
+build, artifact review, and explicit publication transaction. The stable tag and
+stable GitHub Release have not been created.
 
 M8 now provides pinned release inputs, a single `VERSION`, clean-tree and tag
 consistency gates, hardened release profiles/CSP/filesystem opens, deterministic
@@ -38,10 +47,8 @@ stage drafts only; publication requires a
 manual request with observed Forgejo PASS. Draft assets may be replaced, but a
 published release is immutable and corrections require a new version/tag.
 `SHA256SUMS` covers the final status report, SBOM, release manifest, and platform
-payloads while excluding only itself. M8 is not marked DONE until the
-new commit has a green canonical Forgejo gate, a real GitHub release dry-run is
-reviewed, and the release report records
-platform runtime and signing results without converting `NOT RUN` into `PASS`.
+payloads while excluding only itself. Runtime and signing evidence remains
+recorded honestly; `NOT RUN` is never converted into `PASS`.
 
 Desktop explicit sync supports WebDAV, AWS S3, and the Nian Pass Sync Gateway
 with manual only operation; provider credentials are not persisted.
@@ -185,11 +192,12 @@ M6   Browser Extension Foundation               DONE
 M6.5 Browser Native Messaging / Desktop Integration DONE
 M7   BYO-cloud Sync Providers                   DONE
 M7.5 Self-hosted Sync Gateway                   DONE
-M8   Security Hardening / Release Engineering  IN PROGRESS
+M8   Security Hardening / Release Engineering  DONE
 M9+  Apple Platform Resume                     DEFERRED
 ```
 
-M8 completion is the current milestone. M6.5 uses standard browser
+M8 is complete based on accepted RC10; stable publication remains the next
+release operation for the final source generation. M6.5 uses standard browser
 Native Messaging transport but does not implement or claim compatibility with
 the KeePassXC-Browser wire protocol. It requires neither `keepassxc-proxy` nor a
 KeePassXC executable. Chromium development uses the committed public Manifest

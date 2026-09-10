@@ -27,6 +27,16 @@ No unresolved BLOCKER or HIGH finding is accepted by this review. Real platform
 runtime validation can still reveal a new finding and must not be inferred from
 source or cross-compilation evidence.
 
+## M8 closure
+
+The release-engineering BLOCKER disposition was exercised successfully by the
+accepted `v0.1.0-rc.10` release candidate. Its reviewed GitHub production path
+completed multi-platform build and draft staging, then the manual publish-only
+transaction preserved the exact numeric release identity, tag, commit,
+prerelease classification, and reviewed payload bytes through publication.
+This closure does not upgrade unavailable signing or device/GUI runtime evidence;
+the findings and accepted risks above remain in force.
+
 ## Boundary review
 
 - Vault/session: `SecretString` owns Rust secret inputs, the session remains the

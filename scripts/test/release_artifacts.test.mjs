@@ -516,24 +516,24 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   );
   const payloads = {
     windows: {
-      "Nian Pass_0.1.0-rc.10_x64-setup.exe": Buffer.from([0, 1, 2, 3]),
-      "nian-pass-native-host-windows-x86_64-0.1.0-rc.10.zip": safeZip,
+      "Nian Pass_0.1.0_x64-setup.exe": Buffer.from([0, 1, 2, 3]),
+      "nian-pass-native-host-windows-x86_64-0.1.0.zip": safeZip,
     },
     linux: {
-      "Nian_Pass_0.1.0-rc.10_amd64.AppImage": Buffer.from([0, 1, 2, 3]),
-      "Nian Pass_0.1.0-rc.10_amd64.deb": safeDeb,
-      "nian-pass-native-host-linux-x86_64-0.1.0-rc.10.zip": safeZip,
+      "Nian_Pass_0.1.0_amd64.AppImage": Buffer.from([0, 1, 2, 3]),
+      "Nian Pass_0.1.0_amd64.deb": safeDeb,
+      "nian-pass-native-host-linux-x86_64-0.1.0.zip": safeZip,
     },
     browser: {
-      "nian-pass-browser-chromium-0.1.0-rc.10.zip": safeZip,
-      "nian-pass-browser-firefox-0.1.0-rc.10.zip": safeZip,
+      "nian-pass-browser-chromium-0.1.0.zip": safeZip,
+      "nian-pass-browser-firefox-0.1.0.zip": safeZip,
     },
     android: {
       "app-universal-release-unsigned.apk": Buffer.from([0, 1, 2, 3]),
     },
     gateway: {
       "gateway-image.json": Buffer.from('{"imageId":"sha256:fixture"}\n'),
-      "nian-pass-sync-gateway-0.1.0-rc.10.tar.gz": gzipSync(
+      "nian-pass-sync-gateway-0.1.0.tar.gz": gzipSync(
         tarArchive("usr/local/bin/nian-pass-sync-gateway", "binary"),
       ),
     },
@@ -543,7 +543,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     for (const [name, bytes] of Object.entries(files))
       writeFileSync(join(input, platform, name), bytes);
   }
-  assembleReleaseSet(input, output, "0.1.0-rc.10");
+  assembleReleaseSet(input, output, "0.1.0");
   writeFileSync(
     join(output, "release-status.md"),
     "# Release status\n\nExperimental release.\n",
@@ -560,7 +560,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
         env: {
           ...process.env,
           ARTIFACT_DIR: output,
-          RELEASE_TAG: "v0.1.0-rc.10",
+          RELEASE_TAG: "v0.1.0",
           RELEASE_STATUS_DATA_FILE: statusData,
         },
       },
@@ -584,9 +584,9 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     readFileSync(join(output, "release-manifest.json"), "utf8"),
   );
   assert.equal(manifest.artifacts.length, 12);
-  assert.equal(manifest.version, "0.1.0-rc.10");
-  assert.equal(manifest.releaseKind, "prerelease");
-  assert.equal(manifest.tag, "v0.1.0-rc.10");
+  assert.equal(manifest.version, "0.1.0");
+  assert.equal(manifest.releaseKind, "final");
+  assert.equal(manifest.tag, "v0.1.0");
   assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");
   assert.ok(
     manifest.artifacts.some(
@@ -605,7 +605,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     !manifest.artifacts.some((artifact) => artifact.name === "SHA256SUMS"),
   );
   const sbom = JSON.parse(readFileSync(join(output, "sbom.cdx.json"), "utf8"));
-  assert.equal(sbom.metadata.component.version, "0.1.0-rc.10");
+  assert.equal(sbom.metadata.component.version, "0.1.0");
   assert.deepEqual(
     sbom.components.map((component) => component.name),
     ["fixture-runtime"],
@@ -618,10 +618,10 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
   const sums = readFileSync(join(output, "SHA256SUMS"), "utf8");
   assert.match(
     sums,
-    /^[0-9a-f]{64}  Nian_Pass_0\.1\.0-rc\.10_amd64\.AppImage$/m,
+    /^[0-9a-f]{64}  Nian_Pass_0\.1\.0_amd64\.AppImage$/m,
   );
-  assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0-rc\.10_amd64\.deb$/m);
-  assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0-rc\.10_x64-setup\.exe$/m);
+  assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0_amd64\.deb$/m);
+  assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0_x64-setup\.exe$/m);
   assert.doesNotMatch(sums, /Nian Pass_/);
   assert.match(sums, /^[0-9a-f]{64}  gateway-image\.json$/m);
   assert.match(sums, /^[0-9a-f]{64}  release-manifest\.json$/m);
