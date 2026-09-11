@@ -750,7 +750,31 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   );
   assert.match(
     windowsNodeBootstrapViolations(root).join("\n"),
-    /VerifyOnly must not install, enable, or prepare tooling/,
+    /VerifyOnly must not perform install, activation, network, or download operations/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      '  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT',
+      '  Invoke-WebRequest "https://example.invalid/tool"',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /VerifyOnly must not perform install, activation, network, or download operations/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      '  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT',
+      '  Invoke-RestMethod "https://example.invalid/tool"',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /VerifyOnly must not perform install, activation, network, or download operations/,
   );
 
   writeFileSync(

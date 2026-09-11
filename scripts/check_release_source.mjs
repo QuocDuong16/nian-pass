@@ -462,8 +462,24 @@ export function windowsNodeBootstrapViolations(root) {
   require(/Assert-PrivateToolchain \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT/, "VerifyOnly must reverify the private toolchain");
   require(/Assert-PnpmRuntimeNode \$ToolRoot \$pnpmPath/, "must run the pnpm runtime Node guard through the shared verification path");
   require(/WINDOWS_NODE_VERIFY=PASS/, "VerifyOnly must emit successful post-step verification evidence");
-  if (/npm install|corepackPath enable|corepackPath prepare/.test(verifyOnlyBody)) {
-    violations.push(`${helperPath}: VerifyOnly must not install, enable, or prepare tooling`);
+  const forbiddenVerifyOnlyOperations = [
+    /npm\s+install/i,
+    /corepackPath\s+enable/i,
+    /corepackPath\s+prepare/i,
+    /Invoke-WebRequest/i,
+    /Invoke-RestMethod/i,
+    /Start-BitsTransfer/i,
+    /\bcurl(?:\.exe)?\b/i,
+    /\bwget(?:\.exe)?\b/i,
+  ];
+  if (
+    forbiddenVerifyOnlyOperations.some((pattern) =>
+      pattern.test(verifyOnlyBody),
+    )
+  ) {
+    violations.push(
+      `${helperPath}: VerifyOnly must not perform install, activation, network, or download operations`,
+    );
   }
   if (/npm install\s+--global\s+"corepack@/i.test(helper)) {
     violations.push(`${helperPath}: runner-global Corepack installation is forbidden`);
