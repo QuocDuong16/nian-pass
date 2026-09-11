@@ -43,7 +43,10 @@ export function useCloseRequest(options: CloseRequestOptions) {
             return;
           }
           const policy = await before.api.closePolicy();
-          if (!active) return;
+          if (!active) {
+            event.preventDefault();
+            return;
+          }
 
           const after = latest.current;
           if (after.blocked || after.windowLifecycle === null) {

@@ -222,6 +222,50 @@ test("duplicate close while policy is pending is prevented without authorizing a
   expect(destroyApprovedWindow).not.toHaveBeenCalled();
 });
 
+test("unmount during a pending close policy prevents native destruction", async () => {
+  let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
+    Promise.reject(new Error("close handler missing"));
+  let resolvePolicy: (value: { policy: "allow" }) => void = () => {
+    throw new Error("close policy resolver missing");
+  };
+  const closePolicy = vi.fn().mockImplementation(
+    () =>
+      new Promise<{ policy: "allow" }>((resolve) => {
+        resolvePolicy = resolve;
+      }),
+  );
+  const destroyApprovedWindow = vi.fn().mockResolvedValue(undefined);
+  const lifecycle: DesktopWindowLifecycle = {
+    onCloseRequested: vi
+      .fn()
+      .mockImplementation(
+        (handler: (event: CloseRequestEvent) => Promise<void>) => {
+          closeHandler = handler;
+          return Promise.resolve(vi.fn());
+        },
+      ),
+    destroyApprovedWindow,
+  };
+  const view = render(
+    <App api={mutationApi({ closePolicy })} windowLifecycle={lifecycle} />,
+  );
+  await waitFor(() => {
+    expect(lifecycle.onCloseRequested).toHaveBeenCalledOnce();
+  });
+
+  const preventDefault = vi.fn();
+  const close = closeHandler({ preventDefault });
+  expect(closePolicy).toHaveBeenCalledOnce();
+  view.unmount();
+  await act(async () => {
+    resolvePolicy({ policy: "allow" });
+    await close;
+  });
+
+  expect(preventDefault).toHaveBeenCalledOnce();
+  expect(destroyApprovedWindow).not.toHaveBeenCalled();
+});
+
 test("a local draft that appears during close-policy lookup prevents approved destruction", async () => {
   let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
     Promise.reject(new Error("close handler missing"));
