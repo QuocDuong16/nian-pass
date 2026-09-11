@@ -6,7 +6,8 @@ import { test } from "node:test";
 
 import { runChecks } from "../check_security.mjs";
 
-const approvedCsp = "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'";
+const approvedCsp =
+  "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'";
 const workspaceMembers = [
   "apps/cli",
   "apps/desktop/src-tauri",
@@ -53,7 +54,11 @@ function fixture(t) {
   ]) {
     write(root, path, "pub fn safe() {}\n");
   }
-  write(root, "apps/desktop/package.json", '{"dependencies":{"@tauri-apps/api":"2.11.1"}}\n');
+  write(
+    root,
+    "apps/desktop/package.json",
+    '{"dependencies":{"@tauri-apps/api":"2.11.1"}}\n',
+  );
   const manifests = {
     "apps/desktop/src-tauri/Cargo.toml": "nian-pass-desktop",
     "apps/cli/Cargo.toml": "nian-pass-cli",
@@ -68,7 +73,7 @@ function fixture(t) {
   write(
     root,
     "apps/desktop/src-tauri/capabilities/main.json",
-    '{"permissions":["core:default"]}\n',
+    '{"identifier":"main-window","windows":["main"],"permissions":["core:default","core:window:allow-destroy"]}\n',
   );
   writeCsp(root, approvedCsp);
   return root;
@@ -80,7 +85,11 @@ test("approved capability, CSP, dependencies, and source pass", (t) => {
 
 test("browser storage and console output are rejected", (t) => {
   const root = fixture(t);
-  write(root, "apps/desktop/src/App.tsx", 'console.error(localStorage.getItem("vault"));\n');
+  write(
+    root,
+    "apps/desktop/src/App.tsx",
+    'console.error(localStorage.getItem("vault"));\n',
+  );
   const violations = runChecks(root).join("\n");
   assert.match(violations, /console logging/);
   assert.match(violations, /browser persistence/);
@@ -95,20 +104,41 @@ test("browser clipboard access spellings are rejected", (t) => {
   ]) {
     const root = fixture(t);
     write(root, "apps/desktop/src/App.tsx", source);
-    assert.match(runChecks(root).join("\n"), /browser clipboard access is forbidden/);
+    assert.match(
+      runChecks(root).join("\n"),
+      /browser clipboard access is forbidden/,
+    );
   }
 });
 
 test("remote script origin is rejected", (t) => {
   const root = fixture(t);
-  writeCsp(root, approvedCsp.replace("script-src 'self'", "script-src 'self' https://evil.example"));
-  assert.match(runChecks(root).join("\n"), /script-src token https:\/\/evil\.example is not approved/);
+  writeCsp(
+    root,
+    approvedCsp.replace(
+      "script-src 'self'",
+      "script-src 'self' https://evil.example",
+    ),
+  );
+  assert.match(
+    runChecks(root).join("\n"),
+    /script-src token https:\/\/evil\.example is not approved/,
+  );
 });
 
 test("unsafe-inline script behavior is rejected", (t) => {
   const root = fixture(t);
-  writeCsp(root, approvedCsp.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'"));
-  assert.match(runChecks(root).join("\n"), /script-src token 'unsafe-inline' is not approved/);
+  writeCsp(
+    root,
+    approvedCsp.replace(
+      "script-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+    ),
+  );
+  assert.match(
+    runChecks(root).join("\n"),
+    /script-src token 'unsafe-inline' is not approved/,
+  );
 });
 
 test("unsafe-eval, wildcard script, and wildcard default sources are rejected", (t) => {
@@ -134,13 +164,19 @@ test("specific remote connect origin is rejected", (t) => {
       "connect-src ipc: http://ipc.localhost https://evil.example",
     ),
   );
-  assert.match(runChecks(root).join("\n"), /connect-src token https:\/\/evil\.example is not approved/);
+  assert.match(
+    runChecks(root).join("\n"),
+    /connect-src token https:\/\/evil\.example is not approved/,
+  );
 });
 
 test("scheme-wide HTTP connect source is rejected", (t) => {
   const root = fixture(t);
   writeCsp(root, approvedCsp.replace("http://ipc.localhost", "http:"));
-  assert.match(runChecks(root).join("\n"), /connect-src token http: is not approved/);
+  assert.match(
+    runChecks(root).join("\n"),
+    /connect-src token http: is not approved/,
+  );
 });
 
 test("other remote connect schemes and wildcards are rejected", (t) => {
@@ -158,25 +194,37 @@ test("other remote connect schemes and wildcards are rejected", (t) => {
 test("duplicate script-src directive is rejected", (t) => {
   const root = fixture(t);
   writeCsp(root, `${approvedCsp}; script-src https://evil.example`);
-  assert.match(runChecks(root).join("\n"), /duplicate script-src directive is forbidden/);
+  assert.match(
+    runChecks(root).join("\n"),
+    /duplicate script-src directive is forbidden/,
+  );
 });
 
 test("object-src must use its approved none source", (t) => {
   const root = fixture(t);
   writeCsp(root, approvedCsp.replace("object-src 'none'", "object-src 'self'"));
-  assert.match(runChecks(root).join("\n"), /object-src token 'self' is not approved/);
+  assert.match(
+    runChecks(root).join("\n"),
+    /object-src token 'self' is not approved/,
+  );
 });
 
 test("required CSP directives may not be omitted", (t) => {
   const root = fixture(t);
   writeCsp(root, approvedCsp.replace("; object-src 'none'", ""));
-  assert.match(runChecks(root).join("\n"), /required directive object-src is missing/);
+  assert.match(
+    runChecks(root).join("\n"),
+    /required directive object-src is missing/,
+  );
 });
 
 test("unknown CSP directives require policy review", (t) => {
   const root = fixture(t);
   writeCsp(root, `${approvedCsp}; worker-src 'self'`);
-  assert.match(runChecks(root).join("\n"), /directive worker-src is not approved/);
+  assert.match(
+    runChecks(root).join("\n"),
+    /directive worker-src is not approved/,
+  );
 });
 
 test("unapproved Tauri capability and plugin are rejected", (t) => {
@@ -184,7 +232,7 @@ test("unapproved Tauri capability and plugin are rejected", (t) => {
   write(
     root,
     "apps/desktop/src-tauri/capabilities/main.json",
-    '{"permissions":["core:default","shell:default"]}\n',
+    '{"identifier":"main-window","windows":["main"],"permissions":["core:default","core:window:allow-destroy","shell:default"]}\n',
   );
   write(
     root,
@@ -194,6 +242,22 @@ test("unapproved Tauri capability and plugin are rejected", (t) => {
   const violations = runChecks(root).join("\n");
   assert.match(violations, /plugin-shell/);
   assert.match(violations, /shell:default/);
+});
+
+test("main window capability remains narrowly scoped to approved destroy", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/capabilities/main.json",
+    '{"identifier":"main-window","windows":["main","other"],"permissions":["core:default","core:window:allow-destroy","core:window:allow-close"]}\n',
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /scoped to only the main window/);
+  assert.match(
+    violations,
+    /requires exactly core:default and core:window:allow-destroy/,
+  );
+  assert.match(violations, /allow-close/);
 });
 
 test("renamed forbidden Rust Tauri plugin is rejected by actual package name", (t) => {

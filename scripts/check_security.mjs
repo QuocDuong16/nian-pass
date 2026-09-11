@@ -2,7 +2,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { dependencyLabel, loadWorkspacePackages } from "./lib/cargo_dependencies.mjs";
+import {
+  dependencyLabel,
+  loadWorkspacePackages,
+} from "./lib/cargo_dependencies.mjs";
 import {
   frontendProductionFiles,
   lineNumberAt,
@@ -54,7 +57,9 @@ function reportMatches(violations, root, path, source, pattern, message) {
 
 function javascriptDependencyPackage(localName, requirement) {
   if (typeof requirement !== "string") return localName;
-  const alias = requirement.match(/^npm:((?:@[^/@\s]+\/[^@\s]+)|(?:[^@\s]+))(?:@.+)?$/);
+  const alias = requirement.match(
+    /^npm:((?:@[^/@\s]+\/[^@\s]+)|(?:[^@\s]+))(?:@.+)?$/,
+  );
   return alias?.[1] ?? localName;
 }
 
@@ -92,9 +97,18 @@ export function runChecks(root) {
     [/\bdangerouslySetInnerHTML\b/g, "dangerouslySetInnerHTML is forbidden"],
     [/\bdocument\s*\.\s*write\s*\(/g, "document.write is forbidden"],
     [/\beval\s*\(/g, "eval is forbidden"],
-    [/(?:\bnew\s+Function\s*\(|\bFunction\s*\()/g, "Function constructors are forbidden"],
-    [/https?:\/\//g, "runtime remote URLs/assets are forbidden in production frontend source"],
-    [/@tauri-apps\/plugin-/g, "Tauri JavaScript plugins are not approved for the M4.Q frontend"],
+    [
+      /(?:\bnew\s+Function\s*\(|\bFunction\s*\()/g,
+      "Function constructors are forbidden",
+    ],
+    [
+      /https?:\/\//g,
+      "runtime remote URLs/assets are forbidden in production frontend source",
+    ],
+    [
+      /@tauri-apps\/plugin-/g,
+      "Tauri JavaScript plugins are not approved for the M4.Q frontend",
+    ],
     [
       /\b(?:(?:window|globalThis)\s*\.\s*)?navigator\s*(?:(?:\?\.|\.)\s*clipboard\b|\[\s*["']clipboard["']\s*\])/g,
       "browser clipboard access is forbidden; use semantic Rust IPC commands",
@@ -151,12 +165,20 @@ export function runChecks(root) {
   const desktopPackage = JSON.parse(
     readFileSync(resolve(root, "apps/desktop/package.json"), "utf8"),
   );
-  for (const group of [desktopPackage.dependencies, desktopPackage.devDependencies]) {
+  for (const group of [
+    desktopPackage.dependencies,
+    desktopPackage.devDependencies,
+  ]) {
     for (const [localName, requirement] of Object.entries(group ?? {})) {
       const actualPackage = javascriptDependencyPackage(localName, requirement);
       if (forbiddenPlugins.has(actualPackage)) {
-        const label = localName === actualPackage ? actualPackage : `${localName} (package ${actualPackage})`;
-        violations.push(`apps/desktop/package.json: forbidden current-milestone plugin ${label}`);
+        const label =
+          localName === actualPackage
+            ? actualPackage
+            : `${localName} (package ${actualPackage})`;
+        violations.push(
+          `apps/desktop/package.json: forbidden current-milestone plugin ${label}`,
+        );
       }
     }
   }
@@ -176,53 +198,115 @@ export function runChecks(root) {
     }
   }
 
-  const capabilityDirectory = resolve(root, "apps/desktop/src-tauri/capabilities");
-  const allowedPermissions = new Set(["core:default"]);
-  for (const file of readdirSync(capabilityDirectory).filter((name) => name.endsWith(".json"))) {
+  const capabilityDirectory = resolve(
+    root,
+    "apps/desktop/src-tauri/capabilities",
+  );
+  const allowedPermissions = new Set([
+    "core:default",
+    "core:window:allow-destroy",
+  ]);
+  for (const file of readdirSync(capabilityDirectory).filter((name) =>
+    name.endsWith(".json"),
+  )) {
     const relativeName = `apps/desktop/src-tauri/capabilities/${file}`;
-    const capability = JSON.parse(readFileSync(resolve(capabilityDirectory, file), "utf8"));
+    const capability = JSON.parse(
+      readFileSync(resolve(capabilityDirectory, file), "utf8"),
+    );
     if (!Array.isArray(capability.permissions)) {
       violations.push(`${relativeName}: permissions must be an explicit array`);
       continue;
     }
+    if (file === "main.json") {
+      const requiredPermissions = new Set([
+        "core:default",
+        "core:window:allow-destroy",
+      ]);
+      // Tauri prevents native close while a JS listener runs; approved close completes via destroy().
+      if (capability.identifier !== "main-window") {
+        violations.push(`${relativeName}: identifier must remain main-window`);
+      }
+      if (
+        !Array.isArray(capability.windows) ||
+        capability.windows.length !== 1 ||
+        capability.windows[0] !== "main"
+      ) {
+        violations.push(
+          `${relativeName}: capability must remain scoped to only the main window`,
+        );
+      }
+      const permissions = new Set(capability.permissions);
+      if (
+        permissions.size !== requiredPermissions.size ||
+        [...requiredPermissions].some(
+          (permission) => !permissions.has(permission),
+        )
+      ) {
+        violations.push(
+          `${relativeName}: approved close requires exactly core:default and core:window:allow-destroy`,
+        );
+      }
+    }
     for (const permission of capability.permissions) {
-      if (typeof permission !== "string" || !allowedPermissions.has(permission)) {
-        violations.push(`${relativeName}: permission is not approved for M4.Q: ${String(permission)}`);
+      if (
+        typeof permission !== "string" ||
+        !allowedPermissions.has(permission)
+      ) {
+        violations.push(
+          `${relativeName}: permission is not approved for M4.Q: ${String(permission)}`,
+        );
       }
     }
   }
 
-  const tauriConfigPath = resolve(root, "apps/desktop/src-tauri/tauri.conf.json");
+  const tauriConfigPath = resolve(
+    root,
+    "apps/desktop/src-tauri/tauri.conf.json",
+  );
   if (!existsSync(tauriConfigPath)) {
-    violations.push("apps/desktop/src-tauri/tauri.conf.json: missing Tauri configuration");
+    violations.push(
+      "apps/desktop/src-tauri/tauri.conf.json: missing Tauri configuration",
+    );
   } else {
     const config = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
     const csp = config?.app?.security?.csp;
     if (typeof csp !== "string" || csp.trim() === "") {
-      violations.push("apps/desktop/src-tauri/tauri.conf.json: production CSP must be explicit");
+      violations.push(
+        "apps/desktop/src-tauri/tauri.conf.json: production CSP must be explicit",
+      );
     } else {
       const { directives, duplicates } = cspDirectives(csp);
       for (const directive of duplicates) {
-        violations.push(`Tauri CSP: duplicate ${directive} directive is forbidden`);
+        violations.push(
+          `Tauri CSP: duplicate ${directive} directive is forbidden`,
+        );
       }
       for (const directive of directives.keys()) {
         if (!approvedCsp.has(directive)) {
-          violations.push(`Tauri CSP: directive ${directive} is not approved for M4.Q`);
+          violations.push(
+            `Tauri CSP: directive ${directive} is not approved for M4.Q`,
+          );
         }
       }
       for (const [directive, allowedTokens] of approvedCsp) {
         const actualTokens = directives.get(directive);
         if (actualTokens === undefined) {
-          violations.push(`Tauri CSP: required directive ${directive} is missing`);
+          violations.push(
+            `Tauri CSP: required directive ${directive} is missing`,
+          );
           continue;
         }
         if (actualTokens.size === 0) {
-          violations.push(`Tauri CSP: ${directive} must have an explicit source list`);
+          violations.push(
+            `Tauri CSP: ${directive} must have an explicit source list`,
+          );
           continue;
         }
         for (const token of actualTokens) {
           if (!allowedTokens.has(token)) {
-            violations.push(`Tauri CSP: ${directive} token ${token} is not approved for M4.Q`);
+            violations.push(
+              `Tauri CSP: ${directive} token ${token} is not approved for M4.Q`,
+            );
           }
         }
       }
