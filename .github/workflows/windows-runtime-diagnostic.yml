@@ -102,7 +102,7 @@ jobs:
             }
           }
 
-          function Start-DesktopAndRequireStartup([string] $Binary) {
+          function Start-DesktopAndRequireStartup([string] $Binary, [string] $TracePath) {
             $process = Start-Process -FilePath $Binary -PassThru
             Start-Sleep -Seconds 8
             if ($process.HasExited) {
@@ -135,7 +135,6 @@ jobs:
           $version = (Get-Content -LiteralPath "VERSION" -Raw).Trim()
           $closeTrace = Join-Path $env:RUNNER_TEMP "nian-pass-windows-close-trace.log"
           Remove-Item -LiteralPath $closeTrace -Force -ErrorAction SilentlyContinue
-          $env:NIAN_PASS_WINDOWS_CLOSE_TRACE = $closeTrace
           Write-Host "commit SHA: $commit"
           Write-Host "VERSION: $version"
           if ($version -ne "0.1.1") { throw "Windows runtime diagnostic requires VERSION 0.1.1" }
@@ -147,7 +146,17 @@ jobs:
           Write-Host "nian-pass-desktop.exe SizeOfStackReserve: $stackReserve bytes"
           if ($stackReserve -lt [UInt64]8388608) { throw "SizeOfStackReserve $stackReserve bytes is below required 8388608 bytes" }
 
-          $desktopProcess = Start-DesktopAndRequireStartup $desktopBinary
+          $previousTrace = $env:NIAN_PASS_WINDOWS_CLOSE_TRACE
+          try {
+            $env:NIAN_PASS_WINDOWS_CLOSE_TRACE = $closeTrace
+            $desktopProcess = Start-DesktopAndRequireStartup $desktopBinary $closeTrace
+          } finally {
+            if ($null -eq $previousTrace) {
+              Remove-Item Env:NIAN_PASS_WINDOWS_CLOSE_TRACE -ErrorAction SilentlyContinue
+            } else {
+              $env:NIAN_PASS_WINDOWS_CLOSE_TRACE = $previousTrace
+            }
+          }
           Write-Host "WINDOWS_DESKTOP_STARTUP_SMOKE=PASS"
           Test-DesktopGracefulShutdown $desktopProcess
           Write-CloseTrace

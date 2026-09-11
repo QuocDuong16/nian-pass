@@ -414,10 +414,10 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/pnpm --filter @nian-pass\/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc/, "must build the desktop release binary");
   require(/target\/x86_64-pc-windows-msvc\/release\/nian-pass-desktop\.exe/, "must resolve the raw desktop executable");
   require(/Get-PeStackReserve[\s\S]*?SizeOfStackReserve[\s\S]*?8388608/, "must inspect the PE reserve and require 8388608 bytes");
-  require(/Start-DesktopAndRequireStartup[\s\S]*?Start-Process -FilePath \$Binary -PassThru[\s\S]*?Start-Sleep -Seconds 8[\s\S]*?WINDOWS_DESKTOP_STARTUP_SMOKE=PASS/, "must run the bounded desktop startup smoke");
+  require(/Start-DesktopAndRequireStartup[\s\S]*?\[string\] \$TracePath[\s\S]*?Start-Process -FilePath \$Binary -PassThru[\s\S]*?Start-Sleep -Seconds 8[\s\S]*?WINDOWS_DESKTOP_STARTUP_SMOKE=PASS/, "must run the bounded desktop startup smoke");
   require(/Test-DesktopGracefulShutdown[\s\S]*?CloseMainWindow\(\)[\s\S]*?WaitForExit\(5000\)[\s\S]*?\$Process\.ExitCode -ne 0[\s\S]*?WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS/, "must require normal main-window shutdown with exit code 0");
   require(/Stop-DesktopAfterFailedShutdown[\s\S]*?Stop-Process[\s\S]*?throw "Windows desktop graceful shutdown/, "must force-kill only as failed-shutdown cleanup");
-  require(/\$env:NIAN_PASS_WINDOWS_CLOSE_TRACE\s*=\s*\$closeTrace/, "must supply the close trace path only to the diagnostic desktop process");
+  require(/pnpm --filter @nian-pass\/desktop tauri build[\s\S]*?Get-PeStackReserve[\s\S]*?\$previousTrace = \$env:NIAN_PASS_WINDOWS_CLOSE_TRACE[\s\S]*?\$env:NIAN_PASS_WINDOWS_CLOSE_TRACE = \$closeTrace[\s\S]*?Start-DesktopAndRequireStartup \$desktopBinary \$closeTrace[\s\S]*?Remove-Item Env:NIAN_PASS_WINDOWS_CLOSE_TRACE/, "must scope the close trace environment to desktop process startup after build and PE inspection");
   require(/function Write-CloseTrace\(\)[\s\S]*?===== NIAN WINDOWS CLOSE TRACE BEGIN =====[\s\S]*?NIAN_WINDOWS_CLOSE_TRACE=MISSING[\s\S]*?===== NIAN WINDOWS CLOSE TRACE END =====/, "must print a clearly delimited close trace or missing marker");
   require(/Stop-DesktopAfterFailedShutdown[\s\S]*?Write-CloseTrace[\s\S]*?process diagnostics:[\s\S]*?Stop-Process/, "must print the close trace before failed-shutdown diagnostics and cleanup");
   require(/Test-DesktopGracefulShutdown \$desktopProcess\s*\n\s*Write-CloseTrace\s*\n\s*Write-Host "WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS"/, "must print the close trace after successful natural shutdown");

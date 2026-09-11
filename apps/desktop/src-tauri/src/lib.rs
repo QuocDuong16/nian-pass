@@ -136,6 +136,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Nian Pass desktop runtime failed");
 
+    close_trace::trace("RUST_APP_RUNNING");
     app.run(|app_handle, event| {
         if let tauri::RunEvent::WindowEvent { label, event, .. } = event {
             if label == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {

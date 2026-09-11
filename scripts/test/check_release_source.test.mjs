@@ -556,7 +556,7 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   );
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
-    /supply the close trace path/,
+    /scope the close trace environment/,
   );
   writeFileSync(
     workflowPath,
