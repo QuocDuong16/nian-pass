@@ -191,6 +191,7 @@ jobs:
           NIAN_PASS_WINDOWS_PFX_BASE64: ${{ secrets.NIAN_PASS_WINDOWS_PFX_BASE64 }}
           NIAN_PASS_WINDOWS_PFX_PASSWORD: ${{ secrets.NIAN_PASS_WINDOWS_PFX_PASSWORD }}
         run: |
+          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly
           if ((git rev-parse HEAD).Trim() -ne "${{ needs.preflight.outputs.commit }}") { throw "release commit mismatch" }
           ./scripts/release_windows.ps1
           $installer = Get-ChildItem artifacts/release -File -Filter *.exe | Select-Object -First 1

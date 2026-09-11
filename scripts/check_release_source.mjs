@@ -109,8 +109,18 @@ export function githubReleaseWorkflowViolations(root) {
   }
   const windowsSetupNodeIndex = windowsJob.indexOf("uses: actions/setup-node@");
   const windowsBootstrapIndex = windowsJob.indexOf(
-    "./scripts/bootstrap_windows_node_tools.ps1",
+    "./scripts/bootstrap_windows_node_tools.ps1\n",
   );
+  const windowsVerifyOnlyIndex = windowsJob.indexOf(
+    "./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly",
+  );
+  const windowsReleaseScriptIndex = windowsJob.indexOf(
+    "./scripts/release_windows.ps1",
+  );
+  const windowsBuildStep =
+    /      - name: Build and validate native Windows payload[\s\S]*?(?=^      - name:)/m.exec(
+      windowsJob,
+    )?.[0] ?? "";
   if (
     windowsSetupNodeIndex < 0 ||
     windowsBootstrapIndex < 0 ||
@@ -118,6 +128,24 @@ export function githubReleaseWorkflowViolations(root) {
   ) {
     violations.push(
       `${githubWorkflow}: Windows setup-node must run before the shared private Node tool bootstrap`,
+    );
+  }
+  if (
+    windowsVerifyOnlyIndex < 0 ||
+    windowsReleaseScriptIndex < 0 ||
+    windowsVerifyOnlyIndex > windowsReleaseScriptIndex
+  ) {
+    violations.push(
+      `${githubWorkflow}: Windows VerifyOnly must run before release_windows.ps1`,
+    );
+  }
+  if (
+    !/\.\/scripts\/bootstrap_windows_node_tools\.ps1 -VerifyOnly[\s\S]*?\.\/scripts\/release_windows\.ps1/.test(
+      windowsBuildStep,
+    )
+  ) {
+    violations.push(
+      `${githubWorkflow}: Windows build step must run VerifyOnly before release_windows.ps1`,
     );
   }
   require(/^on:\s*\n[\s\S]*?^  push:\s*\n\s+tags:\s*\n\s+- ["']v\*["']/m, "must trigger on v* tags");
@@ -398,6 +426,12 @@ export function windowsNodeBootstrapViolations(root) {
     return [`${helperPath}: shared Windows Node tool bootstrap is missing`];
   }
   const helper = readPolicyText(root, helperPath);
+  const verifyOnlyStart = helper.indexOf("if ($VerifyOnly) {");
+  const bootstrapStart = helper.indexOf("Assert-PinnedNode | Out-Null");
+  const verifyOnlyBody =
+    verifyOnlyStart >= 0 && bootstrapStart > verifyOnlyStart
+      ? helper.slice(verifyOnlyStart, bootstrapStart)
+      : "";
   const violations = [];
   const require = (pattern, message) => {
     if (!pattern.test(helper)) violations.push(`${helperPath}: ${message}`);
@@ -405,14 +439,15 @@ export function windowsNodeBootstrapViolations(root) {
   require(/^\$ErrorActionPreference\s*=\s*"Stop"/m, "must stop on PowerShell errors");
   require(/^\$PSNativeCommandUseErrorActionPreference\s*=\s*\$true/m, "must stop on native command errors");
   require(/\$LASTEXITCODE\s+-ne\s+0/, "must explicitly reject non-zero native command exit codes");
-  require(/\$actualNode\s*=\s*\(node --version\)\.Trim\(\)/, "must read the selected Node version");
+  require(/\[switch\] \$VerifyOnly/, "must support VerifyOnly mode");
+  require(/function Assert-PinnedNode/, "must re-read the selected Node version");
   require(/\$actualNode\s+-ne\s+\$expectedNode/, "must reject an unexpected Node version");
   require(/Join-Path \$env:RUNNER_TEMP "nian-pass-node-tools"/, "must use a private RUNNER_TEMP tool root");
   require(/Join-Path \$env:RUNNER_TEMP "nian-pass-corepack-home"/, "must use a private RUNNER_TEMP COREPACK_HOME");
   require(/npm install --global --prefix \$toolRoot "corepack@\$env:COREPACK_VERSION"/, "must install Corepack with an explicit private npm prefix");
   require(/\$env:COREPACK_HOME\s*=\s*\$corepackHome/, "must isolate COREPACK_HOME");
-  require(/Assert-PrivateToolCommand "corepack" \$toolRoot/, "must require a private Corepack executable");
-  require(/Assert-PrivateToolCommand "pnpm" \$toolRoot/, "must require a private pnpm executable");
+  require(/Assert-PrivateToolCommand "corepack" \$[Tt]oolRoot/, "must require a private Corepack executable");
+  require(/Assert-PrivateToolCommand "pnpm" \$[Tt]oolRoot/, "must require a private pnpm executable");
   require(/\$corepackVersion\s+-ne\s+\$env:COREPACK_VERSION/, "must require the exact Corepack version");
   require(/\$pnpmVersion\s+-ne\s+\$env:PNPM_VERSION/, "must require the exact pnpm version");
   require(/NIAN_PASS_EXPECTED_NODE_VERSION/, "must provide the pnpm runtime Node guard");
@@ -420,7 +455,16 @@ export function windowsNodeBootstrapViolations(root) {
   require(/NODE_OPTIONS\s*=\s*"--require=\$guardPath"/, "must load the pnpm runtime Node guard only for verification");
   require(/Remove-Item Env:NODE_OPTIONS/, "must remove temporary NODE_OPTIONS after verification");
   require(/Set-WorkflowEnvironment "COREPACK_HOME" \$corepackHome/, "must persist isolated COREPACK_HOME through GITHUB_ENV");
+  require(/Set-WorkflowEnvironment "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" \$toolRoot/, "must persist the private tool-root identity through GITHUB_ENV");
   require(/Add-WorkflowPath \$toolRoot/, "must persist the private tool root through GITHUB_PATH");
+  require(/Assert-PathUnderRunnerTemp "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT \$toolRoot/, "VerifyOnly must require the persisted private tool root under RUNNER_TEMP");
+  require(/Assert-PathUnderRunnerTemp "COREPACK_HOME" \$env:COREPACK_HOME \$corepackHome/, "VerifyOnly must require the persisted private COREPACK_HOME");
+  require(/Assert-PrivateToolchain \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT/, "VerifyOnly must reverify the private toolchain");
+  require(/Assert-PnpmRuntimeNode \$ToolRoot \$pnpmPath/, "must run the pnpm runtime Node guard through the shared verification path");
+  require(/WINDOWS_NODE_VERIFY=PASS/, "VerifyOnly must emit successful post-step verification evidence");
+  if (/npm install|corepackPath enable|corepackPath prepare/.test(verifyOnlyBody)) {
+    violations.push(`${helperPath}: VerifyOnly must not install, enable, or prepare tooling`);
+  }
   if (/npm install\s+--global\s+"corepack@/i.test(helper)) {
     violations.push(`${helperPath}: runner-global Corepack installation is forbidden`);
   }
@@ -451,9 +495,17 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020[\s\S]*?node-version:\s*\$\{\{ env\.NODE_VERSION \}\}/, "must install NODE_VERSION with the production-pinned setup-node action");
   const checkoutIndex = workflow.indexOf("uses: actions/checkout@");
   const setupNodeIndex = workflow.indexOf("uses: actions/setup-node@");
-  const bootstrapIndex = workflow.indexOf(
-    "./scripts/bootstrap_windows_node_tools.ps1",
+  const bootstrapIndex = workflow.indexOf("./scripts/bootstrap_windows_node_tools.ps1\n");
+  const verifyOnlyIndex = workflow.indexOf(
+    "./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly",
   );
+  const desktopBuildIndex = workflow.indexOf(
+    "pnpm --filter @nian-pass/desktop tauri build",
+  );
+  const diagnosticBuildStep =
+    /      - name: Build and validate Windows desktop runtime[\s\S]*?(?=^      - name:)/m.exec(
+      workflow,
+    )?.[0] ?? "";
   const frozenLockfileIndex = workflow.indexOf(
     "pnpm install --frozen-lockfile",
   );
@@ -468,6 +520,24 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
     );
   }
   require(/\.\/scripts\/bootstrap_windows_node_tools\.ps1/, "must use the shared private Node tool bootstrap");
+  if (
+    verifyOnlyIndex < 0 ||
+    desktopBuildIndex < 0 ||
+    verifyOnlyIndex > desktopBuildIndex
+  ) {
+    violations.push(
+      `${workflowPath}: VerifyOnly must run before the desktop Tauri build`,
+    );
+  }
+  if (
+    !/\.\/scripts\/bootstrap_windows_node_tools\.ps1 -VerifyOnly[\s\S]*?pnpm --filter @nian-pass\/desktop tauri build/.test(
+      diagnosticBuildStep,
+    )
+  ) {
+    violations.push(
+      `${workflowPath}: diagnostic build step must run VerifyOnly before the desktop Tauri build`,
+    );
+  }
   if (/npm install\s+--global\s+"corepack@/i.test(workflow)) {
     violations.push(`${workflowPath}: runner-global Corepack installation is forbidden`);
   }

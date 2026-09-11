@@ -76,7 +76,14 @@ test("Windows release Rust pin parser fails closed on malformed configuration", 
 test("Windows release script invokes the tested TOML toolchain helper", (t) => {
   const repositoryRoot = resolve(import.meta.dirname, "../..");
   const script = readFileSync(join(repositoryRoot, "scripts/release_windows.ps1"), "utf8");
-  assert.match(script, /node\s+"scripts\/release_toolchain\.mjs"\s+"\.mise\.toml"/);
+  assert.match(
+    script,
+    /Get-CheckedOutput "node" @\("scripts\/release_toolchain\.mjs", "\.mise\.toml"\)/,
+  );
+  const pnpmInstall = script.indexOf('Invoke-Checked "pnpm" @("install", "--frozen-lockfile")');
+  assert.ok(pnpmInstall >= 0);
+  assert.ok(script.indexOf('Assert-PrivateNodeToolCommand "pnpm"') < pnpmInstall);
+  assert.ok(script.indexOf('Get-CheckedOutput $pnpmPath @("--version")') < pnpmInstall);
 
   const root = mkdtempSync(join(tmpdir(), "nian-pass-release-toolchain-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

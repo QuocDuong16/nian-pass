@@ -8,6 +8,29 @@ function Invoke-Checked([string] $Program, [string[]] $Arguments) {
     }
 }
 
+function Get-CheckedOutput([string] $Program, [string[]] $Arguments) {
+    $output = (& $Program @Arguments | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Program failed with exit code $LASTEXITCODE"
+    }
+    return $output
+}
+
+function Get-NormalizedWindowsPath([string] $Path) {
+    return [System.IO.Path]::GetFullPath($Path).TrimEnd([System.IO.Path]::DirectorySeparatorChar).ToLowerInvariant()
+}
+
+function Assert-PrivateNodeToolCommand([string] $Name, [string] $ToolRoot) {
+    $source = (Get-Command $Name -CommandType Application -ErrorAction Stop).Source
+    $normalizedSource = Get-NormalizedWindowsPath $source
+    $normalizedToolRoot = Get-NormalizedWindowsPath $ToolRoot
+    $toolRootPrefix = "$normalizedToolRoot$([System.IO.Path]::DirectorySeparatorChar)"
+    if ($normalizedSource -ne $normalizedToolRoot -and -not $normalizedSource.StartsWith($toolRootPrefix)) {
+        throw "$Name must resolve under NIAN_PASS_WINDOWS_NODE_TOOL_ROOT; found $source"
+    }
+    return $source
+}
+
 function Set-ReleaseOutput([string] $Name, [string] $Value) {
     if ($env:GITHUB_OUTPUT) {
         Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$Name=$Value" -Encoding utf8
@@ -114,16 +137,19 @@ $windowsPfxPassword = $env:NIAN_PASS_WINDOWS_PFX_PASSWORD
 Remove-Item Env:NIAN_PASS_WINDOWS_PFX_BASE64 -ErrorAction SilentlyContinue
 Remove-Item Env:NIAN_PASS_WINDOWS_PFX_PASSWORD -ErrorAction SilentlyContinue
 
-Invoke-Checked "pnpm" @("install", "--frozen-lockfile")
 $expectedNode = "v$((Get-Content -LiteralPath ".node-version" -Raw).Trim())"
 $expectedPnpm = ((Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json).packageManager -replace "^pnpm@", "")
-$expectedRust = (& node "scripts/release_toolchain.mjs" ".mise.toml").Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedRust)) {
-    throw "Could not read the pinned Rust version"
-}
-if ((node --version).Trim() -ne $expectedNode) { throw "Pinned Node $expectedNode is required" }
-if ((pnpm --version).Trim() -ne $expectedPnpm) { throw "Pinned pnpm $expectedPnpm is required" }
+if ((Get-CheckedOutput "node" @("--version")) -ne $expectedNode) { throw "Pinned Node $expectedNode is required" }
+if ([string]::IsNullOrWhiteSpace($env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT)) { throw "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT is required" }
+if (-not (Test-Path -LiteralPath $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT -PathType Container)) { throw "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT directory is missing" }
+$corepackPath = Assert-PrivateNodeToolCommand "corepack" $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT
+$pnpmPath = Assert-PrivateNodeToolCommand "pnpm" $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT
+if ((Get-CheckedOutput $corepackPath @("--version")) -ne "0.35.0") { throw "Pinned Corepack 0.35.0 is required" }
+if ((Get-CheckedOutput $pnpmPath @("--version")) -ne $expectedPnpm) { throw "Pinned pnpm $expectedPnpm is required" }
+$expectedRust = Get-CheckedOutput "node" @("scripts/release_toolchain.mjs", ".mise.toml")
+if ([string]::IsNullOrWhiteSpace($expectedRust)) { throw "Could not read the pinned Rust version" }
 if (((rustc --version) -split ' ')[1] -ne $expectedRust) { throw "Pinned Rust $expectedRust is required" }
+Invoke-Checked "pnpm" @("install", "--frozen-lockfile")
 Invoke-Checked "node" @("scripts/check_release_source.mjs", "--clean", "--tag")
 $env:NIAN_PASS_COMMIT = (git rev-parse HEAD).Trim()
 $env:RELEASE_COMMIT = $env:NIAN_PASS_COMMIT
