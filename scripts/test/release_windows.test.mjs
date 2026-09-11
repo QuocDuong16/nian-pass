@@ -105,7 +105,7 @@ test("Windows release script emits bounded diagnostics before post-build rejecti
   );
 });
 
-test("Windows release source verifies the desktop PE reserve and bounded startup", () => {
+test("Windows release source verifies the desktop PE reserve and graceful shutdown", () => {
   const repositoryRoot = resolve(import.meta.dirname, "../..");
   const buildScript = readFileSync(
     join(repositoryRoot, "apps/desktop/src-tauri/build.rs"),
@@ -135,14 +135,23 @@ test("Windows release source verifies the desktop PE reserve and bounded startup
   assert.match(script, /\[UInt64\]8388608/);
   assert.match(script, /Start-Process -FilePath \$Binary -PassThru/);
   assert.match(script, /Start-Sleep -Seconds 8/);
+  assert.match(script, /Start-DesktopAndRequireStartup/);
+  assert.match(script, /Test-DesktopGracefulShutdown/);
+  assert.match(script, /CloseMainWindow\(\)/);
+  assert.match(script, /WaitForExit\(5000\)/);
+  assert.match(script, /\$Process\.ExitCode -ne 0/);
+  assert.match(script, /Stop-DesktopAfterFailedShutdown[\s\S]*?Stop-Process[\s\S]*?throw "Windows desktop graceful shutdown/);
   assert.match(script, /STATUS_STACK_OVERFLOW \(0xC00000FD\)/);
   assert.match(script, /decimal \$ExitCode \(0x\$\(\$raw\.ToString\('X8'\)\)\)/);
   assert.match(script, /native_messaging_host_smoke/);
+  assert.match(script, /desktop_shutdown_smoke/);
   assert.doesNotMatch(script, /Set-ReleaseOutput "process_smoke"/);
 
   const workflow = readFileSync(join(repositoryRoot, ".github/workflows/release.yml"), "utf8");
   assert.match(workflow, /desktop_startup_smoke: \$\{\{ steps\.build\.outputs\.desktop_startup_smoke \}\}/);
+  assert.match(workflow, /desktop_shutdown_smoke: \$\{\{ steps\.build\.outputs\.desktop_shutdown_smoke \}\}/);
   assert.match(workflow, /native_messaging_host_smoke: \$\{\{ steps\.build\.outputs\.native_messaging_host_smoke \}\}/);
+  assert.match(workflow, /WINDOWS_DESKTOP_SHUTDOWN_STATUS/);
   assert.match(workflow, /WINDOWS_GUI_STATUS: NOT RUN/);
 
   const helper = readFileSync(join(repositoryRoot, "scripts/pe_stack_reserve.mjs"), "utf8");

@@ -3,29 +3,27 @@ use std::{
     io,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
         mpsc::{self, SyncSender},
     },
-    thread::{self, JoinHandle},
     time::Duration,
 };
 
-use browser_native_protocol::bind_desktop_listener;
 use browser_native_protocol::{
-    BrowserRequest, BrowserResponse, Candidate, CandidateText, DesktopListener, DesktopStream,
-    ErrorCode, MAX_CANDIDATE_SUMMARY_BYTES, MAX_CANDIDATES, MAX_CREDENTIAL_FIELD_BYTES,
-    PROTOCOL_VERSION, VaultState, read_request, write_message,
+    BrowserRequest, BrowserResponse, Candidate, CandidateText, DesktopStream, ErrorCode,
+    MAX_CANDIDATE_SUMMARY_BYTES, MAX_CANDIDATES, MAX_CREDENTIAL_FIELD_BYTES, PROTOCOL_VERSION,
+    VaultState, read_request, write_message,
 };
 use credential_provider_core::CredentialTarget;
-use interprocess::local_socket::{ListenerNonblockingMode, traits::Listener as _};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use zeroize::Zeroizing;
 
-use crate::state::{AppState, DesktopError};
+use crate::{
+    browser_bridge_runtime::BrowserBridgeRuntime,
+    state::{AppState, DesktopError},
+};
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
-const LISTENER_POLL: Duration = Duration::from_millis(25);
 
 #[derive(Clone, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -62,7 +60,7 @@ impl<R: Runtime> ApprovalNotifier for TauriApprovalNotifier<R> {
     }
 }
 
-struct ApprovalBroker {
+pub(crate) struct ApprovalBroker {
     pending: Mutex<HashMap<String, SyncSender<bool>>>,
     notifier: Arc<dyn ApprovalNotifier>,
     timeout: Duration,
@@ -113,64 +111,6 @@ impl ApprovalBroker {
     }
 }
 
-struct BrowserBridgeRuntime {
-    stop: Arc<AtomicBool>,
-    listener_thread: Option<JoinHandle<()>>,
-}
-
-impl BrowserBridgeRuntime {
-    fn start(app_state: AppState, broker: Arc<ApprovalBroker>) -> io::Result<Self> {
-        let listener = bind_desktop_listener()?;
-        Self::start_with_listener(listener, app_state, broker)
-    }
-
-    fn start_with_listener(
-        listener: DesktopListener,
-        app_state: AppState,
-        broker: Arc<ApprovalBroker>,
-    ) -> io::Result<Self> {
-        listener.set_nonblocking(ListenerNonblockingMode::Accept)?;
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = stop.clone();
-        let listener_thread = thread::Builder::new()
-            .name("nian-pass-browser-listener".to_owned())
-            .spawn(move || {
-                while !thread_stop.load(Ordering::Acquire) {
-                    match listener.accept() {
-                        Ok(stream) => {
-                            let connection_state = app_state.clone();
-                            let connection_broker = broker.clone();
-                            let _connection = thread::Builder::new()
-                                .name("nian-pass-browser-connection".to_owned())
-                                .spawn(move || {
-                                    let _result = handle_connection(
-                                        stream,
-                                        &connection_state,
-                                        &connection_broker,
-                                    );
-                                });
-                        }
-                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                            thread::park_timeout(LISTENER_POLL);
-                        }
-                        Err(_) => break,
-                    }
-                }
-            })?;
-        Ok(Self {
-            stop,
-            listener_thread: Some(listener_thread),
-        })
-    }
-}
-impl Drop for BrowserBridgeRuntime {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(handle) = self.listener_thread.take() {
-            let _joined = handle.join();
-        }
-    }
-}
 pub struct BrowserBridgeState {
     availability: BrowserBridgeAvailability,
 }
@@ -203,11 +143,12 @@ impl BrowserBridgeState {
         broker: Arc<ApprovalBroker>,
         runtime: io::Result<BrowserBridgeRuntime>,
     ) -> Self {
-        let availability = match runtime {
-            Ok(runtime) => BrowserBridgeAvailability::Available(broker, runtime),
-            Err(_) => BrowserBridgeAvailability::Unavailable,
-        };
-        Self { availability }
+        Self {
+            availability: runtime.map_or_else(
+                |_| BrowserBridgeAvailability::Unavailable,
+                |runtime| BrowserBridgeAvailability::Available(broker, runtime),
+            ),
+        }
     }
     #[cfg(test)]
     pub fn with_pending_request(request_id: &str) -> (Self, mpsc::Receiver<bool>) {
@@ -224,10 +165,7 @@ impl BrowserBridgeState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(request_id.to_owned(), sender);
-        let runtime = BrowserBridgeRuntime {
-            stop: Arc::new(AtomicBool::new(false)),
-            listener_thread: None,
-        };
+        let runtime = BrowserBridgeRuntime::inactive();
         (Self::from_runtime_result(broker, Ok(runtime)), receiver)
     }
 
@@ -238,6 +176,12 @@ impl BrowserBridgeState {
         }
     }
 
+    pub fn shutdown(&self) {
+        if let BrowserBridgeAvailability::Available(_, runtime) = &self.availability {
+            runtime.shutdown();
+        }
+    }
+
     #[cfg(test)]
     #[must_use]
     pub const fn is_available(&self) -> bool {
@@ -245,7 +189,7 @@ impl BrowserBridgeState {
     }
 }
 
-fn handle_connection(
+pub(crate) fn handle_connection(
     mut stream: DesktopStream,
     app_state: &AppState,
     broker: &ApprovalBroker,
@@ -449,10 +393,11 @@ mod tests {
     use super::{ApprovalBroker, ApprovalNotifier, BrowserBridgeState, TauriApprovalNotifier};
     #[cfg(unix)]
     use super::{
-        BrowserBridgeRuntime, CandidateText, CredentialTarget, ErrorCode, PROTOCOL_VERSION,
-        bounded_summary, candidate_response, credential_response, handle_authorized_request,
-        summary,
+        CandidateText, CredentialTarget, ErrorCode, PROTOCOL_VERSION, bounded_summary,
+        candidate_response, credential_response, handle_authorized_request, summary,
     };
+    #[cfg(unix)]
+    use crate::browser_bridge_runtime::BrowserBridgeRuntime;
     #[cfg(unix)]
     use crate::{clipboard::ClipboardPort, mutations::CreateEntryRequestDto, state::AppState};
     #[cfg(unix)]
@@ -929,7 +874,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn listener_runtime_accepts_streams_and_stops_with_its_owner() {
+    fn listener_runtime_stops_explicitly_before_its_owner_drops() {
         let runtime_directory = TestDir::create();
         let listener = bind_desktop_listener_in(&runtime_directory.0)
             .unwrap_or_else(|error| panic!("listener must bind: {error}"));
@@ -966,6 +911,7 @@ mod tests {
             }))
         ));
         drop(client);
+        runtime.shutdown();
         drop(runtime);
     }
 

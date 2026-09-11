@@ -81,7 +81,17 @@ jobs:
             return "decimal $ExitCode (0x$($raw.ToString('X8')))"
           }
 
-          function Test-DesktopStartup([string] $Binary) {
+          function Stop-DesktopAfterFailedShutdown([System.Diagnostics.Process] $Process) {
+            $Process.Refresh()
+            if (-not $Process.HasExited) {
+              Write-Host "Windows desktop graceful shutdown timed out; process diagnostics:"
+              Get-Process -Id $Process.Id -ErrorAction SilentlyContinue | Format-List * | Out-String | Write-Host
+              Stop-Process -Id $Process.Id -ErrorAction SilentlyContinue
+              Wait-Process -Id $Process.Id -ErrorAction SilentlyContinue
+            }
+          }
+
+          function Start-DesktopAndRequireStartup([string] $Binary) {
             $process = Start-Process -FilePath $Binary -PassThru
             Start-Sleep -Seconds 8
             if ($process.HasExited) {
@@ -92,13 +102,21 @@ jobs:
               }
               throw "Windows desktop startup failed unexpectedly; exit code $formatted"
             }
-            [void] $process.CloseMainWindow()
-            if (-not $process.WaitForExit(5000)) {
-              $process.Refresh()
-              if (-not $process.HasExited) {
-                Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
-                Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
-              }
+            return $process
+          }
+
+          function Test-DesktopGracefulShutdown([System.Diagnostics.Process] $Process) {
+            if (-not $Process.CloseMainWindow()) {
+              Stop-DesktopAfterFailedShutdown $Process
+              throw "Windows desktop graceful shutdown could not request main-window close"
+            }
+            if (-not $Process.WaitForExit(5000)) {
+              Stop-DesktopAfterFailedShutdown $Process
+              throw "Windows desktop graceful shutdown timed out after 5 seconds"
+            }
+            if ($Process.ExitCode -ne 0) {
+              $formatted = Format-WindowsExitCode $Process.ExitCode
+              throw "Windows desktop graceful shutdown failed unexpectedly; exit code $formatted"
             }
           }
 
@@ -115,13 +133,16 @@ jobs:
           Write-Host "nian-pass-desktop.exe SizeOfStackReserve: $stackReserve bytes"
           if ($stackReserve -lt [UInt64]8388608) { throw "SizeOfStackReserve $stackReserve bytes is below required 8388608 bytes" }
 
-          Test-DesktopStartup $desktopBinary
+          $desktopProcess = Start-DesktopAndRequireStartup $desktopBinary
           Write-Host "WINDOWS_DESKTOP_STARTUP_SMOKE=PASS"
+          Test-DesktopGracefulShutdown $desktopProcess
+          Write-Host "WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS"
           @(
             "commit SHA: $commit",
             "VERSION: $version",
             "SizeOfStackReserve: $stackReserve",
-            "WINDOWS_DESKTOP_STARTUP_SMOKE=PASS"
+            "WINDOWS_DESKTOP_STARTUP_SMOKE=PASS",
+            "WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS"
           ) | Set-Content -LiteralPath "windows-runtime-diagnostic-evidence.txt" -Encoding utf8
       - name: Upload desktop runtime diagnostic
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -164,6 +164,7 @@ jobs:
     outputs:
       build: ${{ steps.build.outputs.build }}
       desktop_startup_smoke: ${{ steps.build.outputs.desktop_startup_smoke }}
+      desktop_shutdown_smoke: ${{ steps.build.outputs.desktop_shutdown_smoke }}
       native_messaging_host_smoke: ${{ steps.build.outputs.native_messaging_host_smoke }}
       signing: ${{ steps.build.outputs.signing }}
     steps:
@@ -397,6 +398,7 @@ jobs:
           PREFLIGHT_STATUS: PASS
           WINDOWS_BUILD_STATUS: ${{ needs.windows.outputs.build }}
           WINDOWS_DESKTOP_STARTUP_STATUS: ${{ needs.windows.outputs.desktop_startup_smoke }}
+          WINDOWS_DESKTOP_SHUTDOWN_STATUS: ${{ needs.windows.outputs.desktop_shutdown_smoke }}
           WINDOWS_NATIVE_MESSAGING_HOST_STATUS: ${{ needs.windows.outputs.native_messaging_host_smoke }}
           WINDOWS_GUI_STATUS: NOT RUN
           WINDOWS_SIGNING_STATUS: ${{ needs.windows.outputs.signing }}

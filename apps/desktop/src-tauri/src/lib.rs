@@ -1,6 +1,8 @@
 #[cfg(any(desktop, test))]
 mod browser_bridge;
 #[cfg(any(desktop, test))]
+mod browser_bridge_runtime;
+#[cfg(any(desktop, test))]
 mod clipboard;
 #[cfg(any(desktop, test))]
 mod command_support;
@@ -83,9 +85,14 @@ fn install_app_state_with_bridge<R: Runtime>(
     app.manage(bridge);
 }
 
+#[cfg(desktop)]
+fn should_exit_after_window_destroyed(label: &str, event: &tauri::WindowEvent) -> bool {
+    label == "main" && matches!(event, tauri::WindowEvent::Destroyed)
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run() {
-    with_desktop_plugins(tauri::Builder::default())
+    let app = with_desktop_plugins(tauri::Builder::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
             select_vault,
@@ -124,8 +131,17 @@ pub fn run() {
             sync_now,
             resolve_sync_conflict
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("Nian Pass desktop runtime failed");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::WindowEvent { label, event, .. } = event
+            && should_exit_after_window_destroyed(&label, &event)
+        {
+            app_handle.state::<BrowserBridgeState>().shutdown();
+            app_handle.exit(0);
+        }
+    });
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -245,7 +261,7 @@ mod tests {
 
     use super::{
         AppState, BrowserBridgeState, install_app_state_with_bridge, setup_app,
-        with_desktop_plugins,
+        should_exit_after_window_destroyed, with_desktop_plugins,
     };
 
     #[test]
@@ -291,5 +307,21 @@ mod tests {
         for name in forbidden {
             assert!(!command_source.contains(&name));
         }
+    }
+
+    #[test]
+    fn only_main_window_destruction_requests_desktop_exit() {
+        assert!(should_exit_after_window_destroyed(
+            "main",
+            &tauri::WindowEvent::Destroyed
+        ));
+        assert!(!should_exit_after_window_destroyed(
+            "browser-approval",
+            &tauri::WindowEvent::Destroyed
+        ));
+        assert!(!should_exit_after_window_destroyed(
+            "main",
+            &tauri::WindowEvent::Focused(false)
+        ));
     }
 }

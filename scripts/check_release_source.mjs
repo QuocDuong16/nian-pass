@@ -357,7 +357,10 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/pnpm --filter @nian-pass\/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc/, "must build the desktop release binary");
   require(/target\/x86_64-pc-windows-msvc\/release\/nian-pass-desktop\.exe/, "must resolve the raw desktop executable");
   require(/Get-PeStackReserve[\s\S]*?SizeOfStackReserve[\s\S]*?8388608/, "must inspect the PE reserve and require 8388608 bytes");
-  require(/Start-Process -FilePath \$Binary -PassThru[\s\S]*?Start-Sleep -Seconds 8[\s\S]*?WINDOWS_DESKTOP_STARTUP_SMOKE=PASS/, "must run the bounded desktop startup smoke");
+  require(/Start-DesktopAndRequireStartup[\s\S]*?Start-Process -FilePath \$Binary -PassThru[\s\S]*?Start-Sleep -Seconds 8[\s\S]*?WINDOWS_DESKTOP_STARTUP_SMOKE=PASS/, "must run the bounded desktop startup smoke");
+  require(/Test-DesktopGracefulShutdown[\s\S]*?CloseMainWindow\(\)[\s\S]*?WaitForExit\(5000\)[\s\S]*?\$Process\.ExitCode -ne 0[\s\S]*?WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS/, "must require normal main-window shutdown with exit code 0");
+  require(/Stop-DesktopAfterFailedShutdown[\s\S]*?Stop-Process[\s\S]*?throw "Windows desktop graceful shutdown/, "must force-kill only as failed-shutdown cleanup");
+  require(/WINDOWS_DESKTOP_STARTUP_SMOKE=PASS[\s\S]*?WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS/, "must record separate startup and shutdown evidence before upload");
   require(/actions\/upload-artifact@[0-9a-f]{40}[\s\S]*?name: nian-pass-0\.1\.1-windows-runtime-diagnostic[\s\S]*?retention-days: 3/, "must upload the short-retention diagnostic artifact");
   if (/\bgit\s+(tag|push)\b|\bgh\s+release\b/i.test(workflow)) {
     violations.push(`${workflowPath}: tag, push, and GitHub Release mutation are forbidden`);
@@ -498,8 +501,12 @@ export function sourcePolicyViolations(root) {
     !/Get-PeStackReserve/.test(windowsRelease) ||
     !/SizeOfStackReserve/.test(windowsRelease) ||
     !/\[UInt64\]8388608/.test(windowsRelease) ||
-    !/Test-DesktopStartup/.test(windowsRelease) ||
+    !/Start-DesktopAndRequireStartup/.test(windowsRelease) ||
+    !/Test-DesktopGracefulShutdown/.test(windowsRelease) ||
     !/Start-Process -FilePath \$Binary -PassThru/.test(windowsRelease) ||
+    !/CloseMainWindow\(\)/.test(windowsRelease) ||
+    !/WaitForExit\(5000\)/.test(windowsRelease) ||
+    !/\$Process\.ExitCode -ne 0/.test(windowsRelease) ||
     !/STATUS_STACK_OVERFLOW \(0xC00000FD\)/.test(windowsRelease) ||
     !/Convert-PeStackReserve "dumpbin"/.test(windowsRelease) ||
     !/Convert-PeStackReserve "llvm-readobj"/.test(windowsRelease) ||
@@ -510,22 +517,25 @@ export function sourcePolicyViolations(root) {
     !/import\.meta\.url === pathToFileURL\(process\.argv\[1\]\)\.href/.test(peStackReserveParser) ||
     /new URL\(import\.meta\.url\)\.pathname/.test(peStackReserveParser) ||
     !/native_messaging_host_smoke/.test(windowsRelease) ||
+    !/desktop_shutdown_smoke/.test(windowsRelease) ||
     /Set-ReleaseOutput "process_smoke"/.test(windowsRelease)
   ) {
     violations.push(
-      "scripts/release_windows.ps1: PE reserve verification and distinct desktop/native-host smoke evidence are required",
+      "scripts/release_windows.ps1: PE reserve verification and distinct desktop startup/shutdown/native-host smoke evidence are required",
     );
   }
   const releaseWorkflow = read(root, ".github/workflows/release.yml");
   if (
     !/desktop_startup_smoke/.test(releaseWorkflow) ||
+    !/desktop_shutdown_smoke/.test(releaseWorkflow) ||
     !/native_messaging_host_smoke/.test(releaseWorkflow) ||
     !/WINDOWS_DESKTOP_STARTUP_STATUS/.test(releaseWorkflow) ||
+    !/WINDOWS_DESKTOP_SHUTDOWN_STATUS/.test(releaseWorkflow) ||
     !/WINDOWS_NATIVE_MESSAGING_HOST_STATUS/.test(releaseWorkflow) ||
     !/WINDOWS_GUI_STATUS: NOT RUN/.test(releaseWorkflow)
   ) {
     violations.push(
-      ".github/workflows/release.yml: Windows desktop and Native Messaging smoke evidence must remain distinct from full GUI runtime",
+      ".github/workflows/release.yml: Windows desktop startup/shutdown and Native Messaging smoke evidence must remain distinct from full GUI runtime",
     );
   }
   const gatewayImageVersion = read(root, "apps/sync-gateway/Dockerfile").match(

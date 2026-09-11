@@ -129,6 +129,51 @@ test("dirty window close is prevented until explicit discard then requested agai
   expect(api.discardChangesAndLock).toHaveBeenCalledOnce();
 });
 
+test("clean and locked window close requests remain unprevented", async () => {
+  let closeHandler: ((event: CloseRequestEvent) => Promise<void>) | null = null;
+  const lifecycle: DesktopWindowLifecycle = {
+    onCloseRequested: vi
+      .fn()
+      .mockImplementation(
+        (handler: (event: CloseRequestEvent) => Promise<void>) => {
+          closeHandler = handler;
+          return Promise.resolve(vi.fn());
+        },
+      ),
+    requestClose: vi.fn().mockResolvedValue(undefined),
+  };
+  const cleanApi = mutationApi({
+    unlockVault: vi
+      .fn()
+      .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
+    closePolicy: vi.fn().mockResolvedValue({ policy: "allow" }),
+  });
+  const clean = render(<App api={cleanApi} windowLifecycle={lifecycle} />);
+  await unlock();
+  await waitFor(() => {
+    expect(closeHandler).not.toBeNull();
+  });
+  const cleanPreventDefault = vi.fn();
+  await act(async () => {
+    if (closeHandler === null) throw new Error("close handler missing");
+    await closeHandler({ preventDefault: cleanPreventDefault });
+  });
+  expect(cleanPreventDefault).not.toHaveBeenCalled();
+  clean.unmount();
+
+  closeHandler = null;
+  render(<App api={mutationApi()} windowLifecycle={lifecycle} />);
+  await waitFor(() => {
+    expect(closeHandler).not.toBeNull();
+  });
+  const lockedPreventDefault = vi.fn();
+  await act(async () => {
+    if (closeHandler === null) throw new Error("close handler missing");
+    await closeHandler({ preventDefault: lockedPreventDefault });
+  });
+  expect(lockedPreventDefault).not.toHaveBeenCalled();
+});
+
 test("post-discard close failure reports the already-locked state accurately", async () => {
   let closeHandler: ((event: CloseRequestEvent) => Promise<void>) | null = null;
   const lifecycle: DesktopWindowLifecycle = {
