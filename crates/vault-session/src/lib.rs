@@ -1266,6 +1266,9 @@ mod tests {
         let directory = TestDir::create();
         let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
         let before = fs::read(&path).expect("source should be readable");
+        let backup = backup_path(&path);
+        let prior_backup = b"preexisting backup Z";
+        fs::write(&backup, prior_backup).expect("existing backup should be written");
         let mut session = dirty_session(&path, "must not save");
         let saved_revision = session.saved_revision;
         let wrong = SecretString::new("wrong-public-test-password".to_owned());
@@ -1278,7 +1281,10 @@ mod tests {
             fs::read(&path).expect("source should remain readable"),
             before
         );
-        assert!(!backup_path(&path).exists());
+        assert_eq!(
+            fs::read(&backup).expect("existing backup should remain readable"),
+            prior_backup
+        );
         assert!(session.is_dirty());
         assert_eq!(session.saved_revision, saved_revision);
         assert_no_transaction_temps(&directory.path);
