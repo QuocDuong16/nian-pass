@@ -281,12 +281,17 @@ pub fn delete_entry_custom_field(
 }
 
 #[tauri::command]
-pub fn close_policy(state: State<'_, AppState>) -> Result<ClosePolicyDto, DesktopErrorDto> {
-    let service = state
-        .service
-        .lock()
-        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
-    Ok(service.close_policy())
+pub async fn close_policy(state: State<'_, AppState>) -> Result<ClosePolicyDto, DesktopErrorDto> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = state
+            .service
+            .lock()
+            .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
+        Ok(service.close_policy())
+    })
+    .await
+    .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?
 }
 
 #[tauri::command]
@@ -777,7 +782,7 @@ mod tests {
             .clone();
         let entry = snapshot.entries.first().expect("fixture entry").id.clone();
         assert!(matches!(
-            close_policy(state.clone()),
+            tauri::async_runtime::block_on(close_policy(state.clone())),
             Ok(ClosePolicyDto::Allow)
         ));
 
@@ -909,11 +914,14 @@ mod tests {
         assert!(delete_group(group_destination.created_group_id, state.clone()).is_ok());
 
         assert!(matches!(
-            close_policy(state.clone()),
+            tauri::async_runtime::block_on(close_policy(state.clone())),
             Ok(ClosePolicyDto::ConfirmDiscard)
         ));
         assert!(tauri::async_runtime::block_on(lock_vault(state.clone())).is_err());
         assert!(tauri::async_runtime::block_on(discard_changes_and_lock(state.clone())).is_ok());
-        assert!(matches!(close_policy(state), Ok(ClosePolicyDto::Allow)));
+        assert!(matches!(
+            tauri::async_runtime::block_on(close_policy(state)),
+            Ok(ClosePolicyDto::Allow)
+        ));
     }
 }

@@ -15,6 +15,7 @@ interface CloseRequestOptions {
 
 export function useCloseRequest(options: CloseRequestOptions) {
   const latest = useRef(options);
+  const closePolicyInFlight = useRef(false);
   useEffect(() => {
     latest.current = options;
   }, [options]);
@@ -25,25 +26,26 @@ export function useCloseRequest(options: CloseRequestOptions) {
     let unlisten: (() => void) | null = null;
     void options.windowLifecycle
       .onCloseRequested(async (event) => {
+        event.preventDefault();
+        if (closePolicyInFlight.current) return;
+        closePolicyInFlight.current = true;
         const current = latest.current;
-        if (current.blocked) {
-          event.preventDefault();
-          return;
-        }
-        if (current.hasLocalDraft) {
-          event.preventDefault();
-          if (active) current.onDraft();
-          return;
-        }
         try {
+          if (current.blocked) return;
+          if (current.hasLocalDraft) {
+            if (active) current.onDraft();
+            return;
+          }
           const policy = await current.api.closePolicy();
           if (policy.policy === "confirm_discard") {
-            event.preventDefault();
             if (active) current.onDirty();
+          } else if (active && current.windowLifecycle !== null) {
+            await current.windowLifecycle.destroyApprovedWindow();
           }
         } catch {
-          event.preventDefault();
           if (active) current.onError();
+        } finally {
+          closePolicyInFlight.current = false;
         }
       })
       .then((stop) => {

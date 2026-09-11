@@ -6,14 +6,14 @@ const onFocusChanged =
     (handler: (event: { payload: boolean }) => void) => Promise<() => void>
   >();
 const isFocused = vi.fn<() => Promise<boolean>>();
-const close = vi.fn();
+const destroy = vi.fn();
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     onCloseRequested,
     onFocusChanged,
     isFocused,
-    close,
+    destroy,
   }),
 }));
 
@@ -23,18 +23,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("desktop lifecycle delegates close observation and the explicit close request", async () => {
+test("desktop lifecycle destroys only an explicitly approved window", async () => {
   const unlisten = vi.fn();
   onCloseRequested.mockResolvedValue(unlisten);
-  close.mockResolvedValue(undefined);
+  destroy.mockResolvedValue(undefined);
   const handler = vi.fn();
 
   await expect(desktopWindowLifecycle.onCloseRequested(handler)).resolves.toBe(
     unlisten,
   );
   expect(onCloseRequested).toHaveBeenCalledWith(handler);
-  await desktopWindowLifecycle.requestClose();
-  expect(close).toHaveBeenCalledOnce();
+  await desktopWindowLifecycle.destroyApprovedWindow();
+  expect(destroy).toHaveBeenCalledOnce();
 });
 
 test("desktop lifecycle exposes only the boolean focus payload", async () => {

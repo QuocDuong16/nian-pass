@@ -90,9 +90,9 @@ test("successful mutation shows dirty through navigation while no-op and error s
   expect(screen.getByText("Unsaved changes")).toBeVisible();
 });
 
-test("dirty window close is prevented until explicit discard then requested again", async () => {
+test("dirty window close is prevented until explicit discard then destroyed", async () => {
   let closeHandler: ((event: CloseRequestEvent) => Promise<void>) | null = null;
-  const requestClose = vi.fn().mockResolvedValue(undefined);
+  const destroyApprovedWindow = vi.fn().mockResolvedValue(undefined);
   const lifecycle: DesktopWindowLifecycle = {
     onCloseRequested: vi
       .fn()
@@ -102,7 +102,7 @@ test("dirty window close is prevented until explicit discard then requested agai
           return Promise.resolve(vi.fn());
         },
       ),
-    requestClose,
+    destroyApprovedWindow,
   };
   const api = mutationApi({
     unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
@@ -124,13 +124,14 @@ test("dirty window close is prevented until explicit discard then requested agai
     screen.getByRole("button", { name: "Discard changes and close" }),
   );
   await waitFor(() => {
-    expect(requestClose).toHaveBeenCalledOnce();
+    expect(destroyApprovedWindow).toHaveBeenCalledOnce();
   });
   expect(api.discardChangesAndLock).toHaveBeenCalledOnce();
 });
 
-test("clean and locked window close requests remain unprevented", async () => {
-  let closeHandler: ((event: CloseRequestEvent) => Promise<void>) | null = null;
+test("clean and locked close requests are prevented then explicitly destroyed", async () => {
+  let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
+    Promise.reject(new Error("close handler missing"));
   const lifecycle: DesktopWindowLifecycle = {
     onCloseRequested: vi
       .fn()
@@ -140,7 +141,7 @@ test("clean and locked window close requests remain unprevented", async () => {
           return Promise.resolve(vi.fn());
         },
       ),
-    requestClose: vi.fn().mockResolvedValue(undefined),
+    destroyApprovedWindow: vi.fn().mockResolvedValue(undefined),
   };
   const cleanApi = mutationApi({
     unlockVault: vi
@@ -151,27 +152,114 @@ test("clean and locked window close requests remain unprevented", async () => {
   const clean = render(<App api={cleanApi} windowLifecycle={lifecycle} />);
   await unlock();
   await waitFor(() => {
-    expect(closeHandler).not.toBeNull();
+    expect(lifecycle.onCloseRequested).toHaveBeenCalledOnce();
   });
   const cleanPreventDefault = vi.fn();
   await act(async () => {
-    if (closeHandler === null) throw new Error("close handler missing");
     await closeHandler({ preventDefault: cleanPreventDefault });
   });
-  expect(cleanPreventDefault).not.toHaveBeenCalled();
+  expect(cleanPreventDefault).toHaveBeenCalledOnce();
+  expect(lifecycle.destroyApprovedWindow).toHaveBeenCalledOnce();
   clean.unmount();
 
-  closeHandler = null;
+  closeHandler = () => Promise.reject(new Error("close handler missing"));
   render(<App api={mutationApi()} windowLifecycle={lifecycle} />);
   await waitFor(() => {
-    expect(closeHandler).not.toBeNull();
+    expect(lifecycle.onCloseRequested).toHaveBeenCalledTimes(2);
   });
   const lockedPreventDefault = vi.fn();
   await act(async () => {
-    if (closeHandler === null) throw new Error("close handler missing");
     await closeHandler({ preventDefault: lockedPreventDefault });
   });
-  expect(lockedPreventDefault).not.toHaveBeenCalled();
+  expect(lockedPreventDefault).toHaveBeenCalledOnce();
+  expect(lifecycle.destroyApprovedWindow).toHaveBeenCalledTimes(2);
+});
+
+test("close is prevented synchronously and duplicate policy checks are suppressed", async () => {
+  let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
+    Promise.reject(new Error("close handler missing"));
+  let resolvePolicy: (value: { policy: "allow" }) => void = () => {
+    throw new Error("close policy resolver missing");
+  };
+  const closePolicy = vi.fn().mockImplementation(
+    () =>
+      new Promise<{ policy: "allow" }>((resolve) => {
+        resolvePolicy = resolve;
+      }),
+  );
+  const destroyApprovedWindow = vi.fn().mockResolvedValue(undefined);
+  const lifecycle: DesktopWindowLifecycle = {
+    onCloseRequested: vi
+      .fn()
+      .mockImplementation(
+        (handler: (event: CloseRequestEvent) => Promise<void>) => {
+          closeHandler = handler;
+          return Promise.resolve(vi.fn());
+        },
+      ),
+    destroyApprovedWindow,
+  };
+  const api = mutationApi({ closePolicy });
+  render(<App api={api} windowLifecycle={lifecycle} />);
+  await waitFor(() => {
+    expect(lifecycle.onCloseRequested).toHaveBeenCalledOnce();
+  });
+  const firstPreventDefault = vi.fn();
+  const first = closeHandler({ preventDefault: firstPreventDefault });
+  expect(firstPreventDefault).toHaveBeenCalledOnce();
+  const secondPreventDefault = vi.fn();
+  await closeHandler({ preventDefault: secondPreventDefault });
+  expect(secondPreventDefault).toHaveBeenCalledOnce();
+  expect(closePolicy).toHaveBeenCalledOnce();
+  await act(async () => {
+    resolvePolicy({ policy: "allow" });
+    await first;
+  });
+  expect(destroyApprovedWindow).toHaveBeenCalledOnce();
+});
+
+test("local drafts prevent close before querying Rust policy", async () => {
+  let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
+    Promise.reject(new Error("close handler missing"));
+  const destroyApprovedWindow = vi.fn().mockResolvedValue(undefined);
+  const closePolicy = vi.fn().mockResolvedValue({ policy: "allow" });
+  const lifecycle: DesktopWindowLifecycle = {
+    onCloseRequested: vi
+      .fn()
+      .mockImplementation(
+        (handler: (event: CloseRequestEvent) => Promise<void>) => {
+          closeHandler = handler;
+          return Promise.resolve(vi.fn());
+        },
+      ),
+    destroyApprovedWindow,
+  };
+  const api = mutationApi({
+    unlockVault: vi
+      .fn()
+      .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
+    closePolicy,
+  });
+  render(<App api={api} windowLifecycle={lifecycle} />);
+  await unlock();
+  fireEvent.click(screen.getByRole("button", { name: /Account A/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit entry" }));
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "unfinished local title" },
+  });
+  await waitFor(() => {
+    expect(lifecycle.onCloseRequested).toHaveBeenCalledOnce();
+  });
+  const preventDefault = vi.fn();
+  await act(async () => {
+    await closeHandler({ preventDefault });
+  });
+  expect(preventDefault).toHaveBeenCalledOnce();
+  expect(closePolicy).not.toHaveBeenCalled();
+  expect(destroyApprovedWindow).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("heading", { name: "Unfinished edit" }),
+  ).toBeVisible();
 });
 
 test("post-discard close failure reports the already-locked state accurately", async () => {
@@ -185,7 +273,7 @@ test("post-discard close failure reports the already-locked state accurately", a
           return Promise.resolve(vi.fn());
         },
       ),
-    requestClose: vi.fn().mockRejectedValue(new Error("synthetic")),
+    destroyApprovedWindow: vi.fn().mockRejectedValue(new Error("synthetic")),
   };
   const api = mutationApi({
     unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
@@ -287,7 +375,7 @@ test("close-policy failure prevents close and delayed registration is unlistened
           });
         },
       ),
-    requestClose: vi.fn().mockResolvedValue(undefined),
+    destroyApprovedWindow: vi.fn().mockResolvedValue(undefined),
   };
   const api = mutationApi({
     closePolicy: vi.fn().mockRejectedValue(new Error("synthetic")),

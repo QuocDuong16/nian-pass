@@ -26,7 +26,7 @@ function lifecycle(): DesktopWindowLifecycle {
     onCloseRequested: vi.fn().mockResolvedValue(() => undefined),
     onFocusChanged: vi.fn().mockResolvedValue(() => undefined),
     isFocused: vi.fn().mockResolvedValue(true),
-    requestClose: vi.fn().mockResolvedValue(undefined),
+    destroyApprovedWindow: vi.fn().mockResolvedValue(undefined),
   };
 }
 

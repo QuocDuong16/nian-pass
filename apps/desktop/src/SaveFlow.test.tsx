@@ -44,7 +44,7 @@ function deferred<T>() {
 
 function lifecycleHarness() {
   let closeHandler: ((event: CloseRequestEvent) => Promise<void>) | null = null;
-  const requestClose = vi.fn().mockResolvedValue(undefined);
+  const destroyApprovedWindow = vi.fn().mockResolvedValue(undefined);
   const lifecycle: DesktopWindowLifecycle = {
     onCloseRequested: vi
       .fn()
@@ -54,7 +54,7 @@ function lifecycleHarness() {
           return Promise.resolve(vi.fn());
         },
       ),
-    requestClose,
+    destroyApprovedWindow,
   };
   const triggerClose = async (preventDefault = vi.fn()) => {
     if (closeHandler === null) throw new Error("close handler missing");
@@ -63,7 +63,7 @@ function lifecycleHarness() {
   };
   return {
     lifecycle,
-    requestClose,
+    destroyApprovedWindow,
     triggerClose,
     registered: () => closeHandler !== null,
   };
@@ -216,7 +216,7 @@ test.each([
     expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
     expect(api.lockVault).not.toHaveBeenCalled();
     expect(api.discardChangesAndLock).not.toHaveBeenCalled();
-    expect(harness.requestClose).not.toHaveBeenCalled();
+    expect(harness.destroyApprovedWindow).not.toHaveBeenCalled();
   },
 );
 
@@ -365,7 +365,7 @@ test("external conflict never completes a pending Lock or close intent", async (
     name: "The KDBX file changed outside Nian Pass",
   });
   expect(closeApi.lockVault).not.toHaveBeenCalled();
-  expect(harness.requestClose).not.toHaveBeenCalled();
+  expect(harness.destroyApprovedWindow).not.toHaveBeenCalled();
   expect(screen.getByText("Unsaved changes")).toBeVisible();
 });
 
@@ -396,12 +396,12 @@ test("dirty close saves before Lock and close, while failure leaves the window o
     await screen.findByText(/in-memory changes are still available/),
   ).toBeVisible();
   expect(api.lockVault).not.toHaveBeenCalled();
-  expect(harness.requestClose).not.toHaveBeenCalled();
+  expect(harness.destroyApprovedWindow).not.toHaveBeenCalled();
 
   enterCredential();
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => {
-    expect(harness.requestClose).toHaveBeenCalledOnce();
+    expect(harness.destroyApprovedWindow).toHaveBeenCalledOnce();
   });
   expect(api.lockVault).toHaveBeenCalledOnce();
   expect(api.discardChangesAndLock).not.toHaveBeenCalled();
@@ -428,7 +428,7 @@ test("a close request arriving while Save is pending is prevented deterministica
     await harness.triggerClose(preventDefault);
   });
   expect(preventDefault).toHaveBeenCalledOnce();
-  expect(harness.requestClose).not.toHaveBeenCalled();
+  expect(harness.destroyApprovedWindow).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Save vault" })).toHaveTextContent(
     "Saving…",
   );

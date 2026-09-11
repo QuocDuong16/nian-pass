@@ -41,7 +41,7 @@ export function useVaultLock({
       onLocked(result);
       if (closing && windowLifecycle !== null) {
         try {
-          await windowLifecycle.requestClose();
+          await windowLifecycle.destroyApprovedWindow();
         } catch {
           setLockError(
             "Vault locked, but Nian Pass could not close the window.",

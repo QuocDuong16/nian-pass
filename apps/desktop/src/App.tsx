@@ -118,7 +118,7 @@ export default function App({
   useCloseRequest({
     api,
     windowLifecycle,
-    blocked: locking || save.flow.kind !== "closed",
+    blocked: operationPending,
     hasLocalDraft,
     onDraft: () => {
       setAttention({ kind: "draft", reason: "close" });

@@ -44,7 +44,7 @@ function lifecycleHarness() {
       return Promise.resolve(vi.fn());
     },
     isFocused: () => Promise.resolve(focused),
-    requestClose: vi.fn().mockResolvedValue(undefined),
+    destroyApprovedWindow: vi.fn().mockResolvedValue(undefined),
   };
   return {
     lifecycle,
