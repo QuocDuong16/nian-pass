@@ -260,6 +260,27 @@ test("main window capability remains narrowly scoped to approved destroy", (t) =
   assert.match(violations, /allow-close/);
 });
 
+test("destroy permission is exclusive to the reviewed main-window lifecycle", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/capabilities/helper.json",
+    '{"identifier":"helper-window","windows":["helper"],"permissions":["core:default","core:window:allow-destroy"]}\n',
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /approved only for the reviewed main-window close lifecycle/);
+});
+
+test("duplicate capability permissions are rejected", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/capabilities/main.json",
+    '{"identifier":"main-window","windows":["main"],"permissions":["core:default","core:window:allow-destroy","core:window:allow-destroy"]}\n',
+  );
+  assert.match(runChecks(root).join("\n"), /duplicate permissions are forbidden/);
+});
+
 test("renamed forbidden Rust Tauri plugin is rejected by actual package name", (t) => {
   const root = fixture(t);
   write(

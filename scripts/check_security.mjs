@@ -202,10 +202,7 @@ export function runChecks(root) {
     root,
     "apps/desktop/src-tauri/capabilities",
   );
-  const allowedPermissions = new Set([
-    "core:default",
-    "core:window:allow-destroy",
-  ]);
+  const baseAllowedPermissions = new Set(["core:default"]);
   for (const file of readdirSync(capabilityDirectory).filter((name) =>
     name.endsWith(".json"),
   )) {
@@ -216,6 +213,10 @@ export function runChecks(root) {
     if (!Array.isArray(capability.permissions)) {
       violations.push(`${relativeName}: permissions must be an explicit array`);
       continue;
+    }
+    const permissions = new Set(capability.permissions);
+    if (permissions.size !== capability.permissions.length) {
+      violations.push(`${relativeName}: duplicate permissions are forbidden`);
     }
     if (file === "main.json") {
       const requiredPermissions = new Set([
@@ -235,7 +236,6 @@ export function runChecks(root) {
           `${relativeName}: capability must remain scoped to only the main window`,
         );
       }
-      const permissions = new Set(capability.permissions);
       if (
         permissions.size !== requiredPermissions.size ||
         [...requiredPermissions].some(
@@ -246,11 +246,17 @@ export function runChecks(root) {
           `${relativeName}: approved close requires exactly core:default and core:window:allow-destroy`,
         );
       }
+    } else if (permissions.has("core:window:allow-destroy")) {
+      violations.push(
+        `${relativeName}: core:window:allow-destroy is approved only for the reviewed main-window close lifecycle`,
+      );
     }
     for (const permission of capability.permissions) {
       if (
         typeof permission !== "string" ||
-        !allowedPermissions.has(permission)
+        !(file === "main.json"
+          ? permission === "core:default" || permission === "core:window:allow-destroy"
+          : baseAllowedPermissions.has(permission))
       ) {
         violations.push(
           `${relativeName}: permission is not approved for M4.Q: ${String(permission)}`,
