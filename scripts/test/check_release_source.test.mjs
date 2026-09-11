@@ -21,6 +21,7 @@ import {
   sourcePolicyViolations,
   tagIdentityViolation,
   tagViolation,
+  windowsNodeBootstrapViolations,
   windowsRuntimeDiagnosticWorkflowViolations,
 } from "../check_release_source.mjs";
 
@@ -491,6 +492,7 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
+  mkdirSync(join(root, "scripts"), { recursive: true });
   const workflowPath = join(
     root,
     ".github/workflows/windows-runtime-diagnostic.yml",
@@ -498,6 +500,13 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   const workflow = readFileSync(
     join(projectRoot, ".github/workflows/windows-runtime-diagnostic.yml"),
     "utf8",
+  );
+  writeFileSync(
+    join(root, "scripts/bootstrap_windows_node_tools.ps1"),
+    readFileSync(
+      join(projectRoot, "scripts/bootstrap_windows_node_tools.ps1"),
+      "utf8",
+    ),
   );
   writeFileSync(
     workflowPath,
@@ -526,7 +535,7 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   );
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
-    /setup-node must run after checkout and before Corepack\/pnpm use/,
+    /setup-node must run after checkout and before the private Corepack\/pnpm bootstrap/,
   );
   writeFileSync(
     workflowPath,
@@ -565,6 +574,116 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
     /always upload the short-retention close trace artifact/,
+  );
+});
+
+test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  assert.deepEqual(windowsNodeBootstrapViolations(projectRoot), []);
+
+  const root = mkdtempSync(join(tmpdir(), "nian-pass-windows-node-tools-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "scripts"), { recursive: true });
+  const helperPath = join(root, "scripts/bootstrap_windows_node_tools.ps1");
+  const helper = readFileSync(
+    join(projectRoot, "scripts/bootstrap_windows_node_tools.ps1"),
+    "utf8",
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      '$actualNode -ne $expectedNode',
+      '$actualNode -eq $expectedNode',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /unexpected Node version/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      'Assert-PrivateToolCommand "corepack" $toolRoot',
+      '$corepackPath = "C:\\npm\\prefix\\corepack.cmd"',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /private Corepack executable/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      'Assert-PrivateToolCommand "pnpm" $toolRoot',
+      '$pnpmPath = "C:\\npm\\prefix\\pnpm.cmd"',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /private pnpm executable/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      '$pnpmVersion -ne $env:PNPM_VERSION',
+      '$pnpmVersion -eq $env:PNPM_VERSION',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /exact pnpm version/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      '$env:NODE_OPTIONS = "--require=$guardPath"',
+      '$env:NODE_OPTIONS = ""',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /pnpm runtime Node guard/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      'process.version !== `v${expected}`',
+      'process.version === `v${expected}`',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /unexpected pnpm runtime Node version/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      'npm install --global --prefix $toolRoot "corepack@$env:COREPACK_VERSION"',
+      'npm install --global "corepack@$env:COREPACK_VERSION"',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /explicit private npm prefix|runner-global Corepack installation/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      '$PSNativeCommandUseErrorActionPreference = $true',
+      '$PSNativeCommandUseErrorActionPreference = $false',
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /native command errors/,
   );
 });
 

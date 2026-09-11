@@ -35,15 +35,11 @@ jobs:
       - name: Install production-pinned tools
         shell: pwsh
         run: |
-          npm install --global "corepack@$env:COREPACK_VERSION"
-          corepack enable
-          corepack install --global "pnpm@$env:PNPM_VERSION"
+          ./scripts/bootstrap_windows_node_tools.ps1
           rustup toolchain install $env:RUST_VERSION --profile minimal
           rustup default $env:RUST_VERSION
           rustup target add x86_64-pc-windows-msvc --toolchain $env:RUST_VERSION
           pnpm install --frozen-lockfile
-          if ((node --version).Trim() -ne "v$env:NODE_VERSION") { throw "Pinned Node is required" }
-          if ((pnpm --version).Trim() -ne $env:PNPM_VERSION) { throw "Pinned pnpm is required" }
           if (((rustc --version) -split ' ')[1] -ne $env:RUST_VERSION) { throw "Pinned Rust is required" }
       - name: Build and validate Windows desktop runtime
         shell: pwsh

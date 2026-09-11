@@ -180,9 +180,7 @@ jobs:
       - name: Install pinned Windows release tools
         shell: pwsh
         run: |
-          npm install --global "corepack@$env:COREPACK_VERSION"
-          corepack enable
-          corepack install --global "pnpm@$env:PNPM_VERSION"
+          ./scripts/bootstrap_windows_node_tools.ps1
           rustup toolchain install $env:RUST_VERSION --profile minimal
           rustup default $env:RUST_VERSION
           rustup target add x86_64-pc-windows-msvc --toolchain $env:RUST_VERSION

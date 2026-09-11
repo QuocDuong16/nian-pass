@@ -96,6 +96,30 @@ export function githubReleaseWorkflowViolations(root) {
     if (!pattern.test(workflow))
       violations.push(`${githubWorkflow}: ${message}`);
   };
+  const windowsJob = workflowJobBlock(workflow, "windows");
+  if (!/\.\/scripts\/bootstrap_windows_node_tools\.ps1/.test(windowsJob)) {
+    violations.push(
+      `${githubWorkflow}: Windows release job must use the shared private Node tool bootstrap`,
+    );
+  }
+  if (/npm install\s+--global\s+"corepack@\$env:COREPACK_VERSION"/i.test(windowsJob)) {
+    violations.push(
+      `${githubWorkflow}: Windows release job must not mutate runner-global Corepack`,
+    );
+  }
+  const windowsSetupNodeIndex = windowsJob.indexOf("uses: actions/setup-node@");
+  const windowsBootstrapIndex = windowsJob.indexOf(
+    "./scripts/bootstrap_windows_node_tools.ps1",
+  );
+  if (
+    windowsSetupNodeIndex < 0 ||
+    windowsBootstrapIndex < 0 ||
+    windowsSetupNodeIndex > windowsBootstrapIndex
+  ) {
+    violations.push(
+      `${githubWorkflow}: Windows setup-node must run before the shared private Node tool bootstrap`,
+    );
+  }
   require(/^on:\s*\n[\s\S]*?^  push:\s*\n\s+tags:\s*\n\s+- ["']v\*["']/m, "must trigger on v* tags");
   require(/^  workflow_dispatch:\s*\n[\s\S]*?release_tag:[\s\S]*?required:\s*true/m, "manual dispatch must require a release_tag");
   require(/ref:\s*\$\{\{\s*format\(['"]refs\/tags\/\{0\}['"],\s*env\.RELEASE_TAG\)\s*\}\}/, "every checkout must select the explicit refs/tags namespace");
@@ -368,6 +392,41 @@ export function githubReleaseWorkflowViolations(root) {
   return violations;
 }
 
+export function windowsNodeBootstrapViolations(root) {
+  const helperPath = "scripts/bootstrap_windows_node_tools.ps1";
+  if (!existsSync(resolve(root, helperPath))) {
+    return [`${helperPath}: shared Windows Node tool bootstrap is missing`];
+  }
+  const helper = readPolicyText(root, helperPath);
+  const violations = [];
+  const require = (pattern, message) => {
+    if (!pattern.test(helper)) violations.push(`${helperPath}: ${message}`);
+  };
+  require(/^\$ErrorActionPreference\s*=\s*"Stop"/m, "must stop on PowerShell errors");
+  require(/^\$PSNativeCommandUseErrorActionPreference\s*=\s*\$true/m, "must stop on native command errors");
+  require(/\$LASTEXITCODE\s+-ne\s+0/, "must explicitly reject non-zero native command exit codes");
+  require(/\$actualNode\s*=\s*\(node --version\)\.Trim\(\)/, "must read the selected Node version");
+  require(/\$actualNode\s+-ne\s+\$expectedNode/, "must reject an unexpected Node version");
+  require(/Join-Path \$env:RUNNER_TEMP "nian-pass-node-tools"/, "must use a private RUNNER_TEMP tool root");
+  require(/Join-Path \$env:RUNNER_TEMP "nian-pass-corepack-home"/, "must use a private RUNNER_TEMP COREPACK_HOME");
+  require(/npm install --global --prefix \$toolRoot "corepack@\$env:COREPACK_VERSION"/, "must install Corepack with an explicit private npm prefix");
+  require(/\$env:COREPACK_HOME\s*=\s*\$corepackHome/, "must isolate COREPACK_HOME");
+  require(/Assert-PrivateToolCommand "corepack" \$toolRoot/, "must require a private Corepack executable");
+  require(/Assert-PrivateToolCommand "pnpm" \$toolRoot/, "must require a private pnpm executable");
+  require(/\$corepackVersion\s+-ne\s+\$env:COREPACK_VERSION/, "must require the exact Corepack version");
+  require(/\$pnpmVersion\s+-ne\s+\$env:PNPM_VERSION/, "must require the exact pnpm version");
+  require(/NIAN_PASS_EXPECTED_NODE_VERSION/, "must provide the pnpm runtime Node guard");
+  require(/process\.version\s*!==\s*`v\$\{expected\}`/, "must reject an unexpected pnpm runtime Node version");
+  require(/NODE_OPTIONS\s*=\s*"--require=\$guardPath"/, "must load the pnpm runtime Node guard only for verification");
+  require(/Remove-Item Env:NODE_OPTIONS/, "must remove temporary NODE_OPTIONS after verification");
+  require(/Set-WorkflowEnvironment "COREPACK_HOME" \$corepackHome/, "must persist isolated COREPACK_HOME through GITHUB_ENV");
+  require(/Add-WorkflowPath \$toolRoot/, "must persist the private tool root through GITHUB_PATH");
+  if (/npm install\s+--global\s+"corepack@/i.test(helper)) {
+    violations.push(`${helperPath}: runner-global Corepack installation is forbidden`);
+  }
+  return violations;
+}
+
 export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   const workflowPath = ".github/workflows/windows-runtime-diagnostic.yml";
   if (!existsSync(resolve(root, workflowPath))) {
@@ -376,7 +435,7 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
     ];
   }
   const workflow = readPolicyText(root, workflowPath);
-  const violations = [];
+  const violations = windowsNodeBootstrapViolations(root);
   const require = (pattern, message) => {
     if (!pattern.test(workflow)) violations.push(`${workflowPath}: ${message}`);
   };
@@ -392,21 +451,26 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020[\s\S]*?node-version:\s*\$\{\{ env\.NODE_VERSION \}\}/, "must install NODE_VERSION with the production-pinned setup-node action");
   const checkoutIndex = workflow.indexOf("uses: actions/checkout@");
   const setupNodeIndex = workflow.indexOf("uses: actions/setup-node@");
-  const corepackIndex = workflow.indexOf("npm install --global");
+  const bootstrapIndex = workflow.indexOf(
+    "./scripts/bootstrap_windows_node_tools.ps1",
+  );
   const frozenLockfileIndex = workflow.indexOf(
     "pnpm install --frozen-lockfile",
   );
   if (
     checkoutIndex < 0 ||
     setupNodeIndex < checkoutIndex ||
-    setupNodeIndex > corepackIndex ||
+    setupNodeIndex > bootstrapIndex ||
     setupNodeIndex > frozenLockfileIndex
   ) {
     violations.push(
-      `${workflowPath}: setup-node must run after checkout and before Corepack/pnpm use`,
+      `${workflowPath}: setup-node must run after checkout and before the private Corepack/pnpm bootstrap`,
     );
   }
-  require(/if \(\(node --version\)\.Trim\(\) -ne "v\$env:NODE_VERSION"\) \{ throw "Pinned Node is required" \}/, "must retain the exact Node version assertion");
+  require(/\.\/scripts\/bootstrap_windows_node_tools\.ps1/, "must use the shared private Node tool bootstrap");
+  if (/npm install\s+--global\s+"corepack@/i.test(workflow)) {
+    violations.push(`${workflowPath}: runner-global Corepack installation is forbidden`);
+  }
   require(/git rev-parse HEAD/, "must record the checked-out commit SHA");
   require(/Get-Content -LiteralPath "VERSION"[\s\S]*?\$version -ne "0\.1\.1"/, "must record and require VERSION 0.1.1");
   require(/pnpm install --frozen-lockfile/, "must install the frozen lockfile");
