@@ -28,7 +28,6 @@ pub struct VaultSession {
     source_fingerprint: FileFingerprint,
     saved_revision: u64,
 }
-
 impl VaultSession {
     /// Opens an existing regular vault file into a stable unlocked session.
     /// Final-component symlinks and non-regular files are rejected. The file is
@@ -952,7 +951,9 @@ mod tests {
                 .to_string_lossy()
                 .into_owned();
             assert!(
-                !name.starts_with(SAVE_TEMP_PREFIX) && !name.starts_with(BACKUP_TEMP_PREFIX),
+                !name.starts_with(SAVE_TEMP_PREFIX)
+                    && !name.starts_with(BACKUP_TEMP_PREFIX)
+                    && !name.starts_with(super::platform::PRIOR_BACKUP_TEMP_PREFIX),
                 "transaction temp was not cleaned"
             );
         }
