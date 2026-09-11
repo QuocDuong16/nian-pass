@@ -26,13 +26,19 @@ export function useCloseRequest(options: CloseRequestOptions) {
     let unlisten: (() => void) | null = null;
     void options.windowLifecycle
       .onCloseRequested(async (event) => {
-        event.preventDefault();
-        if (closePolicyInFlight.current) return;
+        if (closePolicyInFlight.current) {
+          event.preventDefault();
+          return;
+        }
         closePolicyInFlight.current = true;
         try {
           const before = latest.current;
-          if (before.blocked) return;
+          if (before.blocked) {
+            event.preventDefault();
+            return;
+          }
           if (before.hasLocalDraft) {
+            event.preventDefault();
             if (active) before.onDraft();
             return;
           }
@@ -40,17 +46,22 @@ export function useCloseRequest(options: CloseRequestOptions) {
           if (!active) return;
 
           const after = latest.current;
-          if (after.blocked) return;
+          if (after.blocked || after.windowLifecycle === null) {
+            event.preventDefault();
+            return;
+          }
           if (after.hasLocalDraft) {
+            event.preventDefault();
             after.onDraft();
             return;
           }
           if (policy.policy === "confirm_discard") {
+            event.preventDefault();
             after.onDirty();
             return;
           }
-          await after.windowLifecycle?.destroyApprovedWindow();
         } catch {
+          event.preventDefault();
           if (active) latest.current.onError();
         } finally {
           closePolicyInFlight.current = false;

@@ -129,7 +129,7 @@ test("dirty window close is prevented until explicit discard then destroyed", as
   expect(api.discardChangesAndLock).toHaveBeenCalledOnce();
 });
 
-test("clean and locked close requests are prevented then explicitly destroyed", async () => {
+test("clean and locked Allow close requests leave native destruction to Tauri", async () => {
   let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
     Promise.reject(new Error("close handler missing"));
   const lifecycle: DesktopWindowLifecycle = {
@@ -158,12 +158,14 @@ test("clean and locked close requests are prevented then explicitly destroyed", 
   await act(async () => {
     await closeHandler({ preventDefault: cleanPreventDefault });
   });
-  expect(cleanPreventDefault).toHaveBeenCalledOnce();
-  expect(lifecycle.destroyApprovedWindow).toHaveBeenCalledOnce();
+  expect(cleanPreventDefault).not.toHaveBeenCalled();
+  expect(cleanApi.closePolicy).toHaveBeenCalledOnce();
+  expect(lifecycle.destroyApprovedWindow).not.toHaveBeenCalled();
   clean.unmount();
 
   closeHandler = () => Promise.reject(new Error("close handler missing"));
-  render(<App api={mutationApi()} windowLifecycle={lifecycle} />);
+  const lockedApi = mutationApi();
+  render(<App api={lockedApi} windowLifecycle={lifecycle} />);
   await waitFor(() => {
     expect(lifecycle.onCloseRequested).toHaveBeenCalledTimes(2);
   });
@@ -171,11 +173,12 @@ test("clean and locked close requests are prevented then explicitly destroyed", 
   await act(async () => {
     await closeHandler({ preventDefault: lockedPreventDefault });
   });
-  expect(lockedPreventDefault).toHaveBeenCalledOnce();
-  expect(lifecycle.destroyApprovedWindow).toHaveBeenCalledTimes(2);
+  expect(lockedPreventDefault).not.toHaveBeenCalled();
+  expect(lockedApi.closePolicy).toHaveBeenCalledOnce();
+  expect(lifecycle.destroyApprovedWindow).not.toHaveBeenCalled();
 });
 
-test("close is prevented synchronously and duplicate policy checks are suppressed", async () => {
+test("duplicate close while policy is pending is prevented without authorizing another close", async () => {
   let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
     Promise.reject(new Error("close handler missing"));
   let resolvePolicy: (value: { policy: "allow" }) => void = () => {
@@ -206,7 +209,7 @@ test("close is prevented synchronously and duplicate policy checks are suppresse
   });
   const firstPreventDefault = vi.fn();
   const first = closeHandler({ preventDefault: firstPreventDefault });
-  expect(firstPreventDefault).toHaveBeenCalledOnce();
+  expect(firstPreventDefault).not.toHaveBeenCalled();
   const secondPreventDefault = vi.fn();
   await closeHandler({ preventDefault: secondPreventDefault });
   expect(secondPreventDefault).toHaveBeenCalledOnce();
@@ -215,7 +218,8 @@ test("close is prevented synchronously and duplicate policy checks are suppresse
     resolvePolicy({ policy: "allow" });
     await first;
   });
-  expect(destroyApprovedWindow).toHaveBeenCalledOnce();
+  expect(firstPreventDefault).not.toHaveBeenCalled();
+  expect(destroyApprovedWindow).not.toHaveBeenCalled();
 });
 
 test("a local draft that appears during close-policy lookup prevents approved destruction", async () => {
@@ -251,7 +255,8 @@ test("a local draft that appears during close-policy lookup prevents approved de
   render(<App api={api} windowLifecycle={lifecycle} />);
   await unlock();
 
-  const close = closeHandler({ preventDefault: vi.fn() });
+  const preventDefault = vi.fn();
+  const close = closeHandler({ preventDefault });
   expect(closePolicy).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole("button", { name: /Account A/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Edit entry" }));
@@ -264,6 +269,7 @@ test("a local draft that appears during close-policy lookup prevents approved de
     resolvePolicy({ policy: "allow" });
     await close;
   });
+  expect(preventDefault).toHaveBeenCalledOnce();
   expect(destroyApprovedWindow).not.toHaveBeenCalled();
   expect(
     screen.getByRole("heading", { name: "Unfinished edit" }),
@@ -313,7 +319,8 @@ test("a blocked state that appears during close-policy lookup prevents approved 
   render(<App api={api} windowLifecycle={lifecycle} />);
   await unlock();
 
-  const close = closeHandler({ preventDefault: vi.fn() });
+  const preventDefault = vi.fn();
+  const close = closeHandler({ preventDefault });
   expect(closePolicy).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole("button", { name: "Lock" }));
   await waitFor(() => {
@@ -324,6 +331,7 @@ test("a blocked state that appears during close-policy lookup prevents approved 
     resolvePolicy({ policy: "allow" });
     await close;
   });
+  expect(preventDefault).toHaveBeenCalledOnce();
   expect(destroyApprovedWindow).not.toHaveBeenCalled();
   act(() => {
     resolveLock({ clipboard: "not_owned" });
