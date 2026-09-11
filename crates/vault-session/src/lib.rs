@@ -69,7 +69,6 @@ impl VaultSession {
     pub const fn document(&self) -> &KdbxDocument {
         &self.document
     }
-
     /// Mutably borrows the document; public mutations maintain revision.
     #[must_use]
     pub const fn document_mut(&mut self) -> &mut KdbxDocument {
@@ -95,19 +94,18 @@ impl VaultSession {
         if !self.is_dirty() {
             return Ok(SaveOutcome::Unchanged);
         }
-
         if !platform::SAVE_SUPPORTED {
             return Err(SessionError::UnsupportedPersistencePlatform);
         }
-
+        #[cfg(unix)]
         let source_metadata = validate_current_target(&self.path)?;
+        #[cfg(windows)]
+        validate_current_target(&self.path)?;
         self.require_source_unchanged()?;
         self.verify_save_credential(credential)?;
-
         let parent = self.path.parent().ok_or(SessionError::UnsupportedPath)?;
         let mut serialized = ManagedTemp::create(parent, SAVE_TEMP_PREFIX)?;
         observer.checkpoint(SavePhase::AfterTempCreate, serialized.path())?;
-
         {
             let mut writer = BufWriter::new(serialized.file_mut()?);
             observer.serialize(&self.document, &mut writer, credential)?;
@@ -120,35 +118,41 @@ impl VaultSession {
             .map_err(SessionError::SyncTemp)?;
         serialized.close();
         observer.checkpoint(SavePhase::AfterTempSync, serialized.path())?;
-
         let reopened_temp = open_document(serialized.path(), credential)
             .map_err(SessionError::TempVerificationFailed)?;
         self.document
             .verify_semantic_equivalence(&reopened_temp)
             .map_err(SessionError::TempVerificationFailed)?;
         observer.checkpoint(SavePhase::AfterTempVerify, serialized.path())?;
-
         self.require_source_unchanged()?;
         observer.checkpoint(SavePhase::AfterFinalExternalCheck, &self.path)?;
-
-        apply_restricted_permissions(serialized.path(), &source_metadata)
-            .map_err(SessionError::WriteTemp)?;
-        sync_path(serialized.path()).map_err(SessionError::SyncTemp)?;
-
+        #[cfg(unix)]
+        {
+            apply_restricted_permissions(serialized.path(), &source_metadata)
+                .map_err(SessionError::WriteTemp)?;
+            sync_path(serialized.path()).map_err(SessionError::SyncTemp)?;
+        }
         let backup_path = backup_path(&self.path);
+        #[cfg(unix)]
         let prepared_backup = self.prepare_backup(&backup_path, &source_metadata, observer)?;
-
         // A third check narrows the unavoidable cooperative-locking race and
         // detects changes that happened while the exact backup was prepared.
         observer.checkpoint(SavePhase::BeforeTargetReplace, serialized.path())?;
         self.require_source_unchanged()?;
-
+        #[cfg(unix)]
         observer
             .replace_primary(serialized.path(), &self.path)
             .map_err(SessionError::AtomicReplaceFailed)?;
+        #[cfg(windows)]
+        platform::replace_windows_with_backup(
+            serialized.path(),
+            &self.path,
+            &backup_path,
+            &self.source_fingerprint,
+        )?;
         serialized.disarm();
+        #[cfg(unix)]
         let post_replace_observer = observer.checkpoint(SavePhase::AfterTargetReplace, &self.path);
-
         let durability = observer.sync_parent(parent, true);
         let final_open = open_stable_document_with_hook(&self.path, credential, || {
             observer.checkpoint(SavePhase::AfterFinalDocumentRead, &self.path)
@@ -158,19 +162,17 @@ impl VaultSession {
         self.document
             .verify_semantic_equivalence(&final_document)
             .map_err(SessionError::FinalVerificationFailed)?;
-
         self.source_fingerprint = final_fingerprint;
         self.saved_revision = self.document.revision();
-
+        #[cfg(unix)]
         self.commit_backup(prepared_backup, &backup_path, parent, observer)?;
-
+        #[cfg(unix)]
         post_replace_observer?;
         match durability {
             Ok(()) => Ok(SaveOutcome::Saved),
             Err(source) => Err(SessionError::DurabilityUncertain(source)),
         }
     }
-
     fn require_source_unchanged(&self) -> Result<(), SessionError> {
         validate_current_target(&self.path)?;
         if fingerprint_path(&self.path)? == self.source_fingerprint {
@@ -179,7 +181,6 @@ impl VaultSession {
             Err(SessionError::ExternalModificationDetected)
         }
     }
-
     fn verify_save_credential(&self, credential: &SecretString) -> Result<(), SessionError> {
         match open_document(&self.path, credential) {
             Ok(_) => Ok(()),
@@ -187,7 +188,6 @@ impl VaultSession {
             Err(error) => Err(SessionError::CredentialVerificationFailed(error)),
         }
     }
-
     fn prepare_backup(
         &self,
         backup_path: &Path,
@@ -756,8 +756,10 @@ mod tests {
     #[cfg(unix)]
     use std::io::Write;
 
+    #[cfg(any(unix, windows))]
+    use kdbx::KdbxDocument;
     #[cfg(unix)]
-    use kdbx::{KdbxDocument, KdbxError};
+    use kdbx::KdbxError;
     use vault_core::{EntryId, GroupId, NewEntry, SecretString};
 
     use super::{
@@ -1051,7 +1053,7 @@ mod tests {
         assert!(session.is_dirty());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn verified_saves_rotate_exact_previous_ciphertext_and_update_baseline() {
         let directory = TestDir::create();
@@ -1257,7 +1259,7 @@ mod tests {
         assert_no_transaction_temps(&directory.path);
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn wrong_save_credential_cannot_rekey_or_advance_backup() {
         let directory = TestDir::create();

@@ -131,7 +131,7 @@ impl VaultSession {
             .map_err(SessionError::AtomicReplaceFailed)?;
 
         #[cfg(windows)]
-        replace_windows_with_backup(
+        platform::replace_windows_with_backup(
             prepared.path(),
             &self.path,
             &backup_path,
@@ -154,54 +154,5 @@ impl VaultSession {
         #[cfg(unix)]
         self.commit_backup(backup, &backup_path, parent, &mut observer)?;
         durability.map_err(SessionError::DurabilityUncertain)
-    }
-}
-
-#[cfg(windows)]
-fn replace_windows_with_backup(
-    prepared: &std::path::Path,
-    destination: &std::path::Path,
-    backup: &std::path::Path,
-    expected_source: &FileFingerprint,
-) -> Result<(), SessionError> {
-    super::reject_symlink_if_present(backup).map_err(SessionError::BackupFailed)?;
-    let prior_backup = if backup.exists() {
-        let parent = backup.parent().ok_or(SessionError::UnsupportedPath)?;
-        let path = parent.join(super::random_temp_name(".nian-pass-prior-backup-")?);
-        fs::rename(backup, &path).map_err(SessionError::BackupFailed)?;
-        Some(path)
-    } else {
-        None
-    };
-
-    match platform::replace_existing_with_backup(prepared, destination, backup) {
-        Ok(()) => {
-            if super::fingerprint_path_for_backup(backup)? != *expected_source {
-                return Err(SessionError::SavedButBackupUpdateFailed(
-                    std::io::Error::other(
-                        "Windows replacement backup did not preserve the expected source generation",
-                    ),
-                ));
-            }
-            if let Some(path) = prior_backup {
-                fs::remove_file(path).map_err(SessionError::SavedButBackupUpdateFailed)?;
-            }
-            Ok(())
-        }
-        Err(replace_error) => {
-            // ReplaceFileW documents one partial error in which the old source
-            // has already moved to the requested backup name. Restore the
-            // canonical source before restoring the previous backup.
-            if !destination.exists() && backup.exists() {
-                fs::rename(backup, destination).map_err(SessionError::AtomicReplaceFailed)?;
-            }
-            if let Some(path) = prior_backup {
-                if backup.exists() {
-                    return Err(SessionError::AtomicReplaceFailed(replace_error));
-                }
-                fs::rename(path, backup).map_err(SessionError::AtomicReplaceFailed)?;
-            }
-            Err(SessionError::AtomicReplaceFailed(replace_error))
-        }
     }
 }

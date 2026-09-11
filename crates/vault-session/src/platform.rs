@@ -2,11 +2,17 @@
 use std::fs;
 use std::{io, path::Path};
 
+#[cfg(windows)]
+use std::fs;
+
+#[cfg(windows)]
+use super::{FileFingerprint, SessionError};
+
 #[cfg(unix)]
 pub(crate) const SAVE_SUPPORTED: bool = true;
 
 #[cfg(windows)]
-pub(crate) const SAVE_SUPPORTED: bool = false;
+pub(crate) const SAVE_SUPPORTED: bool = true;
 
 pub(crate) const SYNC_REPLACE_SUPPORTED: bool = true;
 
@@ -62,6 +68,55 @@ pub(crate) fn replace_existing_with_backup(
     backup: &Path,
 ) -> io::Result<()> {
     windows_safe_replace::replace_existing_with_backup(prepared, destination, backup)
+}
+
+/// Shared Windows replacement transaction for ordinary save and sync. It keeps
+/// an existing backup until ReplaceFileW succeeds, then proves the new backup
+/// is the exact primary generation that was replaced.
+#[cfg(windows)]
+pub(crate) fn replace_windows_with_backup(
+    prepared: &Path,
+    destination: &Path,
+    backup: &Path,
+    expected_source: &FileFingerprint,
+) -> Result<(), SessionError> {
+    super::reject_symlink_if_present(backup).map_err(SessionError::BackupFailed)?;
+    let prior_backup = if backup.exists() {
+        let parent = backup.parent().ok_or(SessionError::UnsupportedPath)?;
+        let path = parent.join(super::random_temp_name(".nian-pass-prior-backup-")?);
+        fs::rename(backup, &path).map_err(SessionError::BackupFailed)?;
+        Some(path)
+    } else {
+        None
+    };
+
+    match replace_existing_with_backup(prepared, destination, backup) {
+        Ok(()) => {
+            if super::fingerprint_path_for_backup(backup)? != *expected_source {
+                return Err(SessionError::SavedButBackupUpdateFailed(io::Error::other(
+                    "Windows replacement backup did not preserve the expected source generation",
+                )));
+            }
+            if let Some(path) = prior_backup {
+                fs::remove_file(path).map_err(SessionError::SavedButBackupUpdateFailed)?;
+            }
+            Ok(())
+        }
+        Err(replace_error) => {
+            // ReplaceFileW can move the former primary to backup before a
+            // reported failure; restore primary first, then the prior backup.
+            if !destination.exists() && backup.exists() {
+                fs::rename(backup, destination).map_err(SessionError::AtomicReplaceFailed)?;
+            }
+            if let Some(path) = prior_backup {
+                if backup.exists() {
+                    return Err(SessionError::AtomicReplaceFailed(replace_error));
+                }
+                fs::rename(path, backup).map_err(SessionError::AtomicReplaceFailed)?;
+            }
+            Err(SessionError::AtomicReplaceFailed(replace_error))
+        }
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
