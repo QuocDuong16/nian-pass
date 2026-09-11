@@ -81,9 +81,20 @@ jobs:
             return "decimal $ExitCode (0x$($raw.ToString('X8')))"
           }
 
+          function Write-CloseTrace() {
+            Write-Host "===== NIAN WINDOWS CLOSE TRACE BEGIN ====="
+            if (Test-Path -LiteralPath $closeTrace) {
+              Get-Content -LiteralPath $closeTrace | Write-Host
+            } else {
+              Write-Host "NIAN_WINDOWS_CLOSE_TRACE=MISSING"
+            }
+            Write-Host "===== NIAN WINDOWS CLOSE TRACE END ====="
+          }
+
           function Stop-DesktopAfterFailedShutdown([System.Diagnostics.Process] $Process) {
             $Process.Refresh()
             if (-not $Process.HasExited) {
+              Write-CloseTrace
               Write-Host "Windows desktop graceful shutdown timed out; process diagnostics:"
               Get-Process -Id $Process.Id -ErrorAction SilentlyContinue | Format-List * | Out-String | Write-Host
               Stop-Process -Id $Process.Id -ErrorAction SilentlyContinue
@@ -122,6 +133,9 @@ jobs:
 
           $commit = (git rev-parse HEAD).Trim()
           $version = (Get-Content -LiteralPath "VERSION" -Raw).Trim()
+          $closeTrace = Join-Path $env:RUNNER_TEMP "nian-pass-windows-close-trace.log"
+          Remove-Item -LiteralPath $closeTrace -Force -ErrorAction SilentlyContinue
+          $env:NIAN_PASS_WINDOWS_CLOSE_TRACE = $closeTrace
           Write-Host "commit SHA: $commit"
           Write-Host "VERSION: $version"
           if ($version -ne "0.1.1") { throw "Windows runtime diagnostic requires VERSION 0.1.1" }
@@ -136,6 +150,7 @@ jobs:
           $desktopProcess = Start-DesktopAndRequireStartup $desktopBinary
           Write-Host "WINDOWS_DESKTOP_STARTUP_SMOKE=PASS"
           Test-DesktopGracefulShutdown $desktopProcess
+          Write-CloseTrace
           Write-Host "WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS"
           @(
             "commit SHA: $commit",
@@ -152,4 +167,14 @@ jobs:
             target/x86_64-pc-windows-msvc/release/nian-pass-desktop.exe
             windows-runtime-diagnostic-evidence.txt
           if-no-files-found: error
+          retention-days: 3
+      - name: Upload close-path trace
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nian-pass-0.1.1-windows-close-trace
+          path: |
+            ${{ runner.temp }}/nian-pass-windows-close-trace.log
+            windows-runtime-diagnostic-evidence.txt
+          if-no-files-found: warn
           retention-days: 3

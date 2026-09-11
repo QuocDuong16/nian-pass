@@ -550,6 +550,22 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
     /push, pull_request, and schedule triggers are forbidden/,
   );
+  writeFileSync(
+    workflowPath,
+    workflow.replace("$env:NIAN_PASS_WINDOWS_CLOSE_TRACE = $closeTrace", ""),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /supply the close trace path/,
+  );
+  writeFileSync(
+    workflowPath,
+    workflow.replace("if: always()", "if: success()"),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /always upload the short-retention close trace artifact/,
+  );
 });
 
 test("policy text normalization is LF, CRLF, and CR independent", () => {

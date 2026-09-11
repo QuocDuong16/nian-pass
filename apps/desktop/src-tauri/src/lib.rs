@@ -5,6 +5,8 @@ mod browser_bridge_runtime;
 #[cfg(any(desktop, test))]
 mod clipboard;
 #[cfg(any(desktop, test))]
+mod close_trace;
+#[cfg(any(desktop, test))]
 mod command_support;
 #[cfg(any(desktop, test))]
 mod commands;
@@ -135,11 +137,18 @@ pub fn run() {
         .expect("Nian Pass desktop runtime failed");
 
     app.run(|app_handle, event| {
-        if let tauri::RunEvent::WindowEvent { label, event, .. } = event
-            && should_exit_after_window_destroyed(&label, &event)
-        {
-            app_handle.state::<BrowserBridgeState>().shutdown();
-            app_handle.exit(0);
+        if let tauri::RunEvent::WindowEvent { label, event, .. } = event {
+            if label == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                close_trace::trace("RUST_WINDOW_CLOSE_REQUESTED");
+            }
+            if should_exit_after_window_destroyed(&label, &event) {
+                close_trace::trace("RUST_WINDOW_DESTROYED");
+                close_trace::trace("RUST_BROWSER_BRIDGE_SHUTDOWN_BEGIN");
+                app_handle.state::<BrowserBridgeState>().shutdown();
+                close_trace::trace("RUST_BROWSER_BRIDGE_SHUTDOWN_END");
+                close_trace::trace("RUST_APP_EXIT_REQUESTED");
+                app_handle.exit(0);
+            }
         }
     });
 }

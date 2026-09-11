@@ -282,13 +282,23 @@ pub fn delete_entry_custom_field(
 
 #[tauri::command]
 pub async fn close_policy(state: State<'_, AppState>) -> Result<ClosePolicyDto, DesktopErrorDto> {
+    crate::close_trace::trace("RUST_CLOSE_POLICY_ENTER");
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        crate::close_trace::trace("RUST_CLOSE_POLICY_BEFORE_SERVICE_LOCK");
         let service = state
             .service
             .lock()
             .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
-        Ok(service.close_policy())
+        crate::close_trace::trace("RUST_CLOSE_POLICY_SERVICE_LOCKED");
+        let policy = service.close_policy();
+        match policy {
+            ClosePolicyDto::Allow => crate::close_trace::trace("RUST_CLOSE_POLICY_RESULT_ALLOW"),
+            ClosePolicyDto::ConfirmDiscard => {
+                crate::close_trace::trace("RUST_CLOSE_POLICY_RESULT_CONFIRM_DISCARD");
+            }
+        }
+        Ok(policy)
     })
     .await
     .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?

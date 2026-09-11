@@ -417,8 +417,20 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/Start-DesktopAndRequireStartup[\s\S]*?Start-Process -FilePath \$Binary -PassThru[\s\S]*?Start-Sleep -Seconds 8[\s\S]*?WINDOWS_DESKTOP_STARTUP_SMOKE=PASS/, "must run the bounded desktop startup smoke");
   require(/Test-DesktopGracefulShutdown[\s\S]*?CloseMainWindow\(\)[\s\S]*?WaitForExit\(5000\)[\s\S]*?\$Process\.ExitCode -ne 0[\s\S]*?WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS/, "must require normal main-window shutdown with exit code 0");
   require(/Stop-DesktopAfterFailedShutdown[\s\S]*?Stop-Process[\s\S]*?throw "Windows desktop graceful shutdown/, "must force-kill only as failed-shutdown cleanup");
+  require(/\$env:NIAN_PASS_WINDOWS_CLOSE_TRACE\s*=\s*\$closeTrace/, "must supply the close trace path only to the diagnostic desktop process");
+  require(/function Write-CloseTrace\(\)[\s\S]*?===== NIAN WINDOWS CLOSE TRACE BEGIN =====[\s\S]*?NIAN_WINDOWS_CLOSE_TRACE=MISSING[\s\S]*?===== NIAN WINDOWS CLOSE TRACE END =====/, "must print a clearly delimited close trace or missing marker");
+  require(/Stop-DesktopAfterFailedShutdown[\s\S]*?Write-CloseTrace[\s\S]*?process diagnostics:[\s\S]*?Stop-Process/, "must print the close trace before failed-shutdown diagnostics and cleanup");
+  require(/Test-DesktopGracefulShutdown \$desktopProcess\s*\n\s*Write-CloseTrace\s*\n\s*Write-Host "WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS"/, "must print the close trace after successful natural shutdown");
   require(/WINDOWS_DESKTOP_STARTUP_SMOKE=PASS[\s\S]*?WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS/, "must record separate startup and shutdown evidence before upload");
   require(/actions\/upload-artifact@[0-9a-f]{40}[\s\S]*?name: nian-pass-0\.1\.1-windows-runtime-diagnostic[\s\S]*?retention-days: 3/, "must upload the short-retention diagnostic artifact");
+  require(/if: always\(\)[\s\S]*?name: nian-pass-0\.1\.1-windows-close-trace[\s\S]*?nian-pass-windows-close-trace\.log[\s\S]*?retention-days: 3/, "must always upload the short-retention close trace artifact");
+  const releaseWorkflowPath = ".github/workflows/release.yml";
+  if (
+    existsSync(resolve(root, releaseWorkflowPath)) &&
+    /NIAN_PASS_WINDOWS_CLOSE_TRACE/.test(readPolicyText(root, releaseWorkflowPath))
+  ) {
+    violations.push(`${releaseWorkflowPath}: production release must not enable diagnostic close tracing`);
+  }
   if (/\bgit\s+(tag|push)\b|\bgh\s+release\b/i.test(workflow)) {
     violations.push(
       `${workflowPath}: tag, push, and GitHub Release mutation are forbidden`,
