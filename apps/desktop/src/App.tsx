@@ -91,6 +91,8 @@ export default function App({
   const clearSavePassword = save.clearPassword;
 
   const operationPending = locking || save.busy || mutationPending;
+  const closeBlocked =
+    locking || mutationPending || save.flow.kind !== "closed";
   const idle = useIdleSecurity({
     unlocked: snapshot !== null,
     timeoutMs: autoLockMs,
@@ -118,7 +120,7 @@ export default function App({
   useCloseRequest({
     api,
     windowLifecycle,
-    blocked: operationPending,
+    blocked: closeBlocked,
     hasLocalDraft,
     onDraft: () => {
       setAttention({ kind: "draft", reason: "close" });

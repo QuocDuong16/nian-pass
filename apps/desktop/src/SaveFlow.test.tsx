@@ -100,6 +100,90 @@ test("clean disables Save while dirty Save opens and cancels a cleared credentia
   expect(screen.getByLabelText("Master password")).toHaveValue("");
 });
 
+test.each([
+  "credential",
+  "saving",
+  "external_conflict",
+  "reload_credential",
+  "reloading",
+] as const)(
+  "native close remains blocked during the %s save flow",
+  async (kind) => {
+    const harness = lifecycleHarness();
+    const closePolicy = vi.fn().mockResolvedValue({ policy: "allow" });
+    const savePending = deferred<VaultSnapshotDto>();
+    const reloadPending = deferred<VaultSnapshotDto>();
+    const api = mutationApi({
+      unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
+      closePolicy,
+      saveVault:
+        kind === "saving"
+          ? vi.fn().mockReturnValue(savePending.promise)
+          : vi
+              .fn()
+              .mockRejectedValue(new DesktopCommandError("external_change")),
+      reloadVault:
+        kind === "reloading"
+          ? vi.fn().mockReturnValue(reloadPending.promise)
+          : vi.fn().mockResolvedValue(cleanSnapshot),
+    });
+    await unlock(api, harness.lifecycle);
+    await waitFor(() => {
+      expect(harness.registered()).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
+    if (kind !== "credential") {
+      enterCredential();
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    }
+
+    if (kind === "external_conflict") {
+      await screen.findByRole("dialog", {
+        name: "The KDBX file changed outside Nian Pass",
+      });
+    }
+
+    if (kind === "reload_credential" || kind === "reloading") {
+      await screen.findByRole("dialog", {
+        name: "The KDBX file changed outside Nian Pass",
+      });
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Discard local changes and reload",
+        }),
+      );
+    }
+
+    if (kind === "reloading") {
+      enterCredential();
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Discard local changes and reload",
+        }),
+      );
+    }
+
+    const preventDefault = await harness.triggerClose();
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(closePolicy).not.toHaveBeenCalled();
+    expect(harness.destroyApprovedWindow).not.toHaveBeenCalled();
+
+    if (kind === "saving") {
+      await act(async () => {
+        savePending.resolve(cleanSnapshot);
+        await savePending.promise;
+      });
+    }
+    if (kind === "reloading") {
+      await act(async () => {
+        reloadPending.resolve(cleanSnapshot);
+        await reloadPending.promise;
+      });
+    }
+  },
+);
+
 test("Save waits for Rust, disables mutation, then accepts only canonical clean state", async () => {
   const pending = deferred<VaultSnapshotDto>();
   const api = mutationApi({

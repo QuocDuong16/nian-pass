@@ -29,21 +29,29 @@ export function useCloseRequest(options: CloseRequestOptions) {
         event.preventDefault();
         if (closePolicyInFlight.current) return;
         closePolicyInFlight.current = true;
-        const current = latest.current;
         try {
-          if (current.blocked) return;
-          if (current.hasLocalDraft) {
-            if (active) current.onDraft();
+          const before = latest.current;
+          if (before.blocked) return;
+          if (before.hasLocalDraft) {
+            if (active) before.onDraft();
             return;
           }
-          const policy = await current.api.closePolicy();
-          if (policy.policy === "confirm_discard") {
-            if (active) current.onDirty();
-          } else if (active && current.windowLifecycle !== null) {
-            await current.windowLifecycle.destroyApprovedWindow();
+          const policy = await before.api.closePolicy();
+          if (!active) return;
+
+          const after = latest.current;
+          if (after.blocked) return;
+          if (after.hasLocalDraft) {
+            after.onDraft();
+            return;
           }
+          if (policy.policy === "confirm_discard") {
+            after.onDirty();
+            return;
+          }
+          await after.windowLifecycle?.destroyApprovedWindow();
         } catch {
-          if (active) current.onError();
+          if (active) latest.current.onError();
         } finally {
           closePolicyInFlight.current = false;
         }

@@ -218,6 +218,118 @@ test("close is prevented synchronously and duplicate policy checks are suppresse
   expect(destroyApprovedWindow).toHaveBeenCalledOnce();
 });
 
+test("a local draft that appears during close-policy lookup prevents approved destruction", async () => {
+  let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
+    Promise.reject(new Error("close handler missing"));
+  let resolvePolicy: (value: { policy: "allow" }) => void = () => {
+    throw new Error("close policy resolver missing");
+  };
+  const closePolicy = vi.fn().mockImplementation(
+    () =>
+      new Promise<{ policy: "allow" }>((resolve) => {
+        resolvePolicy = resolve;
+      }),
+  );
+  const destroyApprovedWindow = vi.fn().mockResolvedValue(undefined);
+  const lifecycle: DesktopWindowLifecycle = {
+    onCloseRequested: vi
+      .fn()
+      .mockImplementation(
+        (handler: (event: CloseRequestEvent) => Promise<void>) => {
+          closeHandler = handler;
+          return Promise.resolve(vi.fn());
+        },
+      ),
+    destroyApprovedWindow,
+  };
+  const api = mutationApi({
+    unlockVault: vi
+      .fn()
+      .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
+    closePolicy,
+  });
+  render(<App api={api} windowLifecycle={lifecycle} />);
+  await unlock();
+
+  const close = closeHandler({ preventDefault: vi.fn() });
+  expect(closePolicy).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: /Account A/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit entry" }));
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "draft created during close" },
+  });
+
+  await act(async () => {
+    await Promise.resolve();
+    resolvePolicy({ policy: "allow" });
+    await close;
+  });
+  expect(destroyApprovedWindow).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("heading", { name: "Unfinished edit" }),
+  ).toBeVisible();
+});
+
+test("a blocked state that appears during close-policy lookup prevents approved destruction", async () => {
+  let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
+    Promise.reject(new Error("close handler missing"));
+  let resolvePolicy: (value: { policy: "allow" }) => void = () => {
+    throw new Error("close policy resolver missing");
+  };
+  let resolveLock: (value: { clipboard: "not_owned" }) => void = () => {
+    throw new Error("lock resolver missing");
+  };
+  const closePolicy = vi.fn().mockImplementation(
+    () =>
+      new Promise<{ policy: "allow" }>((resolve) => {
+        resolvePolicy = resolve;
+      }),
+  );
+  const lockVault = vi.fn().mockImplementation(
+    () =>
+      new Promise<{ clipboard: "not_owned" }>((resolve) => {
+        resolveLock = resolve;
+      }),
+  );
+  const destroyApprovedWindow = vi.fn().mockResolvedValue(undefined);
+  const lifecycle: DesktopWindowLifecycle = {
+    onCloseRequested: vi
+      .fn()
+      .mockImplementation(
+        (handler: (event: CloseRequestEvent) => Promise<void>) => {
+          closeHandler = handler;
+          return Promise.resolve(vi.fn());
+        },
+      ),
+    destroyApprovedWindow,
+  };
+  const api = mutationApi({
+    unlockVault: vi
+      .fn()
+      .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
+    closePolicy,
+    lockVault,
+  });
+  render(<App api={api} windowLifecycle={lifecycle} />);
+  await unlock();
+
+  const close = closeHandler({ preventDefault: vi.fn() });
+  expect(closePolicy).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Lock" }));
+  await waitFor(() => {
+    expect(lockVault).toHaveBeenCalledOnce();
+  });
+
+  await act(async () => {
+    resolvePolicy({ policy: "allow" });
+    await close;
+  });
+  expect(destroyApprovedWindow).not.toHaveBeenCalled();
+  act(() => {
+    resolveLock({ clipboard: "not_owned" });
+  });
+});
+
 test("local drafts prevent close before querying Rust policy", async () => {
   let closeHandler: (event: CloseRequestEvent) => Promise<void> = () =>
     Promise.reject(new Error("close handler missing"));
