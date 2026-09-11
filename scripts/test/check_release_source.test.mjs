@@ -95,7 +95,10 @@ function workflowFixture(t, workflow, prefix = "nian-pass-workflow-policy-") {
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
   mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
   mkdirSync(join(root, "scripts"), { recursive: true });
-  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
+  writeFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "name: Quality\n",
+  );
   writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
   for (const name of [
     "release_publication.mjs",
@@ -187,7 +190,14 @@ test("actual repository has the effective deterministic Cargo.toml LF policy", (
   const projectRoot = resolve(import.meta.dirname, "../..");
   assert.deepEqual(cargoTomlEolPolicyViolations(projectRoot), []);
   assert.deepEqual(
-    git(projectRoot, "check-attr", "text", "eol", "--", "apps/desktop/src-tauri/Cargo.toml").split("\n"),
+    git(
+      projectRoot,
+      "check-attr",
+      "text",
+      "eol",
+      "--",
+      "apps/desktop/src-tauri/Cargo.toml",
+    ).split("\n"),
     [
       "apps/desktop/src-tauri/Cargo.toml: text: set",
       "apps/desktop/src-tauri/Cargo.toml: eol: lf",
@@ -197,9 +207,21 @@ test("actual repository has the effective deterministic Cargo.toml LF policy", (
 
 test("source policy rejects absent or non-LF Cargo.toml attributes", (t) => {
   const cases = [
-    ["missing attributes", null, /\.gitattributes: deterministic Cargo\.toml LF policy is missing/],
-    ["CRLF attribute", "apps/desktop/src-tauri/Cargo.toml text eol=crlf\n", /Git eol attribute must be lf/],
-    ["missing EOL attribute", "apps/desktop/src-tauri/Cargo.toml text\n", /Git eol attribute must be lf/],
+    [
+      "missing attributes",
+      null,
+      /\.gitattributes: deterministic Cargo\.toml LF policy is missing/,
+    ],
+    [
+      "CRLF attribute",
+      "apps/desktop/src-tauri/Cargo.toml text eol=crlf\n",
+      /Git eol attribute must be lf/,
+    ],
+    [
+      "missing EOL attribute",
+      "apps/desktop/src-tauri/Cargo.toml text\n",
+      /Git eol attribute must be lf/,
+    ],
   ];
   for (const [name, attributes, expected] of cases) {
     const root = sourcePolicyFixture(t);
@@ -212,7 +234,10 @@ test("source policy rejects absent or non-LF Cargo.toml attributes", (t) => {
 
 test("Cargo.toml has a deterministic LF checkout under Windows autocrlf", (t) => {
   const root = repository(t);
-  const manifest = writeManifest(root, '[package]\nname = "nian-pass-desktop"\n');
+  const manifest = writeManifest(
+    root,
+    '[package]\nname = "nian-pass-desktop"\n',
+  );
   writeFileSync(
     join(root, ".gitattributes"),
     "apps/desktop/src-tauri/Cargo.toml text eol=lf\n",
@@ -223,7 +248,10 @@ test("Cargo.toml has a deterministic LF checkout under Windows autocrlf", (t) =>
   const checkout = checkoutWithAutocrlf(root);
   t.after(() => rmSync(checkout, { recursive: true, force: true }));
   const checkoutManifest = join(checkout, "apps/desktop/src-tauri/Cargo.toml");
-  assert.equal(readFileSync(checkoutManifest, "utf8"), '[package]\nname = "nian-pass-desktop"\n');
+  assert.equal(
+    readFileSync(checkoutManifest, "utf8"),
+    '[package]\nname = "nian-pass-desktop"\n',
+  );
 
   // Simulate the pinned Tauri TOML writer's canonical LF serialization.
   writeFileSync(checkoutManifest, '[package]\nname = "nian-pass-desktop"\n');
@@ -232,16 +260,29 @@ test("Cargo.toml has a deterministic LF checkout under Windows autocrlf", (t) =>
 
 test("without the manifest attribute, a canonical LF rewrite dirties a CRLF checkout", (t) => {
   const root = repository(t);
-  const manifest = writeManifest(root, '[package]\nname = "nian-pass-desktop"\n');
+  const manifest = writeManifest(
+    root,
+    '[package]\nname = "nian-pass-desktop"\n',
+  );
   git(root, "add", manifest);
-  git(root, ...identity, "commit", "--quiet", "-m", "manifest without eol policy");
+  git(
+    root,
+    ...identity,
+    "commit",
+    "--quiet",
+    "-m",
+    "manifest without eol policy",
+  );
 
   const checkout = checkoutWithAutocrlf(root);
   t.after(() => rmSync(checkout, { recursive: true, force: true }));
   const checkoutManifest = join(checkout, "apps/desktop/src-tauri/Cargo.toml");
   assert.match(readFileSync(checkoutManifest, "utf8"), /\r\n/);
   writeFileSync(checkoutManifest, '[package]\nname = "nian-pass-desktop"\n');
-  assert.match(dirtyTreeViolation(checkout), /apps\/desktop\/src-tauri\/Cargo\.toml/);
+  assert.match(
+    dirtyTreeViolation(checkout),
+    /apps\/desktop\/src-tauri\/Cargo\.toml/,
+  );
 });
 
 test("post-build validation rejects a semantic Cargo.toml mutation", (t) => {
@@ -250,7 +291,11 @@ test("post-build validation rejects a semantic Cargo.toml mutation", (t) => {
   git(root, "add", manifest);
   git(root, ...identity, "commit", "--quiet", "-m", "authoritative manifest");
   git(root, "tag", "v0.1.0");
-  const expected = { tag: "v0.1.0", commit: git(root, "rev-parse", "HEAD"), version: "0.1.0" };
+  const expected = {
+    tag: "v0.1.0",
+    commit: git(root, "rev-parse", "HEAD"),
+    version: "0.1.0",
+  };
 
   writeFileSync(manifest, '[package]\nversion = "9.9.9"\n');
   assert.match(
@@ -275,7 +320,11 @@ test("actual Tauri-generated Android Kotlin is ignored while authoritative Kotli
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/generated/WryActivity.kt",
   ];
   for (const path of generated)
-    assert.equal(ignoredByGit(projectRoot, path), true, `${path} must be ignored`);
+    assert.equal(
+      ignoredByGit(projectRoot, path),
+      true,
+      `${path} must be ignored`,
+    );
   assert.equal(
     ignoredByGit(
       projectRoot,
@@ -286,20 +335,14 @@ test("actual Tauri-generated Android Kotlin is ignored while authoritative Kotli
 
   const root = repository(t);
   git(root, "tag", "v0.1.0");
-  const appRoot = join(
-    root,
-    "apps/desktop/src-tauri/gen/android/app",
-  );
+  const appRoot = join(root, "apps/desktop/src-tauri/gen/android/app");
   mkdirSync(appRoot, { recursive: true });
   writeFileSync(join(appRoot, ".gitignore"), "/src/main/**/generated\n");
   git(root, "add", "apps/desktop/src-tauri/gen/android/app/.gitignore");
   git(root, ...identity, "commit", "--quiet", "-m", "ignore generated state");
   git(root, "tag", "-d", "v0.1.0");
   git(root, "tag", "v0.1.0");
-  const sourceRoot = join(
-    appRoot,
-    "src/main/java/dev/nian/pass",
-  );
+  const sourceRoot = join(appRoot, "src/main/java/dev/nian/pass");
   mkdirSync(join(sourceRoot, "generated"), { recursive: true });
   writeFileSync(join(sourceRoot, "generated/RustWebView.kt"), "generated\n");
   writeFileSync(join(sourceRoot, "generated/WryActivity.kt"), "generated\n");
@@ -324,7 +367,11 @@ test("Kotlin compiler session state is ignored while Android source mutations fa
     "apps/desktop/src-tauri/gen/android/buildSrc/.kotlin/sessions/kotlin-compiler-test.salive",
   ];
   for (const path of sessions)
-    assert.equal(ignoredByGit(projectRoot, path), true, `${path} must be ignored`);
+    assert.equal(
+      ignoredByGit(projectRoot, path),
+      true,
+      `${path} must be ignored`,
+    );
 
   const root = repository(t);
   const androidRoot = join(root, "apps/desktop/src-tauri/gen/android");
@@ -338,14 +385,24 @@ test("Kotlin compiler session state is ignored while Android source mutations fa
     mkdirSync(resolve(absolute, ".."), { recursive: true });
     writeFileSync(absolute, "transient\n");
   }
-  const expected = { tag: "v0.1.0", commit: git(root, "rev-parse", "HEAD"), version: "0.1.0" };
+  const expected = {
+    tag: "v0.1.0",
+    commit: git(root, "rev-parse", "HEAD"),
+    version: "0.1.0",
+  };
   assert.equal(dirtyTreeViolation(root), null);
   assert.deepEqual(postBuildSourceViolations(root, expected), []);
 
-  const source = join(androidRoot, "app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt");
+  const source = join(
+    androidRoot,
+    "app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+  );
   mkdirSync(resolve(source, ".."), { recursive: true });
   writeFileSync(source, "unexpected\n");
-  assert.match(postBuildSourceViolations(root, expected).join("\n"), /VaultSourcePlugin\.kt/);
+  assert.match(
+    postBuildSourceViolations(root, expected).join("\n"),
+    /VaultSourcePlugin\.kt/,
+  );
 });
 
 test("post-build validation keeps tag, HEAD, and VERSION bound to pre-build identity", (t) => {
@@ -429,15 +486,23 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   const projectRoot = resolve(import.meta.dirname, "../..");
   assert.deepEqual(windowsRuntimeDiagnosticWorkflowViolations(projectRoot), []);
 
-  const root = mkdtempSync(join(tmpdir(), "nian-pass-windows-runtime-diagnostic-"));
+  const root = mkdtempSync(
+    join(tmpdir(), "nian-pass-windows-runtime-diagnostic-"),
+  );
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
-  const workflowPath = join(root, ".github/workflows/windows-runtime-diagnostic.yml");
+  const workflowPath = join(
+    root,
+    ".github/workflows/windows-runtime-diagnostic.yml",
+  );
   const workflow = readFileSync(
     join(projectRoot, ".github/workflows/windows-runtime-diagnostic.yml"),
     "utf8",
   );
-  writeFileSync(workflowPath, workflow.replace("contents: read", "contents: write"));
+  writeFileSync(
+    workflowPath,
+    workflow.replace("contents: read", "contents: write"),
+  );
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
     /contents: read/,
@@ -445,7 +510,7 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   writeFileSync(
     workflowPath,
     workflow.replace(
-      '      - name: Install pinned Node\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: ${{ env.NODE_VERSION }}\n',
+      "      - name: Install pinned Node\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: ${{ env.NODE_VERSION }}\n",
       "",
     ),
   );
@@ -454,7 +519,7 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
     /production-pinned setup-node action/,
   );
   const setupNodeStep =
-    '      - name: Install pinned Node\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: ${{ env.NODE_VERSION }}\n';
+    "      - name: Install pinned Node\n        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020\n        with:\n          node-version: ${{ env.NODE_VERSION }}\n";
   writeFileSync(
     workflowPath,
     `${workflow.replace(setupNodeStep, "")}\n${setupNodeStep}`,
@@ -474,7 +539,13 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
     /production-pinned setup-node action/,
   );
-  writeFileSync(workflowPath, workflow.replace("  workflow_dispatch:", "  push:\n    branches: [main]\n  workflow_dispatch:"));
+  writeFileSync(
+    workflowPath,
+    workflow.replace(
+      "  workflow_dispatch:",
+      "  push:\n    branches: [main]\n  workflow_dispatch:",
+    ),
+  );
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
     /push, pull_request, and schedule triggers are forbidden/,
@@ -489,14 +560,21 @@ test("policy text normalization is LF, CRLF, and CR independent", () => {
 
 test("canonical release workflow has identical policy results under LF, CRLF, and CR", (t) => {
   const projectRoot = resolve(import.meta.dirname, "../..");
-  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  );
   const lfRoot = workflowFixture(t, workflow, "nian-pass-lf-workflow-");
   const crlfRoot = workflowFixture(
     t,
     workflow.replace(/\n/g, "\r\n"),
     "nian-pass-crlf-workflow-",
   );
-  const crRoot = workflowFixture(t, workflow.replace(/\n/g, "\r"), "nian-pass-cr-workflow-");
+  const crRoot = workflowFixture(
+    t,
+    workflow.replace(/\n/g, "\r"),
+    "nian-pass-cr-workflow-",
+  );
   const expected = githubReleaseWorkflowViolations(lfRoot);
   assert.deepEqual(expected, []);
   assert.deepEqual(githubReleaseWorkflowViolations(crlfRoot), expected);
@@ -512,7 +590,11 @@ test("canonical release workflow has identical policy results under LF, CRLF, an
     "publish=true must download assets from the existing GitHub draft",
   ];
   for (const violation of falsePositives) {
-    assert.ok(!githubReleaseWorkflowViolations(crlfRoot).some((item) => item.includes(violation)));
+    assert.ok(
+      !githubReleaseWorkflowViolations(crlfRoot).some((item) =>
+        item.includes(violation),
+      ),
+    );
   }
 });
 
@@ -520,12 +602,50 @@ test("CRLF workflow policy still detects a real build-mode violation", (t) => {
   const projectRoot = resolve(import.meta.dirname, "../..");
   const workflow = normalizePolicyText(
     readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8"),
-  )
-    .replace("  linux:\n    needs: preflight\n    if: ${{ needs.preflight.outputs.build_mode == 'true' }}\n", "  linux:\n    needs: preflight\n");
-  const root = workflowFixture(t, workflow.replace(/\n/g, "\r\n"), "nian-pass-crlf-violation-");
+  ).replace(
+    "  linux:\n    needs: preflight\n    if: ${{ needs.preflight.outputs.build_mode == 'true' }}\n",
+    "  linux:\n    needs: preflight\n",
+  );
+  const root = workflowFixture(
+    t,
+    workflow.replace(/\n/g, "\r\n"),
+    "nian-pass-crlf-violation-",
+  );
   assert.match(
     githubReleaseWorkflowViolations(root).join("\n"),
     /linux must run only in build\/stage mode/,
+  );
+});
+
+test("GitHub release workflow requires separate Windows shutdown evidence", (t) => {
+  const projectRoot = resolve(import.meta.dirname, "../..");
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  );
+  const missingOutput = workflowFixture(
+    t,
+    workflow.replace(
+      "desktop_shutdown_smoke: ${{ steps.build.outputs.desktop_shutdown_smoke }}",
+      "",
+    ),
+    "nian-pass-missing-windows-shutdown-output-",
+  );
+  assert.match(
+    githubReleaseWorkflowViolations(missingOutput).join("\n"),
+    /Windows job must expose desktop shutdown smoke output/,
+  );
+  const missingAttestation = workflowFixture(
+    t,
+    workflow.replace(
+      "WINDOWS_DESKTOP_SHUTDOWN_STATUS: ${{ needs.windows.outputs.desktop_shutdown_smoke }}",
+      "",
+    ),
+    "nian-pass-missing-windows-shutdown-attestation-",
+  );
+  assert.match(
+    githubReleaseWorkflowViolations(missingAttestation).join("\n"),
+    /attestation must pass desktop shutdown smoke to release status/,
   );
 });
 
@@ -601,9 +721,16 @@ test("GitHub release workflow policy rejects published-release-by-tag draft disc
     'gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | node scripts/github_release_state.mjs tsv',
     'gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"',
   );
-  const root = workflowFixture(t, workflow, "nian-pass-draft-discovery-policy-");
+  const root = workflowFixture(
+    t,
+    workflow,
+    "nian-pass-draft-discovery-policy-",
+  );
   const violations = githubReleaseWorkflowViolations(root).join("\n");
-  assert.match(violations, /published-release-by-tag discovery cannot resolve drafts/);
+  assert.match(
+    violations,
+    /published-release-by-tag discovery cannot resolve drafts/,
+  );
 });
 
 test("GitHub release workflow policy rejects unsafe release asset and metadata HTTP semantics", (t) => {
@@ -612,31 +739,59 @@ test("GitHub release workflow policy rejects unsafe release asset and metadata H
     join(projectRoot, ".github/workflows/release.yml"),
     "utf8",
   )
-    .replace("-H 'Content-Type: application/octet-stream' \\\n                ", "")
-    .replace('-F "body=@$1"', '--input -')
+    .replace(
+      "-H 'Content-Type: application/octet-stream' \\\n                ",
+      "",
+    )
+    .replace('-F "body=@$1"', "--input -")
     .replace(
       '-F draft=false \\\n              -F "prerelease=${RELEASE_IS_PRERELEASE}"',
-      '--input -',
+      "--input -",
     );
   const root = workflowFixture(t, workflow, "nian-pass-release-http-policy-");
   const violations = githubReleaseWorkflowViolations(root).join("\n");
-  assert.match(violations, /explicit binary Content-Type, raw body, and suppress successful response noise/);
-  assert.match(violations, /release notes PATCH must bind source tag\/commit and validate its draft response/);
-  assert.match(violations, /release publication PATCH must bind source tag\/commit and validate its published response/);
+  assert.match(
+    violations,
+    /explicit binary Content-Type, raw body, and suppress successful response noise/,
+  );
+  assert.match(
+    violations,
+    /release notes PATCH must bind source tag\/commit and validate its draft response/,
+  );
+  assert.match(
+    violations,
+    /release publication PATCH must bind source tag\/commit and validate its published response/,
+  );
 });
 
 test("GitHub release workflow policy rejects unpinned mutation and tag rediscovery", (t) => {
   const projectRoot = resolve(import.meta.dirname, "../..");
-  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8")
-    .replace('-F "tag_name=${RELEASE_TAG}" \\\n              -F "target_commitish=${RELEASE_COMMIT}" \\\n              -F "body=@$1"', '-F "body=@$1"')
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  )
+    .replace(
+      '-F "tag_name=${RELEASE_TAG}" \\\n              -F "target_commitish=${RELEASE_COMMIT}" \\\n              -F "body=@$1"',
+      '-F "body=@$1"',
+    )
     .replace(
       'gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" | node scripts/github_release_identity.mjs tsv',
       'gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" | node scripts/github_release_state.mjs tsv',
     );
-  const root = workflowFixture(t, workflow, "nian-pass-release-identity-policy-");
+  const root = workflowFixture(
+    t,
+    workflow,
+    "nian-pass-release-identity-policy-",
+  );
   const violations = githubReleaseWorkflowViolations(root).join("\n");
-  assert.match(violations, /release notes PATCH must bind source tag\/commit and validate its draft response/);
-  assert.match(violations, /transactional release observation must use the resolved numeric release ID and validate exact identity/);
+  assert.match(
+    violations,
+    /release notes PATCH must bind source tag\/commit and validate its draft response/,
+  );
+  assert.match(
+    violations,
+    /transactional release observation must use the resolved numeric release ID and validate exact identity/,
+  );
 });
 
 test("GitHub release workflow policy rejects publication authority bypasses", (t) => {
@@ -688,7 +843,10 @@ test("GitHub release workflow policy rejects publication authority bypasses", (t
   const violations = githubReleaseWorkflowViolations(root).join("\n");
   assert.match(violations, /behavioral publication policy helper/);
   assert.match(violations, /tag-push release runs must remain draft-only/);
-  assert.match(violations, /validate the downloaded DRAFT and isolated PASS candidate/);
+  assert.match(
+    violations,
+    /validate the downloaded DRAFT and isolated PASS candidate/,
+  );
   assert.match(
     violations,
     /publication must retain an exact local DRAFT snapshot/,
@@ -706,16 +864,22 @@ test("GitHub release workflow policy rejects publish-only rebuilds and broad pay
   mkdirSync(join(root, ".github/workflows"), { recursive: true });
   mkdirSync(join(root, ".forgejo/workflows"), { recursive: true });
   mkdirSync(join(root, "scripts"), { recursive: true });
-  writeFileSync(join(root, ".forgejo/workflows/quality.yml"), "name: Quality\n");
-  const workflow = readFileSync(join(projectRoot, ".github/workflows/release.yml"), "utf8")
+  writeFileSync(
+    join(root, ".forgejo/workflows/quality.yml"),
+    "name: Quality\n",
+  );
+  const workflow = readFileSync(
+    join(projectRoot, ".github/workflows/release.yml"),
+    "utf8",
+  )
     .replaceAll("if: ${{ needs.preflight.outputs.build_mode == 'true' }}", "")
     .replace(
-      'gh api -H \'Accept: application/octet-stream\' "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"',
-      ': current-run artifacts are enough',
+      "gh api -H 'Accept: application/octet-stream' \"repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}\"",
+      ": current-run artifacts are enough",
     )
     .replace(
       'release_upload "${candidate_metadata[@]}"',
-      'release_upload release-publish-candidate/*',
+      "release_upload release-publish-candidate/*",
     );
   writeFileSync(join(root, ".github/workflows/release.yml"), workflow);
   for (const name of [
@@ -731,8 +895,14 @@ test("GitHub release workflow policy rejects publish-only rebuilds and broad pay
   const violations = githubReleaseWorkflowViolations(root).join("\n");
   assert.match(violations, /linux must run only in build\/stage mode/);
   assert.match(violations, /attest must run only in build\/stage mode/);
-  assert.match(violations, /publish=true must download assets from the existing GitHub draft/);
-  assert.match(violations, /candidate upload must recheck the observed remote draft state and mutate metadata only/);
+  assert.match(
+    violations,
+    /publish=true must download assets from the existing GitHub draft/,
+  );
+  assert.match(
+    violations,
+    /candidate upload must recheck the observed remote draft state and mutate metadata only/,
+  );
 });
 
 test("GitHub release workflow policy rejects hard-coded prerelease metadata", (t) => {

@@ -203,7 +203,10 @@ test("publication PASS candidate preserves the exact validated DRAFT snapshot", 
     readFileSync(join(draft, "release-status.md"), "utf8"),
     /^DRAFT\n$/,
   );
-  writeFileSync(join(candidate, "sbom.cdx.json"), "publication must not replace SBOM bytes\n");
+  writeFileSync(
+    join(candidate, "sbom.cdx.json"),
+    "publication must not replace SBOM bytes\n",
+  );
   assert.throws(
     () => publicationCandidateChangedFiles(draft, candidate),
     /outside the allowed metadata set/,
@@ -241,7 +244,10 @@ test("publication snapshot validation binds downloaded draft assets to the exact
       ],
     })}\n`,
   );
-  writeFileSync(join(root, "SHA256SUMS"), `${checksumLines(root).join("\n")}\n`);
+  writeFileSync(
+    join(root, "SHA256SUMS"),
+    `${checksumLines(root).join("\n")}\n`,
+  );
   const expected = {
     version: "0.1.0-rc.9",
     tag: "v0.1.0-rc.9",
@@ -291,21 +297,35 @@ test("publication snapshot validation binds downloaded draft assets to the exact
     join(candidate, "release-manifest.json"),
     `${JSON.stringify(passWithStaleForgejo, null, 2)}\n`,
   );
-  writeFileSync(join(candidate, "SHA256SUMS"), `${checksumLines(candidate).join("\n")}\n`);
+  writeFileSync(
+    join(candidate, "SHA256SUMS"),
+    `${checksumLines(candidate).join("\n")}\n`,
+  );
   assert.throws(
-    () => validateReleaseSnapshot(candidate, { ...expected, publicationStatus: "PASS" }),
+    () =>
+      validateReleaseSnapshot(candidate, {
+        ...expected,
+        publicationStatus: "PASS",
+      }),
     /requires Forgejo canonical CI PASS/,
   );
   for (const key of ["version", "tag", "commit", "releaseKind"]) {
     assert.throws(
-      () => validateReleaseSnapshot(draft, { ...expected, [key]: `wrong-${key}` }),
+      () =>
+        validateReleaseSnapshot(draft, { ...expected, [key]: `wrong-${key}` }),
       new RegExp(`release manifest ${key}`),
     );
   }
   writeFileSync(join(draft, "app-universal-release.apk"), "tampered payload");
-  assert.throws(() => validateReleaseSnapshot(draft, expected), /SHA256SUMS verification failed/);
+  assert.throws(
+    () => validateReleaseSnapshot(draft, expected),
+    /SHA256SUMS verification failed/,
+  );
   rmSync(join(draft, "sbom.cdx.json"));
-  assert.throws(() => validateReleaseSnapshot(draft, expected), /missing sbom\.cdx\.json/);
+  assert.throws(
+    () => validateReleaseSnapshot(draft, expected),
+    /missing sbom\.cdx\.json/,
+  );
 });
 
 test("artifact scan rejects secret sentinels and forbidden retained files", (t) => {
@@ -616,10 +636,7 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
       encoding: "utf8",
     });
   const sums = readFileSync(join(output, "SHA256SUMS"), "utf8");
-  assert.match(
-    sums,
-    /^[0-9a-f]{64}  Nian_Pass_0\.1\.0_amd64\.AppImage$/m,
-  );
+  assert.match(sums, /^[0-9a-f]{64}  Nian_Pass_0\.1\.0_amd64\.AppImage$/m);
   assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0_amd64\.deb$/m);
   assert.match(sums, /^[0-9a-f]{64}  Nian\.Pass_0\.1\.0_x64-setup\.exe$/m);
   assert.doesNotMatch(sums, /Nian Pass_/);
@@ -680,7 +697,9 @@ test("canonical aggregation runs scan, SBOM, manifest, and final checksums", (t)
     releaseKind: finalized.releaseKind,
     publicationStatus: "PASS",
   });
-  assert.ok(roundtripManifest.artifacts.every((artifact) => !/\s/u.test(artifact.name)));
+  assert.ok(
+    roundtripManifest.artifacts.every((artifact) => !/\s/u.test(artifact.name)),
+  );
   const roundtripChecksums = spawnSync("sha256sum", ["--check", "SHA256SUMS"], {
     cwd: roundtrip,
     encoding: "utf8",
@@ -717,18 +736,36 @@ test("release assembly rejects unexpected platform payloads", (t) => {
 test("release assembly rejects canonical filename collisions", (t) => {
   const root = directory(t);
   const input = join(root, "platforms");
-  for (const platform of ["windows", "linux", "browser", "android", "gateway"]) {
+  for (const platform of [
+    "windows",
+    "linux",
+    "browser",
+    "android",
+    "gateway",
+  ]) {
     mkdirSync(join(input, platform), { recursive: true });
   }
   const required = {
-    windows: ["nian-pass-native-host-windows-x86_64-0.1.0-rc.9.zip", "Nian Pass_test.exe", "Nian.Pass_test.exe"],
-    linux: ["nian-pass-native-host-linux-x86_64-0.1.0-rc.9.zip", "Nian_Pass_0.1.0-rc.9_amd64.AppImage", "Nian.Pass_0.1.0-rc.9_amd64.deb"],
-    browser: ["nian-pass-browser-chromium-0.1.0-rc.9.zip", "nian-pass-browser-firefox-0.1.0-rc.9.zip"],
+    windows: [
+      "nian-pass-native-host-windows-x86_64-0.1.0-rc.9.zip",
+      "Nian Pass_test.exe",
+      "Nian.Pass_test.exe",
+    ],
+    linux: [
+      "nian-pass-native-host-linux-x86_64-0.1.0-rc.9.zip",
+      "Nian_Pass_0.1.0-rc.9_amd64.AppImage",
+      "Nian.Pass_0.1.0-rc.9_amd64.deb",
+    ],
+    browser: [
+      "nian-pass-browser-chromium-0.1.0-rc.9.zip",
+      "nian-pass-browser-firefox-0.1.0-rc.9.zip",
+    ],
     android: ["app-universal-release-unsigned.apk"],
     gateway: ["gateway-image.json", "nian-pass-sync-gateway-0.1.0-rc.9.tar.gz"],
   };
   for (const [platform, names] of Object.entries(required)) {
-    for (const name of names) writeFileSync(join(input, platform, name), "payload");
+    for (const name of names)
+      writeFileSync(join(input, platform, name), "payload");
   }
   assert.throws(
     () => assembleReleaseSet(input, join(root, "release"), "0.1.0-rc.9"),
@@ -736,10 +773,11 @@ test("release assembly rejects canonical filename collisions", (t) => {
   );
 });
 
-test("release status keeps runtime and signing evidence distinct", () => {
+test("release status keeps Windows runtime and signing evidence distinct", () => {
   const statuses = releaseStatuses({
     WINDOWS_BUILD_STATUS: "PASS",
     WINDOWS_DESKTOP_STARTUP_STATUS: "PASS",
+    WINDOWS_DESKTOP_SHUTDOWN_STATUS: "PASS",
     WINDOWS_NATIVE_MESSAGING_HOST_STATUS: "PASS",
     WINDOWS_GUI_STATUS: "NOT RUN",
     WINDOWS_SIGNING_STATUS: "NOT CONFIGURED",
@@ -752,12 +790,29 @@ test("release status keeps runtime and signing evidence distinct", () => {
   });
   assert.match(report, /Windows release build\s+PASS/);
   assert.match(report, /Windows desktop startup smoke\s+PASS/);
+  assert.match(report, /Windows desktop shutdown smoke\s+PASS/);
   assert.match(report, /Windows Native Messaging host\s+PASS/);
   assert.match(report, /Windows full GUI runtime\s+NOT RUN/);
   assert.match(report, /Windows Authenticode\s+NOT CONFIGURED/);
   assert.match(report, /Apple: M9\+ DEFERRED/);
   assert.match(report, /Known limitations:/);
   assert.match(report, /Release class: final/);
+
+  assert.deepEqual(
+    Object.entries(statuses).filter(([name]) =>
+      name.startsWith("Windows desktop"),
+    ),
+    [
+      ["Windows desktop startup smoke", "PASS"],
+      ["Windows desktop shutdown smoke", "PASS"],
+    ],
+  );
+  const statusJson = JSON.parse(JSON.stringify(statuses));
+  assert.equal(statusJson["Windows desktop shutdown smoke"], "PASS");
+  assert.equal(
+    releaseStatuses({})["Windows desktop shutdown smoke"],
+    "NOT RUN",
+  );
 });
 
 test("RC release status is explicitly classified as a prerelease", () => {

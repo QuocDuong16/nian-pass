@@ -9,6 +9,7 @@ const fields = [
   ["GitHub release preflight", "PREFLIGHT_STATUS"],
   ["Windows release build", "WINDOWS_BUILD_STATUS"],
   ["Windows desktop startup smoke", "WINDOWS_DESKTOP_STARTUP_STATUS"],
+  ["Windows desktop shutdown smoke", "WINDOWS_DESKTOP_SHUTDOWN_STATUS"],
   ["Windows Native Messaging host", "WINDOWS_NATIVE_MESSAGING_HOST_STATUS"],
   ["Windows full GUI runtime", "WINDOWS_GUI_STATUS"],
   ["Windows Authenticode", "WINDOWS_SIGNING_STATUS"],
@@ -38,17 +39,22 @@ const fields = [
 const allowed = new Set(["PASS", "FAIL", "NOT RUN", "NOT CONFIGURED", "DRAFT"]);
 
 export function releaseStatuses(environment) {
-  return Object.fromEntries(fields.map(([label, variable]) => {
-    const value = environment[variable] ?? "NOT RUN";
-    if (!allowed.has(value)) throw new Error(`${variable} has invalid release status ${value}`);
-    return [label, value];
-  }));
+  return Object.fromEntries(
+    fields.map(([label, variable]) => {
+      const value = environment[variable] ?? "NOT RUN";
+      if (!allowed.has(value))
+        throw new Error(`${variable} has invalid release status ${value}`);
+      return [label, value];
+    }),
+  );
 }
 
 export function releaseStatusMarkdown({ version, tag, commit, statuses }) {
   const releaseKind = releaseVersionKind(version);
   const width = Math.max(...Object.keys(statuses).map((name) => name.length));
-  const rows = Object.entries(statuses).map(([name, value]) => `${name.padEnd(width)}  ${value}`);
+  const rows = Object.entries(statuses).map(
+    ([name, value]) => `${name.padEnd(width)}  ${value}`,
+  );
   return `# Nian Pass ${version} release validation\n\nExperimental release. Do not use Nian Pass with production credentials.\n\nRelease class: ${releaseKind}\nTag: ${tag}\nCommit: ${commit}\nSupported: Windows desktop, Linux desktop, Android, browser extension, self-hosted Sync Gateway\nApple: M9+ DEFERRED\nKnown limitations: full GUI/device validation, artifact signing, store signing, and registry publication are authoritative only when the matrix below records PASS.\n\n\`\`\`text\n${rows.join("\n")}\n\`\`\`\n`;
 }
 
@@ -57,22 +63,35 @@ function main() {
   const tag = process.env.RELEASE_TAG ?? "";
   const commit = process.env.RELEASE_COMMIT ?? "";
   if (!version || tag !== `v${version}` || !/^[0-9a-f]{40}$/.test(commit)) {
-    throw new Error("release status requires matching version/tag and a full commit SHA");
+    throw new Error(
+      "release status requires matching version/tag and a full commit SHA",
+    );
   }
   const statuses = releaseStatuses(process.env);
-  const output = resolve(process.env.RELEASE_STATUS_OUTPUT ?? "artifacts/release/release-status.md");
-  writeFileSync(output, releaseStatusMarkdown({ version, tag, commit, statuses }));
+  const output = resolve(
+    process.env.RELEASE_STATUS_OUTPUT ?? "artifacts/release/release-status.md",
+  );
+  writeFileSync(
+    output,
+    releaseStatusMarkdown({ version, tag, commit, statuses }),
+  );
   if (process.env.RELEASE_STATUS_DATA_OUTPUT) {
-    writeFileSync(resolve(process.env.RELEASE_STATUS_DATA_OUTPUT), `${JSON.stringify(statuses, null, 2)}\n`);
+    writeFileSync(
+      resolve(process.env.RELEASE_STATUS_DATA_OUTPUT),
+      `${JSON.stringify(statuses, null, 2)}\n`,
+    );
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   try {
     main();
   } catch (error) {
-    process.stderr.write(`Release status generation failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `Release status generation failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exitCode = 1;
   }
 }

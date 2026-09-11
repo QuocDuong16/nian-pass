@@ -113,6 +113,8 @@ export function githubReleaseWorkflowViolations(root) {
     require(new RegExp(`^  ${job}:\\s*$`, "m"), `missing ${job} job`);
   }
   require(/^  windows:[\s\S]*?^    runs-on:\s*windows-/m, "Windows artifacts require a native Windows runner");
+  require(/desktop_shutdown_smoke:\s*\$\{\{ steps\.build\.outputs\.desktop_shutdown_smoke \}\}/, "Windows job must expose desktop shutdown smoke output");
+  require(/WINDOWS_DESKTOP_SHUTDOWN_STATUS:\s*\$\{\{ needs\.windows\.outputs\.desktop_shutdown_smoke \}\}/, "attestation must pass desktop shutdown smoke to release status");
   require(/^  linux:[\s\S]*?^    runs-on:\s*ubuntu-/m, "Linux artifacts require a Linux runner");
   require(/^  android:[\s\S]*?^    runs-on:\s*ubuntu-/m, "Android artifacts require a Linux runner");
   require(/^  publish:[\s\S]*?^    permissions:\s*\n\s+contents:\s*write/m, "only publish must receive release write authority");
@@ -125,13 +127,22 @@ export function githubReleaseWorkflowViolations(root) {
   require(/release_kind:\s*\$\{\{ steps\.source\.outputs\.release_kind \}\}/, "preflight must classify the release version once");
   require(/build_mode:\s*\$\{\{ steps\.source\.outputs\.build_mode \}\}/, "preflight must resolve build versus publish-only mode once");
   require(/RELEASE_EVENT_NAME="\$\{GITHUB_EVENT_NAME\}" PUBLISH_RELEASE="\$\{PUBLISH_RELEASE\}" node scripts\/release_execution_mode\.mjs/, "preflight must use the tested build/publish execution-mode helper");
-  for (const job of ["linux", "windows", "browser", "android", "gateway", "attest"]) {
+  for (const job of [
+    "linux",
+    "windows",
+    "browser",
+    "android",
+    "gateway",
+    "attest",
+  ]) {
     if (
       !/^    if: \$\{\{ needs\.preflight\.outputs\.build_mode == 'true' \}\}$/m.test(
         workflowJobBlock(workflow, job),
       )
     ) {
-      violations.push(`${githubWorkflow}: ${job} must run only in build/stage mode`);
+      violations.push(
+        `${githubWorkflow}: ${job} must run only in build/stage mode`,
+      );
     }
   }
   require(/^  publish:[\s\S]*?^    needs: \[preflight, linux, windows, browser, android, gateway, attest\][\s\S]*?^    if: \$\{\{ always\(\) && needs\.preflight\.result == 'success' && \(needs\.preflight\.outputs\.build_mode == 'false' \|\| needs\.attest\.result == 'success'\) \}\}/m, "publish-only mode must not be skipped because build jobs are intentionally skipped");
@@ -154,7 +165,9 @@ export function githubReleaseWorkflowViolations(root) {
   require(/gh api --paginate --slurp "repos\/\$\{GITHUB_REPOSITORY\}\/releases" \| node scripts\/github_release_state\.mjs tsv/, "publication discovery must list paginated releases through the tested draft-aware resolver");
   require(/read_release_state\(\)[\s\S]*?gh api "repos\/\$\{GITHUB_REPOSITORY\}\/releases\/\$\{RELEASE_ID\}" \| node scripts\/github_release_identity\.mjs tsv/, "transactional release observation must use the resolved numeric release ID and validate exact identity");
   if (/releases\/tags\/\$\{RELEASE_TAG\}/.test(workflow)) {
-    violations.push(`${githubWorkflow}: published-release-by-tag discovery cannot resolve drafts`);
+    violations.push(
+      `${githubWorkflow}: published-release-by-tag discovery cannot resolve drafts`,
+    );
   }
   require(/candidate_stage_exit[\s\S]*?restore_draft_or_fail[\s\S]*?PASS candidate staging failed/, "partial PASS candidate staging must restore the DRAFT snapshot or fail without further mutation");
 
@@ -200,27 +213,51 @@ export function githubReleaseWorkflowViolations(root) {
 
   const githubReleaseStateHelper = "scripts/github_release_state.mjs";
   if (!existsSync(resolve(root, githubReleaseStateHelper))) {
-    violations.push(`${githubReleaseStateHelper}: draft-aware release resolver is missing`);
+    violations.push(
+      `${githubReleaseStateHelper}: draft-aware release resolver is missing`,
+    );
   } else {
     const helper = read(root, githubReleaseStateHelper);
-    if (!/tag_name === tag/.test(helper) || !/matches\.length !== 1/.test(helper)) {
-      violations.push(`${githubReleaseStateHelper}: exact release tag matching must fail closed`);
+    if (
+      !/tag_name === tag/.test(helper) ||
+      !/matches\.length !== 1/.test(helper)
+    ) {
+      violations.push(
+        `${githubReleaseStateHelper}: exact release tag matching must fail closed`,
+      );
     }
-    if (!/target_commitish !== commit/.test(helper) || !/prerelease !== prerelease/.test(helper)) {
-      violations.push(`${githubReleaseStateHelper}: release target and prerelease must bind to the source`);
+    if (
+      !/target_commitish !== commit/.test(helper) ||
+      !/prerelease !== prerelease/.test(helper)
+    ) {
+      violations.push(
+        `${githubReleaseStateHelper}: release target and prerelease must bind to the source`,
+      );
     }
   }
 
   const githubReleaseIdentityHelper = "scripts/github_release_identity.mjs";
   if (!existsSync(resolve(root, githubReleaseIdentityHelper))) {
-    violations.push(`${githubReleaseIdentityHelper}: release-ID identity resolver is missing`);
+    violations.push(
+      `${githubReleaseIdentityHelper}: release-ID identity resolver is missing`,
+    );
   } else {
     const helper = read(root, githubReleaseIdentityHelper);
-    if (!/release tag identity drift/.test(helper) || !/release commit identity drift/.test(helper)) {
-      violations.push(`${githubReleaseIdentityHelper}: release-ID observation must fail closed on tag or commit drift`);
+    if (
+      !/release tag identity drift/.test(helper) ||
+      !/release commit identity drift/.test(helper)
+    ) {
+      violations.push(
+        `${githubReleaseIdentityHelper}: release-ID observation must fail closed on tag or commit drift`,
+      );
     }
-    if (!/release ID identity drift/.test(helper) || !/release prerelease identity drift/.test(helper)) {
-      violations.push(`${githubReleaseIdentityHelper}: release-ID observation must validate numeric ID and prerelease class`);
+    if (
+      !/release ID identity drift/.test(helper) ||
+      !/release prerelease identity drift/.test(helper)
+    ) {
+      violations.push(
+        `${githubReleaseIdentityHelper}: release-ID observation must validate numeric ID and prerelease class`,
+      );
     }
   }
 
@@ -251,13 +288,17 @@ export function githubReleaseWorkflowViolations(root) {
 
   const executionHelper = "scripts/release_execution_mode.mjs";
   if (!existsSync(resolve(root, executionHelper))) {
-    violations.push(`${executionHelper}: release build/publish mode helper is missing`);
+    violations.push(
+      `${executionHelper}: release build/publish mode helper is missing`,
+    );
   } else if (
     !/eventName === "push"[\s\S]*?eventName === "workflow_dispatch"/.test(
       read(root, executionHelper),
     )
   ) {
-    violations.push(`${executionHelper}: must distinguish tag build and manual publication modes`);
+    violations.push(
+      `${executionHelper}: must distinguish tag build and manual publication modes`,
+    );
   }
 
   const artifactHelper = "scripts/release_artifacts.mjs";
@@ -266,10 +307,18 @@ export function githubReleaseWorkflowViolations(root) {
   } else {
     const helper = read(root, artifactHelper);
     if (!/status === "PASS" && forgejoCiStatus !== "PASS"/.test(helper)) {
-      violations.push(`${artifactHelper}: PASS publication metadata must require observed Forgejo canonical CI PASS`);
+      violations.push(
+        `${artifactHelper}: PASS publication metadata must require observed Forgejo canonical CI PASS`,
+      );
     }
-    if (!/expected\.publicationStatus === "PASS"[\s\S]*?Forgejo canonical CI.*?PASS/.test(helper)) {
-      violations.push(`${artifactHelper}: PASS snapshot validation must require Forgejo canonical CI PASS`);
+    if (
+      !/expected\.publicationStatus === "PASS"[\s\S]*?Forgejo canonical CI.*?PASS/.test(
+        helper,
+      )
+    ) {
+      violations.push(
+        `${artifactHelper}: PASS snapshot validation must require Forgejo canonical CI PASS`,
+      );
     }
   }
 
@@ -322,7 +371,9 @@ export function githubReleaseWorkflowViolations(root) {
 export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   const workflowPath = ".github/workflows/windows-runtime-diagnostic.yml";
   if (!existsSync(resolve(root, workflowPath))) {
-    return [`${workflowPath}: manual Windows runtime diagnostic workflow is missing`];
+    return [
+      `${workflowPath}: manual Windows runtime diagnostic workflow is missing`,
+    ];
   }
   const workflow = readPolicyText(root, workflowPath);
   const violations = [];
@@ -331,7 +382,9 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   };
   require(/^on:\s*\n\s+workflow_dispatch:\s*\n\s+inputs:\s*\n\s+source_ref:[\s\S]*?required:\s*true[\s\S]*?default:\s*main/m, "must be workflow_dispatch-only with required source_ref defaulting to main");
   if (/^\s*(push|pull_request|schedule):/m.test(workflow)) {
-    violations.push(`${workflowPath}: push, pull_request, and schedule triggers are forbidden`);
+    violations.push(
+      `${workflowPath}: push, pull_request, and schedule triggers are forbidden`,
+    );
   }
   require(/^permissions:\s*\n\s+contents:\s*read\s*$/m, "default permissions must be contents: read");
   require(/^    runs-on:\s*windows-2025\s*$/m, "must use windows-2025");
@@ -340,14 +393,18 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   const checkoutIndex = workflow.indexOf("uses: actions/checkout@");
   const setupNodeIndex = workflow.indexOf("uses: actions/setup-node@");
   const corepackIndex = workflow.indexOf("npm install --global");
-  const frozenLockfileIndex = workflow.indexOf("pnpm install --frozen-lockfile");
+  const frozenLockfileIndex = workflow.indexOf(
+    "pnpm install --frozen-lockfile",
+  );
   if (
     checkoutIndex < 0 ||
     setupNodeIndex < checkoutIndex ||
     setupNodeIndex > corepackIndex ||
     setupNodeIndex > frozenLockfileIndex
   ) {
-    violations.push(`${workflowPath}: setup-node must run after checkout and before Corepack/pnpm use`);
+    violations.push(
+      `${workflowPath}: setup-node must run after checkout and before Corepack/pnpm use`,
+    );
   }
   require(/if \(\(node --version\)\.Trim\(\) -ne "v\$env:NODE_VERSION"\) \{ throw "Pinned Node is required" \}/, "must retain the exact Node version assertion");
   require(/git rev-parse HEAD/, "must record the checked-out commit SHA");
@@ -363,7 +420,9 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/WINDOWS_DESKTOP_STARTUP_SMOKE=PASS[\s\S]*?WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS/, "must record separate startup and shutdown evidence before upload");
   require(/actions\/upload-artifact@[0-9a-f]{40}[\s\S]*?name: nian-pass-0\.1\.1-windows-runtime-diagnostic[\s\S]*?retention-days: 3/, "must upload the short-retention diagnostic artifact");
   if (/\bgit\s+(tag|push)\b|\bgh\s+release\b/i.test(workflow)) {
-    violations.push(`${workflowPath}: tag, push, and GitHub Release mutation are forbidden`);
+    violations.push(
+      `${workflowPath}: tag, push, and GitHub Release mutation are forbidden`,
+    );
   }
   return violations;
 }
@@ -412,7 +471,9 @@ export function cargoTomlEolPolicyViolations(root) {
     { cwd: root, encoding: "utf8" },
   );
   if (result.status !== 0) {
-    return ["could not inspect Git attributes for apps/desktop/src-tauri/Cargo.toml"];
+    return [
+      "could not inspect Git attributes for apps/desktop/src-tauri/Cargo.toml",
+    ];
   }
   const attributes = new Map(
     result.stdout
@@ -474,7 +535,9 @@ export function sourcePolicyViolations(root) {
   if (
     !/CARGO_CFG_TARGET_OS/.test(desktopBuild) ||
     !/CARGO_CFG_TARGET_ENV/.test(desktopBuild) ||
-    !/cargo:rustc-link-arg-bin=nian-pass-desktop=\/STACK:8388608/.test(desktopBuild) ||
+    !/cargo:rustc-link-arg-bin=nian-pass-desktop=\/STACK:8388608/.test(
+      desktopBuild,
+    ) ||
     /RUST_MIN_STACK/.test(desktopBuild)
   ) {
     violations.push(
@@ -514,7 +577,9 @@ export function sourcePolicyViolations(root) {
     !/BigInt\(`0x\$\{encoded\}`\)/.test(peStackReserveParser) ||
     !/parseLlvmStackReserve/.test(peStackReserveParser) ||
     !/import \{ pathToFileURL \} from "node:url"/.test(peStackReserveParser) ||
-    !/import\.meta\.url === pathToFileURL\(process\.argv\[1\]\)\.href/.test(peStackReserveParser) ||
+    !/import\.meta\.url === pathToFileURL\(process\.argv\[1\]\)\.href/.test(
+      peStackReserveParser,
+    ) ||
     /new URL\(import\.meta\.url\)\.pathname/.test(peStackReserveParser) ||
     !/native_messaging_host_smoke/.test(windowsRelease) ||
     !/desktop_shutdown_smoke/.test(windowsRelease) ||
@@ -724,11 +789,14 @@ export function dirtyTreeViolation(root) {
     : `release source tree contains uncommitted changes:\n${status}`;
 }
 
-export function releaseIdentityViolations(root, {
-  tag = process.env.RELEASE_TAG ?? "",
-  commit = process.env.RELEASE_COMMIT,
-  version = process.env.RELEASE_VERSION,
-} = {}) {
+export function releaseIdentityViolations(
+  root,
+  {
+    tag = process.env.RELEASE_TAG ?? "",
+    commit = process.env.RELEASE_COMMIT,
+    version = process.env.RELEASE_VERSION,
+  } = {},
+) {
   const violations = [];
   const mismatch = tagViolation(root, tag);
   if (mismatch) {
@@ -739,11 +807,15 @@ export function releaseIdentityViolations(root, {
   }
   const head = gitCommit(root, "HEAD");
   if (commit && head !== commit) {
-    violations.push(`release HEAD ${String(head)} != expected commit ${commit}`);
+    violations.push(
+      `release HEAD ${String(head)} != expected commit ${commit}`,
+    );
   }
   const actualVersion = releaseVersion(root);
   if (version && actualVersion !== version) {
-    violations.push(`release VERSION ${actualVersion} != expected version ${version}`);
+    violations.push(
+      `release VERSION ${actualVersion} != expected version ${version}`,
+    );
   }
   return violations;
 }
@@ -761,7 +833,9 @@ function main() {
   const prebuild = modes.has("--prebuild");
   const postbuild = modes.has("--postbuild");
   if (prebuild && postbuild) {
-    violations.push("release source check modes --prebuild and --postbuild are mutually exclusive");
+    violations.push(
+      "release source check modes --prebuild and --postbuild are mutually exclusive",
+    );
   }
   if (modes.has("--clean") || prebuild) {
     const dirty = dirtyTreeViolation(repositoryRoot);
