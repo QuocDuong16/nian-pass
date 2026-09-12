@@ -23,7 +23,7 @@ const cleanSnapshot: VaultSnapshotDto = { ...mutationSnapshot, dirty: false };
 
 async function unlock(api: DesktopApi, lifecycle?: DesktopWindowLifecycle) {
   render(<App api={api} windowLifecycle={lifecycle ?? null} />);
-  fireEvent.click(screen.getByRole("button", { name: "Choose KDBX file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await screen.findByText("fixture.kdbx");
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: "demopass" },
@@ -69,13 +69,13 @@ function lifecycleHarness() {
   };
 }
 
-function enterCredential(password = "demopass") {
+function enterReloadCredential(password = "demopass") {
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: password },
   });
 }
 
-test("clean disables Save while dirty Save opens and cancels a cleared credential dialog", async () => {
+test("clean disables Save while dirty Save uses retained session authority directly", async () => {
   const cleanApi = mutationApi({
     unlockVault: vi.fn().mockResolvedValue(cleanSnapshot),
   });
@@ -88,20 +88,17 @@ test("clean disables Save while dirty Save opens and cancels a cleared credentia
   });
   await unlock(dirtyApi);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  expect(screen.getByRole("dialog")).toHaveAccessibleName("Save changes");
-  const password = screen.getByLabelText("Master password");
-  expect(password).toHaveAttribute("type", "password");
-  expect(password).toHaveAttribute("autocomplete", "current-password");
-  expect(password).toHaveAttribute("spellcheck", "false");
-  fireEvent.change(password, { target: { value: "temporary-save-secret" } });
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(dirtyApi.saveVault).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  expect(screen.getByLabelText("Master password")).toHaveValue("");
+  await waitFor(() => {
+    expect(dirtyApi.saveVault).toHaveBeenCalledOnce();
+  });
+  expect(dirtyApi.saveVault).toHaveBeenCalledWith();
+  expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("dialog", { name: "Save changes" }),
+  ).not.toBeInTheDocument();
 });
 
 test.each([
-  "credential",
   "saving",
   "external_conflict",
   "reload_credential",
@@ -133,10 +130,6 @@ test.each([
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-    if (kind !== "credential") {
-      enterCredential();
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    }
 
     if (kind === "external_conflict") {
       await screen.findByRole("dialog", {
@@ -156,7 +149,7 @@ test.each([
     }
 
     if (kind === "reloading") {
-      enterCredential();
+      enterReloadCredential();
       fireEvent.click(
         screen.getByRole("button", {
           name: "Discard local changes and reload",
@@ -192,8 +185,6 @@ test("Save waits for Rust, disables mutation, then accepts only canonical clean 
   });
   await unlock(api);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(screen.getByText("Unsaved changes")).toBeVisible();
   expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument();
@@ -201,7 +192,7 @@ test("Save waits for Rust, disables mutation, then accepts only canonical clean 
     "Saving…",
   );
   expect(screen.getByRole("button", { name: "Lock" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "New entry" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "+ New entry" })).toBeDisabled();
 
   await act(async () => {
     pending.resolve(cleanSnapshot);
@@ -214,7 +205,7 @@ test("Save waits for Rust, disables mutation, then accepts only canonical clean 
   expect(screen.getAllByText("Saved").length).toBeGreaterThan(0);
 });
 
-test("save authentication failure clears the password and keeps dirty state", async () => {
+test("save authentication failure requires reopening and keeps dirty state", async () => {
   const api = mutationApi({
     unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
     saveVault: vi
@@ -223,13 +214,13 @@ test("save authentication failure clears the password and keeps dirty state", as
   });
   await unlock(api);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  enterCredential("wrong-password");
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(
-    await screen.findByText(/Check the master password and try again/),
+    await screen.findByText(
+      /can no longer authenticate this vault for saving/i,
+    ),
   ).toBeVisible();
-  expect(screen.getByLabelText("Master password")).toHaveValue("");
+  expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
   expect(screen.getByText("Unsaved changes")).toBeVisible();
   expect(api.lockVault).not.toHaveBeenCalled();
 });
@@ -244,16 +235,14 @@ test("save uncertainty refreshes canonical state without showing a false success
   });
   await unlock(api);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  enterCredential("temporary-save-password");
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(
     await screen.findByText(/could not verify the final on-disk state/),
   ).toBeVisible();
   expect(api.getVaultSnapshot).toHaveBeenCalledOnce();
-  expect(screen.getByLabelText("Master password")).toHaveValue("");
+  expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
   expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
-  expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument();
+  expect(document.querySelector(".save-status")).toBeEmptyDOMElement();
   expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
   expect(api.lockVault).not.toHaveBeenCalled();
   expect(api.discardChangesAndLock).not.toHaveBeenCalled();
@@ -287,16 +276,14 @@ test.each([
       });
     }
     fireEvent.click(screen.getByRole("button", { name: actionLabel }));
-    enterCredential("temporary-save-password");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
       await screen.findByText(/could not verify the final on-disk state/),
     ).toBeVisible();
     expect(api.getVaultSnapshot).toHaveBeenCalledOnce();
-    expect(screen.getByLabelText("Master password")).toHaveValue("");
+    expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
     expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Saved$/)).not.toBeInTheDocument();
+    expect(document.querySelector(".save-status")).toBeEmptyDOMElement();
     expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
     expect(api.lockVault).not.toHaveBeenCalled();
     expect(api.discardChangesAndLock).not.toHaveBeenCalled();
@@ -313,8 +300,6 @@ test("external conflict keeps local dirty state and explicit Cancel does no disc
   });
   await unlock(api);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(
     await screen.findByRole("dialog", {
@@ -344,14 +329,12 @@ test("conflict reload succeeds cleanly while reload failure retains local dirty 
   });
   await unlock(api);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Discard local changes and reload",
     }),
   );
-  enterCredential("wrong-current-password");
+  enterReloadCredential("wrong-current-password");
   fireEvent.click(
     screen.getByRole("button", { name: "Discard local changes and reload" }),
   );
@@ -359,7 +342,7 @@ test("conflict reload succeeds cleanly while reload failure retains local dirty 
   expect(screen.getByLabelText("Master password")).toHaveValue("");
   expect(screen.getByText("Unsaved changes")).toBeVisible();
 
-  enterCredential("current-password");
+  enterReloadCredential("current-password");
   fireEvent.click(
     screen.getByRole("button", { name: "Discard local changes and reload" }),
   );
@@ -384,22 +367,19 @@ test("dirty Lock saves before ordinary Lock and never locks on save failure", as
   fireEvent.click(
     screen.getByRole("button", { name: "Save changes and lock" }),
   );
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(
     await screen.findByText(/in-memory changes are still available/),
   ).toBeVisible();
   expect(api.lockVault).not.toHaveBeenCalled();
   expect(screen.getByText("Unsaved changes")).toBeVisible();
 
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Try Save again" }));
   await waitFor(() => {
     expect(api.lockVault).toHaveBeenCalledOnce();
   });
   expect(api.discardChangesAndLock).not.toHaveBeenCalled();
   expect(
-    await screen.findByRole("button", { name: "Choose KDBX file" }),
+    await screen.findByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
 });
 
@@ -415,8 +395,6 @@ test("external conflict never completes a pending Lock or close intent", async (
   fireEvent.click(
     screen.getByRole("button", { name: "Save changes and lock" }),
   );
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await screen.findByRole("dialog", {
     name: "The KDBX file changed outside Nian Pass",
   });
@@ -443,8 +421,6 @@ test("external conflict never completes a pending Lock or close intent", async (
   fireEvent.click(
     screen.getByRole("button", { name: "Save changes and close" }),
   );
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await screen.findByRole("dialog", {
     name: "The KDBX file changed outside Nian Pass",
   });
@@ -474,16 +450,13 @@ test("dirty close saves before Lock and close, while failure leaves the window o
   fireEvent.click(
     screen.getByRole("button", { name: "Save changes and close" }),
   );
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(
     await screen.findByText(/in-memory changes are still available/),
   ).toBeVisible();
   expect(api.lockVault).not.toHaveBeenCalled();
   expect(harness.destroyApprovedWindow).not.toHaveBeenCalled();
 
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Try Save again" }));
   await waitFor(() => {
     expect(harness.destroyApprovedWindow).toHaveBeenCalledOnce();
   });
@@ -504,8 +477,6 @@ test("a close request arriving while Save is pending is prevented deterministica
     expect(harness.registered()).toBe(true);
   });
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  enterCredential();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   const preventDefault = vi.fn();
   await act(async () => {

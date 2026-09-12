@@ -71,6 +71,59 @@ pub async fn select_vault<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+pub async fn create_vault<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    vault_name: String,
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<Option<VaultSnapshotDto>, DesktopErrorDto> {
+    let dialog = app
+        .dialog()
+        .file()
+        .add_filter("KeePass database", &["kdbx"])
+        .set_file_name("vault.kdbx");
+    create_vault_with_picker(vault_name, password, state, move || {
+        dialog.blocking_save_file()
+    })
+    .await
+}
+
+async fn create_vault_with_picker(
+    vault_name: String,
+    password: String,
+    state: State<'_, AppState>,
+    picker: impl FnOnce() -> Option<FilePath> + Send + 'static,
+) -> Result<Option<VaultSnapshotDto>, DesktopErrorDto> {
+    let vault_name = vault_name.trim().to_owned();
+    if vault_name.is_empty() || password.is_empty() {
+        return Err(DesktopError::InvalidRequest.into());
+    }
+    let operation = state
+        .begin_vault_operation()
+        .map_err(DesktopErrorDto::from)?;
+    let selected = tauri::async_runtime::spawn_blocking(picker)
+        .await
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = match selected {
+        FilePath::Path(path) => path,
+        FilePath::Url(_) => return Err(DesktopError::UnsupportedVault.into()),
+    };
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _operation = operation;
+        let credential = SecretString::new(password);
+        let mut service = service.lock().map_err(|_| DesktopError::Internal)?;
+        service.create(path, &vault_name, credential).map(Some)
+    })
+    .await
+    .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn unlock_vault(
     password: String,
     state: State<'_, AppState>,
@@ -96,11 +149,8 @@ pub fn vault_snapshot(state: State<'_, AppState>) -> Result<VaultSnapshotDto, De
 }
 
 #[tauri::command]
-pub async fn save_vault(
-    password: String,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    crate::persistence::save(password, state).await
+pub async fn save_vault(state: State<'_, AppState>) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    crate::persistence::save(state).await
 }
 
 #[tauri::command]
@@ -352,19 +402,22 @@ mod tests {
 
     use serde::de::DeserializeOwned;
     use serde_json::{Value, from_str, from_value, json, to_value};
-    use tauri::{Manager, test::mock_app};
+    use tauri::{
+        Manager,
+        test::{mock_app, mock_builder, mock_context, noop_assets},
+    };
     use vault_core::{EntryId, SecretString};
     use vault_session::VaultSession;
 
     use super::{
         close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
-        delete_entry, delete_entry_custom_field, delete_group, delete_sync_profile,
-        discard_changes_and_lock, entry_detail, lock_vault, move_entry, move_group, reload_vault,
-        rename_group, reset_sync_state, resolve_browser_connection, resolve_sync_conflict,
-        reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
-        reveal_entry_url, reveal_entry_username, runtime_info, save_sync_profile, save_vault,
-        select_vault, set_entry_custom_field, sync_now, sync_profiles, test_sync_provider,
-        update_entry,
+        create_vault, create_vault_with_picker, delete_entry, delete_entry_custom_field,
+        delete_group, delete_sync_profile, discard_changes_and_lock, entry_detail, lock_vault,
+        move_entry, move_group, reload_vault, rename_group, reset_sync_state,
+        resolve_browser_connection, resolve_sync_conflict, reveal_entry_custom_field,
+        reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
+        reveal_entry_username, runtime_info, save_sync_profile, save_vault, select_vault,
+        set_entry_custom_field, sync_now, sync_profiles, test_sync_provider, update_entry,
     };
     use crate::{
         browser_bridge::BrowserBridgeState,
@@ -431,6 +484,114 @@ mod tests {
         assert_eq!(
             to_value(error).expect("stable error should serialize"),
             json!({ "code": "operation_in_progress" })
+        );
+    }
+
+    #[test]
+    fn create_vault_command_builds_native_picker_but_honors_gate_before_showing_it() {
+        let app = mock_builder()
+            .plugin(tauri_plugin_dialog::init())
+            .build(mock_context(noop_assets()))
+            .expect("dialog plugin should compose with mock runtime");
+        app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let state = app.state::<AppState>();
+        let _active = state
+            .begin_vault_operation()
+            .expect("test operation should acquire gate");
+        let result = tauri::async_runtime::block_on(create_vault(
+            app.handle().clone(),
+            "Personal".to_owned(),
+            "demopass".to_owned(),
+            state,
+        ));
+        let Err(error) = result else {
+            panic!("busy create must fail before showing the picker");
+        };
+        assert_eq!(
+            to_value(error).expect("stable busy error"),
+            json!({ "code": "operation_in_progress" })
+        );
+    }
+
+    #[test]
+    fn create_vault_picker_flow_validates_gates_cancels_and_creates_without_gui() {
+        let app = mock_app();
+        app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let state = app.state::<AppState>();
+
+        let invalid = tauri::async_runtime::block_on(create_vault_with_picker(
+            "   ".to_owned(),
+            "demopass".to_owned(),
+            state.clone(),
+            || panic!("invalid create request must not invoke the picker"),
+        ));
+        let Err(invalid) = invalid else {
+            panic!("blank vault name should fail");
+        };
+        assert_eq!(
+            to_value(invalid).expect("stable create error"),
+            json!({ "code": "invalid_request" })
+        );
+
+        let active = state
+            .begin_vault_operation()
+            .expect("test operation should acquire gate");
+        let busy = tauri::async_runtime::block_on(create_vault_with_picker(
+            "Personal".to_owned(),
+            "demopass".to_owned(),
+            state.clone(),
+            || panic!("busy create request must not invoke the picker"),
+        ));
+        drop(active);
+        let Err(busy) = busy else {
+            panic!("busy create should fail");
+        };
+        assert_eq!(
+            to_value(busy).expect("stable busy error"),
+            json!({ "code": "operation_in_progress" })
+        );
+
+        let Ok(cancelled) = tauri::async_runtime::block_on(create_vault_with_picker(
+            "Personal".to_owned(),
+            "demopass".to_owned(),
+            state.clone(),
+            || None,
+        )) else {
+            panic!("picker cancellation should not be an error");
+        };
+        assert!(cancelled.is_none());
+
+        let directory = TestDir::create();
+        let path = directory.0.join("created-command.kdbx");
+        let Ok(Some(created)) = tauri::async_runtime::block_on(create_vault_with_picker(
+            "  Personal  ".to_owned(),
+            "demopass".to_owned(),
+            state,
+            {
+                let path = path.clone();
+                move || Some(tauri_plugin_dialog::FilePath::Path(path))
+            },
+        )) else {
+            panic!("command create should succeed with a snapshot");
+        };
+        assert_eq!(created.file_name, "created-command.kdbx");
+        assert_eq!(created.groups.first().expect("root group").name, "Personal");
+        assert!(path.is_file());
+
+        let duplicate_app = mock_app();
+        duplicate_app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let duplicate = tauri::async_runtime::block_on(create_vault_with_picker(
+            "Duplicate".to_owned(),
+            "demopass".to_owned(),
+            duplicate_app.state::<AppState>(),
+            move || Some(tauri_plugin_dialog::FilePath::Path(path)),
+        ));
+        let Err(duplicate) = duplicate else {
+            panic!("existing target must not be overwritten");
+        };
+        assert_eq!(
+            to_value(duplicate).expect("stable duplicate error"),
+            json!({ "code": "vault_already_exists" })
         );
     }
 
@@ -527,7 +688,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn m44_commands_move_credentials_and_return_only_canonical_snapshots() {
+    fn save_command_uses_retained_session_authority_and_returns_only_canonical_snapshot() {
         let (_directory, path, app) = writable_app();
         let state = app.state::<AppState>();
         let entry_id = {
@@ -549,31 +710,17 @@ mod tests {
             entry_id
         };
         let before = fs::read(&path).expect("source should be readable");
-        let synthetic = "M4.4-SAVE-PASSWORD";
-        let Err(wrong) =
-            tauri::async_runtime::block_on(save_vault(synthetic.to_owned(), state.clone()))
-        else {
-            panic!("wrong credential should fail");
-        };
-        let serialized = to_value(wrong).expect("stable error should serialize");
-        assert!(!serialized.to_string().contains(synthetic));
-        assert_eq!(fs::read(&path).expect("source should remain"), before);
-        assert!(
-            state
-                .service
-                .lock()
-                .expect("desktop service lock")
-                .snapshot()
-                .expect("dirty snapshot")
-                .dirty
-        );
-
-        let Ok(saved) =
-            tauri::async_runtime::block_on(save_vault("demopass".to_owned(), state.clone()))
-        else {
-            panic!("save command should succeed");
+        let Ok(saved) = tauri::async_runtime::block_on(save_vault(state.clone())) else {
+            panic!("save command should succeed with retained session authority");
         };
         assert!(!saved.dirty);
+        assert_ne!(
+            fs::read(&path).expect("saved source should be readable"),
+            before
+        );
+        let serialized = to_value(&saved).expect("canonical snapshot should serialize");
+        assert!(!serialized.to_string().contains("demopass"));
+        assert!(serialized.get("masterPassword").is_none());
 
         {
             let mut service = state.service.lock().expect("desktop service lock");
@@ -637,6 +784,11 @@ mod tests {
             DesktopError::SyncUnsupportedProvider,
             DesktopError::SyncUnsafeProvider,
             DesktopError::SyncCredentialsRequired,
+            DesktopError::VaultCreateFailed,
+            DesktopError::VaultAlreadyExists,
+            DesktopError::UnsupportedWriteFormat,
+            DesktopError::UnsupportedPersistencePlatform,
+            DesktopError::ReadOnlySource,
         ];
         let serialized: Vec<Value> = errors
             .into_iter()

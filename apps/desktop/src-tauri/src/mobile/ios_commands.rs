@@ -5,7 +5,7 @@ use std::sync::MutexGuard;
 use tauri::State;
 use vault_core::SecretString;
 
-use crate::dto::{EntryDetailDto, MobileSelectedVaultDto, VaultSnapshotDto};
+use crate::dto::{EntryDetailDto, MobileSelectedVaultDto, MobileVaultSnapshotDto};
 
 use super::{
     MobileAppState, MobileError,
@@ -73,7 +73,7 @@ pub(crate) async fn mobile_select_vault(
 pub(crate) async fn mobile_unlock_vault(
     password: String,
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     let service = state.service.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let credential = SecretString::new(password);
@@ -90,7 +90,7 @@ pub(crate) async fn mobile_unlock_vault(
 #[tauri::command]
 pub(crate) fn mobile_vault_snapshot(
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     lock_service(&state)?.snapshot().map_err(Into::into)
 }
 

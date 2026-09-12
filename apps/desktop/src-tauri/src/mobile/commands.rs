@@ -12,7 +12,8 @@ use vault_core::SecretString;
 
 #[cfg(target_os = "android")]
 use crate::dto::{
-    CreatedEntryDto, CreatedGroupDto, EntryDetailDto, MobileSelectedVaultDto, VaultSnapshotDto,
+    EntryDetailDto, MobileCreatedEntryDto, MobileCreatedGroupDto, MobileSelectedVaultDto,
+    MobileVaultSnapshotDto,
 };
 #[cfg(target_os = "android")]
 use crate::mobile::{
@@ -151,7 +152,7 @@ pub(crate) async fn mobile_select_vault(
 pub(crate) async fn mobile_unlock_vault(
     password: String,
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     let service = state.service.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let credential = SecretString::new(password);
@@ -178,7 +179,7 @@ macro_rules! read_command {
 #[cfg(target_os = "android")]
 read_command!(
     mobile_vault_snapshot,
-    VaultSnapshotDto,
+    MobileVaultSnapshotDto,
     MobileVaultService::snapshot
 );
 
@@ -248,7 +249,7 @@ mutation_command!(
     mobile_update_entry,
     request,
     MobileUpdateEntryRequest,
-    VaultSnapshotDto,
+    MobileVaultSnapshotDto,
     update_entry
 );
 #[cfg(target_os = "android")]
@@ -256,7 +257,7 @@ mutation_command!(
     mobile_create_entry,
     request,
     MobileCreateEntryRequest,
-    CreatedEntryDto,
+    MobileCreatedEntryDto,
     create_entry
 );
 #[cfg(target_os = "android")]
@@ -264,7 +265,7 @@ mutation_command!(
     mobile_move_entry,
     request,
     MobileMoveEntryRequest,
-    VaultSnapshotDto,
+    MobileVaultSnapshotDto,
     move_entry
 );
 #[cfg(target_os = "android")]
@@ -272,7 +273,7 @@ mutation_command!(
     mobile_create_group,
     request,
     MobileCreateGroupRequest,
-    CreatedGroupDto,
+    MobileCreatedGroupDto,
     create_group
 );
 #[cfg(target_os = "android")]
@@ -280,7 +281,7 @@ mutation_command!(
     mobile_rename_group,
     request,
     MobileRenameGroupRequest,
-    VaultSnapshotDto,
+    MobileVaultSnapshotDto,
     rename_group
 );
 #[cfg(target_os = "android")]
@@ -288,7 +289,7 @@ mutation_command!(
     mobile_move_group,
     request,
     MobileMoveGroupRequest,
-    VaultSnapshotDto,
+    MobileVaultSnapshotDto,
     move_group
 );
 #[cfg(target_os = "android")]
@@ -296,7 +297,7 @@ mutation_command!(
     mobile_set_entry_custom_field,
     request,
     MobileSetCustomFieldRequest,
-    VaultSnapshotDto,
+    MobileVaultSnapshotDto,
     set_custom_field
 );
 
@@ -305,7 +306,7 @@ mutation_command!(
 pub(crate) fn mobile_delete_entry(
     entry_id: String,
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     lock_service(&state)?
         .delete_entry(entry_id)
         .map_err(Into::into)
@@ -315,7 +316,7 @@ pub(crate) fn mobile_delete_entry(
 pub(crate) fn mobile_delete_group(
     group_id: String,
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     lock_service(&state)?
         .delete_group(group_id)
         .map_err(Into::into)
@@ -326,7 +327,7 @@ pub(crate) fn mobile_delete_entry_custom_field(
     entry_id: String,
     name: String,
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     lock_service(&state)?
         .delete_custom_field(entry_id, name)
         .map_err(Into::into)
@@ -338,7 +339,7 @@ pub(crate) async fn mobile_save_vault(
     password: String,
     source: State<'_, AndroidVaultSource>,
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     persistence::save(password, source.inner().clone(), state.service.clone())
         .await
         .map_err(Into::into)
@@ -350,7 +351,7 @@ pub(crate) async fn mobile_reload_vault(
     password: String,
     source: State<'_, AndroidVaultSource>,
     state: State<'_, MobileAppState>,
-) -> Result<VaultSnapshotDto, MobileErrorDto> {
+) -> Result<MobileVaultSnapshotDto, MobileErrorDto> {
     persistence::reload(password, source.inner().clone(), state.service.clone())
         .await
         .map_err(Into::into)

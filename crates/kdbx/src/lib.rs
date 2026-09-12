@@ -7,6 +7,7 @@
 // External compatibility tests surface child-process diagnostics on failure only.
 #![cfg_attr(test, allow(clippy::print_stderr))]
 
+mod create;
 mod entry_mutations;
 mod entry_reads;
 mod sync;

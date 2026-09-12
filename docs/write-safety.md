@@ -224,13 +224,7 @@ notification.
 
 ## Desktop mapping and lifecycle limitations
 
-M4.3 mutation commands still change only the Rust-owned unlocked
-`KdbxDocument`; they never write disk. M4.4 adds one explicit `save_vault`
-boundary whose complete path is React credential dialog -> semantic IPC ->
-immediate `SecretString` -> `DesktopVaultService::save` ->
-`VaultSession::save` -> this existing M3 transaction. The Tauri crate contains
-no `fs::write`, rename, backup, temp serialization, or fingerprint
-implementation. There is no autosave, Save As, or force overwrite.
+M4.3 mutation commands still change only the Rust-owned unlocked `KdbxDocument`; they never write disk. The current desktop `save_vault` boundary carries no credential argument: unlock retains a `SecretString` only inside `DesktopVaultService`, and ordinary Save follows semantic IPC -> retained Rust session authority -> `DesktopVaultService::save` -> `VaultSession::save` -> this existing M3 transaction. Lock/discard drops that credential. External-conflict reload remains a separate re-authentication path. The Tauri crate contains no direct truncate/write, backup, temp serialization, or fingerprint implementation. There is no autosave, Save As, or force overwrite.
 
 The desktop service mutex serializes Save with in-memory mutations and Lock.
 Save does not acquire the separate Copy/Lock lifecycle gate, avoiding inverse

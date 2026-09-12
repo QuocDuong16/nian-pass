@@ -114,6 +114,7 @@ remain accurately unverified.
 
 | Capability | Status | Evidence |
 |---|---|---|
+| New KDBX 4.1 vault creation | Verified | `KdbxDocument::new` writes to a create-new private target, syncs it, reopens it with the supplied credential, verifies semantic equivalence, and refuses to overwrite an existing target |
 | KDBX 4.1 open → Nian Pass rename → save → Nian Pass reopen | Self-roundtrip verified | Trusted `keepassxc-2.7.12-kdbx41.kdbx`; expected post-mutation database equals reopened database |
 | Nian Pass output → KeePassXC open/list | Externally verified | KeePassXC `db-info` reports AES-256, AES-KDF, and two entries; `ls` reads the exact Unicode title |
 | KeePassXC title edit/resave → Nian Pass reopen | Externally verified | Nian Pass reopens the separate KeePassXC output and verifies the second title and history delta |
@@ -139,8 +140,8 @@ remain accurately unverified.
 | Custom-field mutation | Self-roundtrip verified | Protected/unprotected creation, protection-preserving update, empty key/value, same-value no-op, tracked deletion, missing deletion no-op, and protected-value reopen are asserted |
 | Reserved generic field access | Verified rejected | Standard fields, current/legacy TOTP storage names, and KeePassXC passkey attributes return generic `ReservedField` without mutation |
 | KeePassXC-specific nullable group flags and AutoType obfuscation XML encodings | Supporting regression verified | Output XML asserts literal `null` and integer `0`, matching pinned upstream KeePassXC 2.7+ regressions |
-| KDBX 4.0 writing | Unsupported | On Linux, dirty in-memory session edits are allowed, but save returns typed `UnsupportedWriteFormat`; pinned writer only emits exact 4.1 and source bytes remain unchanged |
-| KDBX 3.1 writing | Unsupported | On Linux, dirty in-memory session edits are allowed, but save returns typed `UnsupportedWriteFormat`; no silent KDBX 4.1 upgrade and source bytes remain unchanged |
+| KDBX 4.0 writing | Unsupported / read-only | Desktop unlock reports `UnsupportedWriteFormat`; mutation and Save are disabled/rejected before editing, the pinned writer only emits exact 4.1, and source bytes remain unchanged |
+| KDBX 3.1 writing | Unsupported / read-only | Desktop unlock reports `UnsupportedWriteFormat`; mutation and Save are disabled/rejected before editing, with no silent KDBX 4.1 upgrade and source bytes unchanged |
 | Verified local atomic save | Verified on Linux | Same-directory private temp is flushed, synced, reopened, compared to complete parsed semantics, atomically installed without deleting the source first, and final target is reopened and compared again |
 | External modification rejection | Verified on Linux | Complete encrypted-file SHA-256 catches pre-save changes, a valid external replacement after temp verification, and a controlled same-size byte change without overwriting external bytes |
 | Wrong ordinary-save password rejection | Verified on Linux | Credential must open the unchanged current source; mismatch leaves exact source bytes, backup, and dirty revision unchanged |

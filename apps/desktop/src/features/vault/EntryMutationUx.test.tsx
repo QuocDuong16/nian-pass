@@ -125,6 +125,44 @@ test("entry edit failure clears secret drafts while retaining non-secret metadat
   ).not.toBeInTheDocument();
 });
 
+test("entry edit password generator keeps generated plaintext in the local draft", () => {
+  const api = mutationApi();
+  render(
+    <EntryEditForm
+      api={api}
+      detail={mutationDetail}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Generate password" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+  const password = screen.getByLabelText<HTMLInputElement>("Password");
+  expect(password.value).not.toBe("");
+  expect(api.updateEntry).not.toHaveBeenCalled();
+});
+
+test("entry creation password generator materializes only the new local password field", () => {
+  const api = mutationApi();
+  render(
+    <EntryCreateDialog
+      api={api}
+      groupId="group-root"
+      onCreated={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Generate password" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+  const password = screen.getByLabelText<HTMLInputElement>("Password");
+  expect(password.value).not.toBe("");
+  expect(api.createEntry).not.toHaveBeenCalled();
+});
+
 test("entry creation keeps secrets local, selects result, and clears on failure or Cancel", async () => {
   const api = mutationApi();
   const onCreated = vi.fn();

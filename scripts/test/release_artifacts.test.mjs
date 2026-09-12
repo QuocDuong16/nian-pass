@@ -448,7 +448,7 @@ test("release manifest binds artifacts to source, toolchains, and signing", () =
     version: "0.1.0-rc.9",
     tag: "v0.1.0-rc.9",
     commit: "a".repeat(40),
-    toolchains: { rust: "1.98.0", node: "26.7.0" },
+    toolchains: { rust: "1.98.0", node: "26.8.1" },
     signing: { windows: "NOT RUN" },
     validation: { "Windows full GUI runtime": "NOT RUN" },
     infrastructure: { provider: "GitHub Actions hosted runners" },

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { EntryDetailDto, VaultSnapshotDto } from "../../types/desktop";
-import type { MobileApi } from "../../types/mobile";
+import type { EntryDetailDto } from "../../types/desktop";
+import type { MobileApi, MobileVaultSnapshotDto } from "../../types/mobile";
 import { EntryCreateDialog } from "../vault/EntryCreateDialog";
 import { EntryList } from "../vault/EntryList";
 import { GroupActions } from "../vault/GroupActions";
@@ -10,10 +10,10 @@ import { MobileEntryDetail } from "./MobileEntryDetail";
 
 interface Props {
   api: MobileApi;
-  snapshot: VaultSnapshotDto;
+  snapshot: MobileVaultSnapshotDto;
   disabled: boolean;
   readOnly?: boolean;
-  onSnapshot: (snapshot: VaultSnapshotDto) => void;
+  onSnapshot: (snapshot: MobileVaultSnapshotDto) => void;
   onDraftChange: (active: boolean) => void;
   onBusyChange: (busy: boolean) => void;
 }
@@ -89,7 +89,7 @@ export function MobileVaultBrowser(props: Props) {
   };
 
   const acceptSnapshot = (
-    next: VaultSnapshotDto,
+    next: MobileVaultSnapshotDto,
     preferredEntry = selectedEntryId,
   ) => {
     props.onSnapshot(next);

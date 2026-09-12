@@ -44,6 +44,12 @@ const gatewayProfile = {
 
 const snapshot = {
   dirty: false,
+  fileName: "fixture.kdbx",
+  capabilities: {
+    formatVersion: "4.1",
+    writable: true,
+    writeRestriction: null,
+  },
   rootGroupId: "root",
   groups: [{ id: "root", name: "Root", childGroupIds: [], entryIds: [] }],
   entries: [],

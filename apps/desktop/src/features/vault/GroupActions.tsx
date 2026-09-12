@@ -1,25 +1,26 @@
 import { useMemo, useState } from "react";
 
-import type { DesktopApi } from "../../lib/desktop";
-import type { GroupDto, GroupId, VaultSnapshotDto } from "../../types/desktop";
+import type {
+  GroupDto,
+  GroupId,
+  VaultCoreSnapshotDto,
+} from "../../types/desktop";
+import type { GroupActionsApi } from "../../types/mutation-api";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 type GroupAction = "create" | "rename" | "move" | "delete";
 
-interface GroupActionsProps {
-  api: Pick<
-    DesktopApi,
-    "createGroup" | "renameGroup" | "moveGroup" | "deleteGroup"
-  >;
+interface GroupActionsProps<TSnapshot extends VaultCoreSnapshotDto> {
+  api: GroupActionsApi<TSnapshot>;
   group: GroupDto;
-  snapshot: VaultSnapshotDto;
+  snapshot: TSnapshot;
   disabled: boolean;
-  onChanged: (snapshot: VaultSnapshotDto, selectedGroupId: GroupId) => void;
+  onChanged: (snapshot: TSnapshot, selectedGroupId: GroupId) => void;
   onDraftChange?: (active: boolean) => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
-export function GroupActions({
+export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
   api,
   group,
   snapshot,
@@ -27,8 +28,9 @@ export function GroupActions({
   onChanged,
   onDraftChange,
   onBusyChange,
-}: GroupActionsProps) {
+}: GroupActionsProps<TSnapshot>) {
   const [action, setAction] = useState<GroupAction | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [name, setName] = useState("");
   const [destination, setDestination] = useState(snapshot.rootGroupId);
   const [busy, setBusy] = useState(false);
@@ -63,6 +65,7 @@ export function GroupActions({
 
   const open = (next: GroupAction) => {
     setFailed(false);
+    setMenuOpen(false);
     setAction(next);
     setName(next === "rename" ? group.name : "");
     setDestination(destinations[0]?.id ?? snapshot.rootGroupId);
@@ -95,45 +98,60 @@ export function GroupActions({
   return (
     <div className="group-actions" aria-label="Group operations">
       <button
+        className="group-menu-trigger"
         type="button"
         disabled={disabled}
+        aria-expanded={menuOpen}
         onClick={() => {
-          open("create");
+          setMenuOpen((value) => !value);
         }}
       >
-        New group
+        Group actions
       </button>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          open("rename");
-        }}
-      >
-        Rename group
-      </button>
-      {!root ? (
-        <>
+      {menuOpen ? (
+        <div className="group-action-menu" role="menu">
           <button
             type="button"
-            disabled={disabled}
+            role="menuitem"
             onClick={() => {
-              open("move");
+              open("create");
             }}
           >
-            Move group
+            New group
           </button>
           <button
-            className="danger-button"
             type="button"
-            disabled={disabled}
+            role="menuitem"
             onClick={() => {
-              open("delete");
+              open("rename");
             }}
           >
-            Permanently delete group
+            Rename group
           </button>
-        </>
+          {!root ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  open("move");
+                }}
+              >
+                Move group
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  open("delete");
+                }}
+              >
+                Permanently delete group
+              </button>
+            </>
+          ) : null}
+        </div>
       ) : null}
       {failed ? (
         <p role="alert">Could not complete the group operation.</p>

@@ -6,6 +6,9 @@ interface EntryListProps {
   entries: EntrySummaryDto[];
   selectedEntryId: string | null;
   onSelect: (entryId: string) => void;
+  heading?: string | undefined;
+  eyebrow?: string;
+  emptyMessage?: string;
 }
 
 export function EntryList({
@@ -13,13 +16,18 @@ export function EntryList({
   entries,
   selectedEntryId,
   onSelect,
+  heading,
+  eyebrow = "Selected group",
+  emptyMessage = "No entries in this group.",
 }: EntryListProps) {
   return (
     <section className="entry-pane" aria-labelledby="entries-title">
       <header className="entry-heading">
         <div>
-          <p className="eyebrow">Selected group</p>
-          <h2 id="entries-title">{group.name || "Unnamed group"}</h2>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2 id="entries-title">
+            {heading ?? (group.name || "Unnamed group")}
+          </h2>
         </div>
         <span className="entry-count">
           {entries.length} {entries.length === 1 ? "entry" : "entries"}
@@ -27,7 +35,7 @@ export function EntryList({
       </header>
 
       {entries.length === 0 ? (
-        <div className="empty-state">No entries in this group.</div>
+        <div className="empty-state">{emptyMessage}</div>
       ) : (
         <ul className="entry-list">
           {entries.map((entry) => (
@@ -35,8 +43,8 @@ export function EntryList({
               <button
                 className={
                   entry.id === selectedEntryId
-                    ? "entry-card selected"
-                    : "entry-card"
+                    ? "entry-row selected"
+                    : "entry-row"
                 }
                 type="button"
                 onClick={() => {

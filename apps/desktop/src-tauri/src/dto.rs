@@ -21,31 +21,68 @@ pub struct MobileSelectedVaultDto {
     pub writable: bool,
 }
 
-/// Secret-free browse snapshot sent to the WebView.
+/// Platform-neutral, secret-free browse snapshot.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VaultSnapshotDto {
+pub struct VaultCoreSnapshotDto {
     pub dirty: bool,
     pub root_group_id: String,
     pub groups: Vec<GroupDto>,
     pub entries: Vec<EntrySummaryDto>,
 }
 
+/// Desktop browse snapshot sent to the WebView.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultSnapshotDto {
+    pub dirty: bool,
+    pub file_name: String,
+    pub capabilities: VaultCapabilitiesDto,
+    pub root_group_id: String,
+    pub groups: Vec<GroupDto>,
+    pub entries: Vec<EntrySummaryDto>,
+}
+
+/// Secret-free write capability metadata for the currently unlocked vault.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultCapabilitiesDto {
+    pub format_version: String,
+    pub writable: bool,
+    pub write_restriction: Option<WriteRestrictionDto>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WriteRestrictionDto {
+    UnsupportedWriteFormat,
+    UnsupportedPersistencePlatform,
+    ReadOnlySource,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios", test))]
+pub type MobileVaultSnapshotDto = VaultCoreSnapshotDto;
+
 /// Secret-free result of entry creation.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreatedEntryDto {
+pub struct CreatedEntryDto<S = VaultSnapshotDto> {
     pub created_entry_id: String,
-    pub snapshot: VaultSnapshotDto,
+    pub snapshot: S,
 }
 
 /// Secret-free result of group creation.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreatedGroupDto {
+pub struct CreatedGroupDto<S = VaultSnapshotDto> {
     pub created_group_id: String,
-    pub snapshot: VaultSnapshotDto,
+    pub snapshot: S,
 }
+
+#[cfg(any(target_os = "android", target_os = "ios", test))]
+pub type MobileCreatedEntryDto = CreatedEntryDto<MobileVaultSnapshotDto>;
+#[cfg(any(target_os = "android", target_os = "ios", test))]
+pub type MobileCreatedGroupDto = CreatedGroupDto<MobileVaultSnapshotDto>;
 
 /// Rust-authoritative decision for a main-window close request.
 #[cfg(desktop)]
@@ -90,6 +127,7 @@ pub struct EntryDetailDto {
     pub url: SummaryTextDto,
     pub password_present: bool,
     pub notes_present: bool,
+    pub tags: Vec<String>,
     pub custom_fields: Vec<CustomFieldSummaryDto>,
 }
 
@@ -150,6 +188,27 @@ impl From<&SummaryText> for SummaryTextDto {
 
 impl VaultSnapshotDto {
     #[must_use]
+    pub fn from_vault(
+        vault: &Vault,
+        dirty: bool,
+        file_name: String,
+        capabilities: VaultCapabilitiesDto,
+    ) -> Self {
+        let core = VaultCoreSnapshotDto::from_vault(vault, dirty);
+
+        Self {
+            dirty: core.dirty,
+            file_name,
+            capabilities,
+            root_group_id: core.root_group_id,
+            groups: core.groups,
+            entries: core.entries,
+        }
+    }
+}
+
+impl VaultCoreSnapshotDto {
+    #[must_use]
     pub fn from_vault(vault: &Vault, dirty: bool) -> Self {
         let mut groups = Vec::with_capacity(vault.group_count());
         let mut entries = Vec::with_capacity(vault.entry_count());
@@ -174,6 +233,7 @@ impl EntryDetailDto {
             url: entry.url().into(),
             password_present: entry.has_password(),
             notes_present: entry.has_notes(),
+            tags: entry.tags().to_vec(),
             custom_fields: custom_fields.iter().map(Into::into).collect(),
         }
     }
@@ -264,7 +324,7 @@ mod tests {
     use super::{
         ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, EntryDetailDto,
         EntrySummaryDto, GroupDto, LockResultDto, SelectedVaultDto, SummaryTextDto,
-        VaultSnapshotDto,
+        VaultCapabilitiesDto, VaultSnapshotDto,
     };
     use crate::clipboard::{CLIPBOARD_CLEAR_MS, ClipboardClearStatus, ClipboardCopy};
 
@@ -299,6 +359,12 @@ mod tests {
         };
         let snapshot = VaultSnapshotDto {
             dirty: false,
+            file_name: "example.kdbx".to_owned(),
+            capabilities: VaultCapabilitiesDto {
+                format_version: "4.1".to_owned(),
+                writable: true,
+                write_restriction: None,
+            },
             root_group_id: "group-root".to_owned(),
             groups: vec![GroupDto {
                 id: "group-root".to_owned(),
@@ -330,6 +396,12 @@ mod tests {
         );
         let created_entry_snapshot = VaultSnapshotDto {
             dirty: true,
+            file_name: "example.kdbx".to_owned(),
+            capabilities: VaultCapabilitiesDto {
+                format_version: "4.1".to_owned(),
+                writable: true,
+                write_restriction: None,
+            },
             root_group_id: "group-root".to_owned(),
             groups: vec![GroupDto {
                 id: "group-root".to_owned(),
@@ -360,6 +432,12 @@ mod tests {
         );
         let created_group_snapshot = VaultSnapshotDto {
             dirty: true,
+            file_name: "example.kdbx".to_owned(),
+            capabilities: VaultCapabilitiesDto {
+                format_version: "4.1".to_owned(),
+                writable: true,
+                write_restriction: None,
+            },
             root_group_id: "group-root".to_owned(),
             groups: vec![
                 GroupDto {
@@ -396,7 +474,7 @@ mod tests {
             SummaryText::Visible("Example".to_owned()),
             SummaryText::Protected,
             SummaryText::Missing,
-            Vec::new(),
+            vec!["test".to_owned()],
             true,
             true,
         );
@@ -460,6 +538,7 @@ mod tests {
                 "id",
                 "notesPresent",
                 "passwordPresent",
+                "tags",
                 "title",
                 "url",
                 "username",

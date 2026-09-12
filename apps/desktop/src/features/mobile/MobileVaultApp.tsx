@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MobileCommandError } from "../../lib/mobile";
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { MobileVaultSnapshotDto } from "../../types/mobile";
 import type { MobileApi, MobileSelectedVaultDto } from "../../types/mobile";
 import type { RuntimePlatform } from "../../types/runtime";
 import { MobileAutofillPanel } from "./MobileAutofillPanel";
@@ -26,7 +26,7 @@ export function MobileVaultApp({
   const [phase, setPhase] = useState<Phase>("no_selection");
   const [selected, setSelected] = useState<MobileSelectedVaultDto | null>(null);
   const [password, setPassword] = useState("");
-  const [snapshot, setSnapshot] = useState<VaultSnapshotDto | null>(null);
+  const [snapshot, setSnapshot] = useState<MobileVaultSnapshotDto | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hidden, setHidden] = useState(document.hidden);
@@ -53,7 +53,7 @@ export function MobileVaultApp({
     setSelected(next);
     setPhase("selected_locked");
   }, []);
-  const onAutofillUnlocked = useCallback((current: VaultSnapshotDto) => {
+  const onAutofillUnlocked = useCallback((current: MobileVaultSnapshotDto) => {
     setSnapshot(current);
     setPhase("unlocked");
   }, []);

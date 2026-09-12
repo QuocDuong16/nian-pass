@@ -9,7 +9,7 @@ use std::{
 use kdbx::{KdbxDocument, KdbxError};
 use vault_core::{EntryId, SecretString};
 
-use crate::dto::{EntryDetailDto, VaultSnapshotDto};
+use crate::dto::{EntryDetailDto, MobileVaultSnapshotDto};
 
 use super::{
     MobileError,
@@ -37,7 +37,7 @@ impl MobileVaultSession {
         handle: MobileSourceHandle,
         writable: bool,
         credential: &SecretString,
-    ) -> Result<(Self, VaultSnapshotDto), MobileError> {
+    ) -> Result<(Self, MobileVaultSnapshotDto), MobileError> {
         let before = EncryptedGeneration::from_path(staged_path)
             .map_err(|_| MobileError::UnsupportedVault)?;
         let document =
@@ -63,7 +63,7 @@ impl MobileVaultSession {
         ))
     }
 
-    pub(super) fn snapshot(&self) -> Result<VaultSnapshotDto, MobileError> {
+    pub(super) fn snapshot(&self) -> Result<MobileVaultSnapshotDto, MobileError> {
         snapshot_for(&self.document, self.saved_revision)
     }
 
@@ -183,7 +183,7 @@ impl MobileVaultSession {
         prepared: &PreparedMobileSave,
         read_back_path: &Path,
         credential: &SecretString,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         if self.document.revision() != prepared.revision {
             return Err(MobileError::SaveUncertain);
         }
@@ -206,7 +206,7 @@ impl MobileVaultSession {
         &mut self,
         staged_path: &Path,
         credential: &SecretString,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         let before =
             EncryptedGeneration::from_path(staged_path).map_err(|_| MobileError::ReloadFailed)?;
         let candidate = KdbxDocument::open(staged_path, credential.expose_secret()).map_err(
@@ -232,11 +232,11 @@ impl MobileVaultSession {
 fn snapshot_for(
     document: &KdbxDocument,
     saved_revision: u64,
-) -> Result<VaultSnapshotDto, MobileError> {
+) -> Result<MobileVaultSnapshotDto, MobileError> {
     document
         .projection()
         .map(|vault| {
-            VaultSnapshotDto::from_vault(&vault, document.has_changes_since(saved_revision))
+            MobileVaultSnapshotDto::from_vault(&vault, document.has_changes_since(saved_revision))
         })
         .map_err(|_| MobileError::Internal)
 }

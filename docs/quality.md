@@ -15,7 +15,7 @@ for feedback but is intentionally not equivalent to the full gate.
 
 - Rust 1.98.0 from `.mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
   `rust-toolchain.toml` mirrors the pin for direct Cargo and editor invocations
-- Node 26.7.0 from `.node-version`
+- Node 26.8.1 from `.node-version`
 - Corepack 0.35.0, installed explicitly in Forgejo because Node 26 does not bundle it
 - pnpm 11.22.0 from the root `packageManager`
 - GNU Make

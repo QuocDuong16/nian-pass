@@ -4,7 +4,7 @@ use kdbx::KdbxError;
 use serde::Deserialize;
 use vault_core::{EntryId, EntryUpdate, FieldProtection, GroupId, NewEntry, SecretString};
 
-use crate::dto::{CreatedEntryDto, CreatedGroupDto, VaultSnapshotDto};
+use crate::dto::{MobileCreatedEntryDto, MobileCreatedGroupDto, MobileVaultSnapshotDto};
 
 use super::{MobileError, session::MobileVaultSession};
 
@@ -78,7 +78,7 @@ impl MobileVaultSession {
     pub(super) fn update_entry(
         &mut self,
         request: MobileUpdateEntryRequest,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&request.entry_id)?;
         let password = request.password.map(SecretString::new);
         let notes = request.notes.map(SecretString::new);
@@ -100,7 +100,7 @@ impl MobileVaultSession {
     pub(super) fn create_entry(
         &mut self,
         request: MobileCreateEntryRequest,
-    ) -> Result<CreatedEntryDto, MobileError> {
+    ) -> Result<MobileCreatedEntryDto, MobileError> {
         require_id(&request.group_id)?;
         let password = request.password.map(SecretString::new);
         let notes = request.notes.map(SecretString::new);
@@ -117,7 +117,7 @@ impl MobileVaultSession {
                 notes.as_ref(),
             )
             .map_err(map_mutation_error)?;
-        Ok(CreatedEntryDto {
+        Ok(MobileCreatedEntryDto {
             created_entry_id: created.as_str().to_owned(),
             snapshot: self.snapshot()?,
         })
@@ -126,7 +126,7 @@ impl MobileVaultSession {
     pub(super) fn delete_entry(
         &mut self,
         entry_id: String,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&entry_id)?;
         self.document
             .permanently_delete_entry(&EntryId::new(entry_id))
@@ -137,7 +137,7 @@ impl MobileVaultSession {
     pub(super) fn move_entry(
         &mut self,
         request: MobileMoveEntryRequest,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&request.entry_id)?;
         require_id(&request.destination_group_id)?;
         self.document
@@ -152,14 +152,14 @@ impl MobileVaultSession {
     pub(super) fn create_group(
         &mut self,
         request: MobileCreateGroupRequest,
-    ) -> Result<CreatedGroupDto, MobileError> {
+    ) -> Result<MobileCreatedGroupDto, MobileError> {
         require_id(&request.parent_group_id)?;
         require_name(&request.name)?;
         let created = self
             .document
             .create_group(&GroupId::new(request.parent_group_id), &request.name)
             .map_err(map_mutation_error)?;
-        Ok(CreatedGroupDto {
+        Ok(MobileCreatedGroupDto {
             created_group_id: created.as_str().to_owned(),
             snapshot: self.snapshot()?,
         })
@@ -168,7 +168,7 @@ impl MobileVaultSession {
     pub(super) fn rename_group(
         &mut self,
         request: MobileRenameGroupRequest,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&request.group_id)?;
         require_name(&request.name)?;
         self.document
@@ -180,7 +180,7 @@ impl MobileVaultSession {
     pub(super) fn move_group(
         &mut self,
         request: MobileMoveGroupRequest,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&request.group_id)?;
         require_id(&request.destination_group_id)?;
         self.document
@@ -195,7 +195,7 @@ impl MobileVaultSession {
     pub(super) fn delete_group(
         &mut self,
         group_id: String,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&group_id)?;
         self.document
             .permanently_delete_group(&GroupId::new(group_id))
@@ -206,7 +206,7 @@ impl MobileVaultSession {
     pub(super) fn set_custom_field(
         &mut self,
         request: MobileSetCustomFieldRequest,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&request.entry_id)?;
         let entry = EntryId::new(request.entry_id);
         let exists = self
@@ -233,7 +233,7 @@ impl MobileVaultSession {
         &mut self,
         entry_id: String,
         name: String,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         require_id(&entry_id)?;
         self.document
             .delete_entry_custom_field(&EntryId::new(entry_id), &name)

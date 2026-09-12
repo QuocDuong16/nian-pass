@@ -16,7 +16,7 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.7.0"
+          node_version="26.8.1"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
@@ -54,7 +54,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 25
     container:
-      image: node:26.7.0-bookworm@sha256:e929171d35b9df7773a3ec5b068e387fa109441dc90f91e6560af5d39b7e9bf1
+      image: node:26.8.1-bookworm@sha256:9f94d34c787165dca03b74e5bf9c3bf90e8de79b19aa3d87fe1fa1694bf75c89
 
     steps:
       - name: Check out repository
@@ -92,7 +92,7 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.7.0"
+          node_version="26.8.1"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
@@ -166,7 +166,7 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.7.0"
+          node_version="26.8.1"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
@@ -212,7 +212,7 @@ jobs:
       - name: Install pinned Node.js runtime
         run: |
           set -Eeuo pipefail
-          node_version="26.7.0"
+          node_version="26.8.1"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
@@ -260,7 +260,7 @@ jobs:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.7.0"
+          node_version="26.8.1"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"

@@ -1,40 +1,39 @@
 import { useState } from "react";
 
-import type { DesktopApi } from "../../lib/desktop";
 import type {
   EntryDetailDto,
   SummaryTextDto,
   UpdateEntryRequest,
+  VaultCoreSnapshotDto,
   VaultSnapshotDto,
 } from "../../types/desktop";
+import type { EntryEditApi } from "../../types/mutation-api";
 import { EditableMetadataField } from "./EditableMetadataField";
+import { PasswordGenerator } from "./PasswordGenerator";
 import { useSecretDraft } from "./useSecretDraft";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
-interface EntryEditFormProps {
-  api: Pick<
-    DesktopApi,
-    | "updateEntry"
-    | "revealEntryTitle"
-    | "revealEntryUsername"
-    | "revealEntryUrl"
-    | "revealEntryNotes"
-  >;
+interface EntryEditFormProps<
+  TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
+> {
+  api: EntryEditApi<TSnapshot>;
   detail: EntryDetailDto;
   disabled: boolean;
-  onApplied: (snapshot: VaultSnapshotDto) => void;
+  onApplied: (snapshot: TSnapshot) => void;
   onCancel: () => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
-export function EntryEditForm({
+export function EntryEditForm<
+  TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
+>({
   api,
   detail,
   disabled,
   onApplied,
   onCancel,
   onBusyChange,
-}: EntryEditFormProps) {
+}: EntryEditFormProps<TSnapshot>) {
   const title = useSecretDraft();
   const username = useSecretDraft();
   const url = useSecretDraft();
@@ -146,6 +145,12 @@ export function EntryEditForm({
         <small>
           Existing password is never preloaded. Empty sets an empty password.
         </small>
+        <PasswordGenerator
+          disabled={disabled || applying}
+          onGenerated={(generated) => {
+            setPasswordDraft(generated);
+          }}
+        />
       </div>
 
       <div className="form-field">

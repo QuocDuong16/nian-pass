@@ -1,14 +1,14 @@
 import { vi } from "vitest";
 
+import type { EntryDetailDto } from "../types/desktop";
 import type {
-  CreatedEntryDto,
-  CreatedGroupDto,
-  EntryDetailDto,
-  VaultSnapshotDto,
-} from "../types/desktop";
-import type { MobileApi } from "../types/mobile";
+  MobileApi,
+  MobileCreatedEntryDto,
+  MobileCreatedGroupDto,
+  MobileVaultSnapshotDto,
+} from "../types/mobile";
 
-export const mobileSnapshot: VaultSnapshotDto = {
+export const mobileSnapshot: MobileVaultSnapshotDto = {
   dirty: false,
   rootGroupId: "group-root",
   groups: [
@@ -46,6 +46,7 @@ export const mobileDetail: EntryDetailDto = {
   url: { kind: "protected" },
   passwordPresent: true,
   notesPresent: true,
+  tags: [],
   customFields: [{ name: "Account type", protection: "unprotected" }],
 };
 
@@ -68,13 +69,13 @@ export function createMobileApi(overrides: Partial<MobileApi> = {}): MobileApi {
     createEntry: vi.fn().mockResolvedValue({
       createdEntryId: "entry-created",
       snapshot: mobileSnapshot,
-    } satisfies CreatedEntryDto),
+    } satisfies MobileCreatedEntryDto),
     deleteEntry: vi.fn().mockResolvedValue(mobileSnapshot),
     moveEntry: vi.fn().mockResolvedValue(mobileSnapshot),
     createGroup: vi.fn().mockResolvedValue({
       createdGroupId: "group-created",
       snapshot: mobileSnapshot,
-    } satisfies CreatedGroupDto),
+    } satisfies MobileCreatedGroupDto),
     renameGroup: vi.fn().mockResolvedValue(mobileSnapshot),
     moveGroup: vi.fn().mockResolvedValue(mobileSnapshot),
     deleteGroup: vi.fn().mockResolvedValue(mobileSnapshot),

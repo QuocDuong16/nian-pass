@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { MobileVaultSnapshotDto } from "../../types/mobile";
 import type {
   MobileApi,
   MobileSecurityResumeDto,
@@ -22,7 +22,7 @@ import { useMobileUnlockedSecurity } from "./useMobileUnlockedSecurity";
 interface Props {
   api: MobileApi;
   selected: MobileSelectedVaultDto;
-  initialSnapshot: VaultSnapshotDto;
+  initialSnapshot: MobileVaultSnapshotDto;
   hidden: boolean;
   securityStatus: MobileSecurityResumeDto | null;
   securityRefreshing: boolean;

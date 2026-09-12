@@ -7,7 +7,7 @@ use std::{
 
 use vault_core::SecretString;
 
-use crate::dto::{EntryDetailDto, MobileSelectedVaultDto, VaultSnapshotDto};
+use crate::dto::{EntryDetailDto, MobileSelectedVaultDto, MobileVaultSnapshotDto};
 
 use super::{
     MobileError,
@@ -148,7 +148,7 @@ impl MobileVaultService {
     pub(crate) fn unlock(
         &mut self,
         credential: &SecretString,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         if self.active_operation.is_some() {
             return Err(MobileError::Busy);
         }
@@ -178,7 +178,7 @@ impl MobileVaultService {
         Ok(snapshot)
     }
 
-    pub(crate) fn snapshot(&self) -> Result<VaultSnapshotDto, MobileError> {
+    pub(crate) fn snapshot(&self) -> Result<MobileVaultSnapshotDto, MobileError> {
         self.session.as_ref().ok_or(MobileError::Locked)?.snapshot()
     }
 
@@ -297,7 +297,7 @@ impl MobileVaultService {
         prepared: &PreparedMobileSave,
         read_back_path: &Path,
         credential: &SecretString,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         if self.active_operation != Some(prepared.operation) {
             return Err(MobileError::SaveUncertain);
         }
@@ -312,7 +312,7 @@ impl MobileVaultService {
         operation: u64,
         staged_path: &Path,
         credential: &SecretString,
-    ) -> Result<VaultSnapshotDto, MobileError> {
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
         if self.active_operation != Some(operation) {
             return Err(MobileError::ReloadFailed);
         }

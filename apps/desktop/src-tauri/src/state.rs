@@ -5,15 +5,18 @@ use std::sync::{
 };
 
 use vault_core::{EntryId, SecretString};
-use vault_session::VaultSession;
+use vault_session::{VaultSession, WriteRestriction};
 
 mod browser;
 mod error;
+mod snapshot;
 mod sync_support;
 
 pub use error::DesktopError;
 pub(crate) use error::map_mutation_error;
-use error::{map_clipboard_error, map_open_error, map_provider_error, map_save_error};
+use error::{
+    map_clipboard_error, map_create_error, map_open_error, map_provider_error, map_save_error,
+};
 
 use crate::{
     clipboard::{ClipboardClearStatus, ClipboardCopy, ClipboardPort, DesktopClipboardService},
@@ -24,6 +27,7 @@ use crate::{
 pub struct DesktopVaultService {
     selected_path: Option<PathBuf>,
     session: Option<VaultSession>,
+    save_credential: Option<SecretString>,
     browser_session_id: Option<String>,
 }
 
@@ -33,6 +37,7 @@ impl DesktopVaultService {
         Self {
             selected_path: None,
             session: None,
+            save_credential: None,
             browser_session_id: None,
         }
     }
@@ -47,6 +52,26 @@ impl DesktopVaultService {
         Ok(SelectedVaultDto { file_name })
     }
 
+    pub fn create(
+        &mut self,
+        path: PathBuf,
+        vault_name: &str,
+        credential: SecretString,
+    ) -> Result<VaultSnapshotDto, DesktopError> {
+        if self.session.is_some() {
+            return Err(DesktopError::AlreadyUnlocked);
+        }
+        let session =
+            VaultSession::create(&path, vault_name, &credential).map_err(map_create_error)?;
+        let snapshot = snapshot::from_session(&session).map_err(map_create_error)?;
+        let browser_session_id = random_process_token()?;
+        self.selected_path = Some(session.path().to_owned());
+        self.session = Some(session);
+        self.save_credential = Some(credential);
+        self.browser_session_id = Some(browser_session_id);
+        Ok(snapshot)
+    }
+
     pub fn unlock(&mut self, credential: SecretString) -> Result<VaultSnapshotDto, DesktopError> {
         if self.session.is_some() {
             return Err(DesktopError::AlreadyUnlocked);
@@ -57,27 +82,24 @@ impl DesktopVaultService {
             .as_deref()
             .ok_or(DesktopError::NoVaultSelected)?;
         let session = VaultSession::open(path, &credential).map_err(map_open_error)?;
-        let snapshot = session
-            .projection()
-            .map(|vault| VaultSnapshotDto::from_vault(&vault, session.is_dirty()))
-            .map_err(map_open_error)?;
+        let snapshot = snapshot::from_session(&session).map_err(map_open_error)?;
         let browser_session_id = random_process_token()?;
         self.session = Some(session);
+        self.save_credential = Some(credential);
         self.browser_session_id = Some(browser_session_id);
         Ok(snapshot)
     }
 
     pub fn snapshot(&self) -> Result<VaultSnapshotDto, DesktopError> {
         let session = self.session.as_ref().ok_or(DesktopError::Locked)?;
-        session
-            .projection()
-            .map(|vault| VaultSnapshotDto::from_vault(&vault, session.is_dirty()))
-            .map_err(|_| DesktopError::Internal)
+        snapshot::from_session(session).map_err(|_| DesktopError::Internal)
     }
 
-    pub fn save(&mut self, credential: SecretString) -> Result<VaultSnapshotDto, DesktopError> {
+    pub fn save(&mut self) -> Result<VaultSnapshotDto, DesktopError> {
+        self.require_writable()?;
+        let credential = self.save_credential.as_ref().ok_or(DesktopError::Locked)?;
         let session = self.session.as_mut().ok_or(DesktopError::Locked)?;
-        session.save(&credential).map_err(map_save_error)?;
+        session.save(credential).map_err(map_save_error)?;
         self.snapshot()
     }
 
@@ -90,18 +112,25 @@ impl DesktopVaultService {
             .to_owned();
         let candidate =
             VaultSession::open(path, &credential).map_err(|_| DesktopError::ReloadFailed)?;
-        let snapshot = candidate
-            .projection()
-            .map(|vault| VaultSnapshotDto::from_vault(&vault, candidate.is_dirty()))
-            .map_err(|_| DesktopError::ReloadFailed)?;
+        let snapshot =
+            snapshot::from_session(&candidate).map_err(|_| DesktopError::ReloadFailed)?;
         let browser_session_id = random_process_token()?;
         self.session = Some(candidate);
+        self.save_credential = Some(credential);
         self.browser_session_id = Some(browser_session_id);
         Ok(snapshot)
     }
 
     pub(crate) fn session_mut(&mut self) -> Result<&mut VaultSession, DesktopError> {
+        self.require_writable()?;
         self.session.as_mut().ok_or(DesktopError::Locked)
+    }
+
+    fn require_writable(&self) -> Result<(), DesktopError> {
+        let session = self.session.as_ref().ok_or(DesktopError::Locked)?;
+        session.write_restriction().map_or(Ok(()), |restriction| {
+            Err(write_restriction_error(restriction))
+        })
     }
 
     pub fn entry_detail(&self, entry_id: &str) -> Result<EntryDetailDto, DesktopError> {
@@ -189,6 +218,7 @@ impl DesktopVaultService {
 
     pub fn discard_and_lock(&mut self) -> Result<(), DesktopError> {
         let session = self.session.take().ok_or(DesktopError::Locked)?;
+        self.save_credential = None;
         self.browser_session_id = None;
         session.lock();
         self.selected_path = None;
@@ -211,6 +241,16 @@ impl DesktopVaultService {
             return Err(DesktopError::EntryNotFound);
         }
         Ok(session)
+    }
+}
+
+fn write_restriction_error(restriction: WriteRestriction) -> DesktopError {
+    match restriction {
+        WriteRestriction::UnsupportedWriteFormat => DesktopError::UnsupportedWriteFormat,
+        WriteRestriction::UnsupportedPersistencePlatform => {
+            DesktopError::UnsupportedPersistencePlatform
+        }
+        WriteRestriction::ReadOnlySource => DesktopError::ReadOnlySource,
     }
 }
 
@@ -359,12 +399,17 @@ mod tests {
     use credential_provider_core::CredentialTarget;
     use serde_json::{Map, Value, to_value};
     use vault_core::{EntryId, NewEntry, SecretString};
-    use vault_session::VaultSession;
+    use vault_session::{VaultSession, WriteRestriction};
 
     use vault_session::SessionError;
 
-    use super::{AppState, DesktopError, DesktopVaultService, map_save_error};
-    use crate::clipboard::{ClipboardClearStatus, ClipboardPort};
+    use super::{
+        AppState, DesktopError, DesktopVaultService, map_save_error, write_restriction_error,
+    };
+    use crate::{
+        clipboard::{ClipboardClearStatus, ClipboardPort},
+        dto::WriteRestrictionDto,
+    };
 
     const FIXTURE_PASSWORD: &str = "demopass";
     const FIXTURE: &str = "keepassxc-2.7.12-kdbx41.kdbx";
@@ -475,6 +520,122 @@ mod tests {
         external
             .save(&credential())
             .expect("external save should succeed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_new_vault_is_clean_writable_persistable_and_drops_session_credential_on_lock() {
+        let directory = TestDir::create();
+        let path = directory.0.join("created.kdbx");
+        let mut service = DesktopVaultService::new();
+        let snapshot = service
+            .create(path.clone(), "Personal", credential())
+            .expect("new vault should be created");
+        assert!(!snapshot.dirty);
+        assert_eq!(snapshot.file_name, "created.kdbx");
+        assert_eq!(snapshot.capabilities.format_version, "4.1");
+        assert!(snapshot.capabilities.writable);
+        assert!(snapshot.capabilities.write_restriction.is_none());
+        assert!(service.save_credential.is_some());
+
+        let root = snapshot.root_group_id.clone();
+        service
+            .session_mut()
+            .expect("created vault should be writable")
+            .document_mut()
+            .create_group(&vault_core::GroupId::new(root), "Accounts")
+            .expect("group creation should mutate the new vault");
+        assert!(service.snapshot().expect("dirty snapshot").dirty);
+        assert!(
+            !service
+                .save()
+                .expect("retained credential should save")
+                .dirty
+        );
+        VaultSession::open(&path, &credential()).expect("created vault should reopen");
+
+        let mut duplicate = DesktopVaultService::new();
+        assert!(matches!(
+            duplicate.create(path, "Duplicate", credential()),
+            Err(DesktopError::VaultAlreadyExists)
+        ));
+        service
+            .discard_and_lock()
+            .expect("clean created vault should lock");
+        assert!(service.save_credential.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsupported_kdbx_version_is_read_only_before_mutation() {
+        let directory = TestDir::create();
+        let path = directory.0.join("legacy.kdbx");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../fixtures/kdbx/keepass-upstream-kdbx31-aeskdf-aes.kdbx"),
+            &path,
+        )
+        .expect("legacy fixture copy should succeed");
+        let mut service = DesktopVaultService::new();
+        service
+            .select_path(path)
+            .expect("legacy fixture should be selectable");
+        let snapshot = service
+            .unlock(credential())
+            .expect("legacy fixture should open read-only");
+        assert!(!snapshot.capabilities.writable);
+        assert_eq!(snapshot.capabilities.format_version, "3.1");
+        assert!(matches!(
+            snapshot.capabilities.write_restriction,
+            Some(WriteRestrictionDto::UnsupportedWriteFormat)
+        ));
+        assert!(matches!(
+            service.session_mut(),
+            Err(DesktopError::UnsupportedWriteFormat)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readonly_source_is_reported_before_mutation() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy();
+        let mut permissions = fs::metadata(&path).expect("fixture metadata").permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&path, permissions).expect("fixture should become read-only");
+
+        let mut service = DesktopVaultService::new();
+        service
+            .select_path(path)
+            .expect("read-only fixture should be selectable");
+        let snapshot = service
+            .unlock(credential())
+            .expect("read-only fixture should unlock");
+        assert!(!snapshot.capabilities.writable);
+        assert!(matches!(
+            snapshot.capabilities.write_restriction,
+            Some(WriteRestrictionDto::ReadOnlySource)
+        ));
+        assert!(matches!(
+            service.session_mut(),
+            Err(DesktopError::ReadOnlySource)
+        ));
+    }
+
+    #[test]
+    fn write_restriction_errors_are_stable_for_every_reason() {
+        assert_eq!(
+            write_restriction_error(WriteRestriction::UnsupportedWriteFormat),
+            DesktopError::UnsupportedWriteFormat
+        );
+        assert_eq!(
+            write_restriction_error(WriteRestriction::UnsupportedPersistencePlatform),
+            DesktopError::UnsupportedPersistencePlatform
+        );
+        assert_eq!(
+            write_restriction_error(WriteRestriction::ReadOnlySource),
+            DesktopError::ReadOnlySource
+        );
     }
 
     #[derive(Default)]
@@ -893,9 +1054,7 @@ mod tests {
         let entry_id = mutate_first_title(&mut service, "desktop saved B");
         assert!(service.snapshot().expect("dirty snapshot").dirty);
 
-        let saved = service
-            .save(credential())
-            .expect("desktop save should succeed");
+        let saved = service.save().expect("desktop save should succeed");
         assert!(!saved.dirty);
         assert!(fs::read(&path).expect("saved source should be readable") != initial);
         let reopened =
@@ -911,12 +1070,7 @@ mod tests {
         );
 
         mutate_first_title(&mut service, "desktop saved C");
-        assert!(
-            !service
-                .save(credential())
-                .expect("second save should succeed")
-                .dirty
-        );
+        assert!(!service.save().expect("second save should succeed").dirty);
         let reopened = VaultSession::open(&path, &credential()).expect("second save should reopen");
         assert_eq!(
             reopened
@@ -936,8 +1090,9 @@ mod tests {
         let before = fs::read(&path).expect("source should be readable");
         let entry_id = mutate_first_title(&mut service, "local retry edit");
 
+        service.save_credential = Some(SecretString::new("wrong-password".to_owned()));
         assert!(matches!(
-            service.save(SecretString::new("wrong-password".to_owned())),
+            service.save(),
             Err(DesktopError::SaveAuthenticationFailed)
         ));
         assert_eq!(fs::read(&path).expect("source should remain"), before);
@@ -949,12 +1104,8 @@ mod tests {
                 .expose_secret(),
             "local retry edit"
         );
-        assert!(
-            !service
-                .save(credential())
-                .expect("valid retry should succeed")
-                .dirty
-        );
+        service.save_credential = Some(credential());
+        assert!(!service.save().expect("valid retry should succeed").dirty);
     }
 
     #[cfg(unix)]
@@ -965,10 +1116,7 @@ mod tests {
         write_external_version(&path, "external C");
         let external = fs::read(&path).expect("external source should be readable");
 
-        assert!(matches!(
-            service.save(credential()),
-            Err(DesktopError::ExternalChange)
-        ));
+        assert!(matches!(service.save(), Err(DesktopError::ExternalChange)));
         assert_eq!(
             fs::read(&path).expect("external source should remain"),
             external
@@ -988,10 +1136,7 @@ mod tests {
         );
 
         fs::remove_file(&path).expect("external deletion should succeed");
-        assert!(matches!(
-            service.save(credential()),
-            Err(DesktopError::ExternalChange)
-        ));
+        assert!(matches!(service.save(), Err(DesktopError::ExternalChange)));
         assert!(!path.exists());
         assert!(
             service
@@ -1006,17 +1151,12 @@ mod tests {
     fn external_change_after_a_successful_save_uses_the_fresh_baseline() {
         let (_directory, path, mut service) = isolated_service();
         mutate_first_title(&mut service, "saved S1");
-        service
-            .save(credential())
-            .expect("first save should succeed");
+        service.save().expect("first save should succeed");
         write_external_version(&path, "external after S1");
         let external = fs::read(&path).expect("external generation should be readable");
         mutate_first_title(&mut service, "local after S1");
 
-        assert!(matches!(
-            service.save(credential()),
-            Err(DesktopError::ExternalChange)
-        ));
+        assert!(matches!(service.save(), Err(DesktopError::ExternalChange)));
         assert_eq!(
             fs::read(&path).expect("external generation should remain"),
             external
@@ -1426,7 +1566,23 @@ mod tests {
 
     fn assert_reviewed_keys(value: &Value) {
         let root = value.as_object().expect("snapshot should be an object");
-        assert_exact_keys(root, &["dirty", "rootGroupId", "groups", "entries"]);
+        assert_exact_keys(
+            root,
+            &[
+                "dirty",
+                "fileName",
+                "capabilities",
+                "rootGroupId",
+                "groups",
+                "entries",
+            ],
+        );
+        assert_exact_keys(
+            root["capabilities"]
+                .as_object()
+                .expect("capabilities should be an object"),
+            &["formatVersion", "writable", "writeRestriction"],
+        );
 
         for group in root["groups"]
             .as_array()

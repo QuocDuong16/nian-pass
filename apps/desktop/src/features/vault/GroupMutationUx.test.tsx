@@ -28,13 +28,14 @@ test("root exposes create and rename but never move or delete", () => {
       onChanged={vi.fn()}
     />,
   );
-  expect(screen.getByRole("button", { name: "New group" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "Rename group" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  expect(screen.getByRole("menuitem", { name: "New group" })).toBeVisible();
+  expect(screen.getByRole("menuitem", { name: "Rename group" })).toBeVisible();
   expect(
-    screen.queryByRole("button", { name: "Move group" }),
+    screen.queryByRole("menuitem", { name: "Move group" }),
   ).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Permanently delete group" }),
+    screen.queryByRole("menuitem", { name: "Permanently delete group" }),
   ).not.toBeInTheDocument();
 });
 
@@ -50,7 +51,8 @@ test("group create and rename use stable selected GroupIds", async () => {
       onChanged={onChanged}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "New group" }));
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "New group" }));
   fireEvent.change(screen.getByLabelText("Group name"), {
     target: { value: "Created child" },
   });
@@ -60,7 +62,8 @@ test("group create and rename use stable selected GroupIds", async () => {
   });
   expect(onChanged).toHaveBeenCalledWith(mutationSnapshot, "group-created");
 
-  fireEvent.click(screen.getByRole("button", { name: "Rename group" }));
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Rename group" }));
   fireEvent.change(screen.getByLabelText("Group name"), {
     target: { value: "Renamed root" },
   });
@@ -82,8 +85,9 @@ test("recursive group deletion warning is explicit and falls back to parent", as
       onChanged={onChanged}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
   fireEvent.click(
-    screen.getByRole("button", { name: "Permanently delete group" }),
+    screen.getByRole("menuitem", { name: "Permanently delete group" }),
   );
   expect(screen.getByText(/every descendant group/)).toBeVisible();
   expect(

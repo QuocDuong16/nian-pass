@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use vault_core::SecretString;
 
-use crate::dto::VaultSnapshotDto;
+use crate::dto::MobileVaultSnapshotDto;
 
 use super::{
     MobileError,
@@ -17,7 +17,7 @@ pub(super) async fn save(
     password: String,
     source: AndroidVaultSource,
     service: Arc<Mutex<MobileVaultService>>,
-) -> Result<VaultSnapshotDto, MobileError> {
+) -> Result<MobileVaultSnapshotDto, MobileError> {
     let operation = service
         .lock()
         .map_err(|_| MobileError::Internal)?
@@ -64,7 +64,7 @@ pub(super) async fn reload(
     password: String,
     source: AndroidVaultSource,
     service: Arc<Mutex<MobileVaultService>>,
-) -> Result<VaultSnapshotDto, MobileError> {
+) -> Result<MobileVaultSnapshotDto, MobileError> {
     let operation = service
         .lock()
         .map_err(|_| MobileError::Internal)?

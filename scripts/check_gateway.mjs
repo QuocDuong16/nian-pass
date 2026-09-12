@@ -45,9 +45,9 @@ export function gatewayWorkflowDependencyViolations(workflow) {
   if (job === "") return ["Forgejo gateway container job is missing"];
 
   const violations = [];
-  if (!/node_version="26\.7\.0"/.test(job)) {
+  if (!/node_version="26\.8\.1"/.test(job)) {
     violations.push(
-      "Forgejo gateway container job must install pinned Node.js 26.7.0",
+      "Forgejo gateway container job must install pinned Node.js 26.8.1",
     );
   }
   if (!/corepack@0\.35\.0/.test(job) || !/pnpm@11\.22\.0/.test(job)) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { MobileCommandError } from "../../lib/mobile";
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { MobileVaultSnapshotDto } from "../../types/mobile";
 import type { MobileApi } from "../../types/mobile";
 
 export type MobileSaveFlow =
@@ -17,7 +17,7 @@ export type MobileSaveFlow =
 interface Options {
   api: MobileApi;
   dirty: boolean;
-  onSnapshot: (snapshot: VaultSnapshotDto) => void;
+  onSnapshot: (snapshot: MobileVaultSnapshotDto) => void;
   onLocked: () => void;
   onLockPendingChange: (pending: boolean) => void;
   onLockFailure: () => void;

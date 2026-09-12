@@ -9,6 +9,7 @@ import type {
 } from "../../types/desktop";
 import { CustomFieldsEditor } from "./CustomFieldsEditor";
 import { EntryActions } from "./EntryActions";
+import { EntryTags } from "./EntryTags";
 import { Summary } from "./summary";
 import { useSecretReveal } from "./useSecretReveal";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
@@ -18,6 +19,7 @@ interface EntryReadViewProps {
   detail: EntryDetailDto;
   groups: GroupDto[];
   disabled: boolean;
+  mutationDisabled?: boolean;
   onEdit: () => void;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
@@ -34,6 +36,7 @@ export function EntryReadView({
   detail,
   groups,
   disabled,
+  mutationDisabled = false,
   onEdit,
   onSnapshot,
   onDeleted,
@@ -115,7 +118,11 @@ export function EntryReadView({
             />
           </h2>
         </div>
-        <button type="button" disabled={disabled} onClick={onEdit}>
+        <button
+          type="button"
+          disabled={disabled || mutationDisabled}
+          onClick={onEdit}
+        >
           Edit entry
         </button>
       </div>
@@ -148,6 +155,7 @@ export function EntryReadView({
           emptyLabel="Empty URL"
         />
       </section>
+      <EntryTags tags={detail.tags} />
       <section className="detail-field" aria-labelledby="password-label">
         <h3 id="password-label">Password</h3>
         <div className="secret-block">
@@ -212,7 +220,7 @@ export function EntryReadView({
         api={api}
         entryId={detail.id}
         fields={detail.customFields}
-        disabled={disabled}
+        disabled={disabled || mutationDisabled}
         onApplied={onSnapshot}
         onDraftChange={setCustomFieldDraft}
         onBusyChange={setCustomFieldBusy}
@@ -221,7 +229,7 @@ export function EntryReadView({
         api={api}
         detail={detail}
         groups={groups}
-        disabled={disabled}
+        disabled={disabled || mutationDisabled}
         onDeleted={onDeleted}
         onMoved={onMoved}
         onDraftChange={setEntryActionDraft}

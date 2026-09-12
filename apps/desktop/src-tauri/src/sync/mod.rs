@@ -658,9 +658,7 @@ mod tests {
                 .document_mut()
                 .set_entry_title(&EntryId::new(entry), "local upload")
                 .expect("mutate local");
-            service
-                .save(SecretString::new(PASSWORD.to_owned()))
-                .expect("save local");
+            service.save().expect("save local");
         }
         runtime
             .sync_now(
@@ -703,9 +701,7 @@ mod tests {
                 .document_mut()
                 .set_entry_title(&EntryId::new(entry), "local conflict")
                 .expect("mutate local");
-            service
-                .save(SecretString::new(PASSWORD.to_owned()))
-                .expect("save conflict");
+            service.save().expect("save conflict");
         }
         let remote_conflict = changed(&remote_next, "remote conflict");
         {

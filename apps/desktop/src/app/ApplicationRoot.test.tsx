@@ -40,7 +40,7 @@ test("desktop runtime mounts the existing desktop application", async () => {
   );
 
   expect(
-    await screen.findByRole("button", { name: "Choose KDBX file" }),
+    await screen.findByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
   await waitFor(() => {
     expect(windowLifecycle.onCloseRequested).toHaveBeenCalledOnce();

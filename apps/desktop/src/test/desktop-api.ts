@@ -5,6 +5,12 @@ import type { EntryDetailDto, VaultSnapshotDto } from "../types/desktop";
 
 export const mutationSnapshot: VaultSnapshotDto = {
   dirty: true,
+  fileName: "fixture.kdbx",
+  capabilities: {
+    formatVersion: "4.1",
+    writable: true,
+    writeRestriction: null,
+  },
   rootGroupId: "group-root",
   groups: [
     {
@@ -41,12 +47,16 @@ export const mutationDetail: EntryDetailDto = {
   url: { kind: "visible", value: "m4.3://a" },
   passwordPresent: true,
   notesPresent: true,
+  tags: [],
   customFields: [{ name: "Private", protection: "protected" }],
 };
 
 export function mutationApi(overrides: Partial<DesktopApi> = {}): DesktopApi {
   return {
     selectVault: vi.fn().mockResolvedValue({ fileName: "fixture.kdbx" }),
+    createVault: vi
+      .fn()
+      .mockResolvedValue({ ...mutationSnapshot, dirty: false }),
     unlockVault: vi
       .fn()
       .mockResolvedValue({ ...mutationSnapshot, dirty: false }),

@@ -1,15 +1,19 @@
 import type {
-  CreatedEntryDto,
-  CreatedGroupDto,
+  CreatedEntryBaseDto,
+  CreatedGroupBaseDto,
   CreateEntryRequest,
   EntryDetailDto,
   EntryId,
   GroupId,
   SetCustomFieldRequest,
   UpdateEntryRequest,
-  VaultSnapshotDto,
+  VaultCoreSnapshotDto,
   SummaryTextDto,
 } from "./desktop";
+
+export type MobileVaultSnapshotDto = VaultCoreSnapshotDto;
+export type MobileCreatedEntryDto = CreatedEntryBaseDto;
+export type MobileCreatedGroupDto = CreatedGroupBaseDto;
 
 export interface MobileSelectedVaultDto {
   fileName: string;
@@ -85,40 +89,43 @@ export interface MobileSecurityAcknowledgementDto {
 
 export interface MobileApi {
   selectVault: () => Promise<MobileSelectedVaultDto | null>;
-  unlockVault: (password: string) => Promise<VaultSnapshotDto>;
-  getVaultSnapshot: () => Promise<VaultSnapshotDto>;
+  unlockVault: (password: string) => Promise<MobileVaultSnapshotDto>;
+  getVaultSnapshot: () => Promise<MobileVaultSnapshotDto>;
   getEntryDetail: (entryId: EntryId) => Promise<EntryDetailDto>;
   revealEntryTitle: (entryId: EntryId) => Promise<string>;
   revealEntryUsername: (entryId: EntryId) => Promise<string>;
   revealEntryUrl: (entryId: EntryId) => Promise<string>;
   revealEntryNotes: (entryId: EntryId) => Promise<string>;
   revealEntryCustomField: (entryId: EntryId, name: string) => Promise<string>;
-  updateEntry: (request: UpdateEntryRequest) => Promise<VaultSnapshotDto>;
-  createEntry: (request: CreateEntryRequest) => Promise<CreatedEntryDto>;
-  deleteEntry: (entryId: EntryId) => Promise<VaultSnapshotDto>;
+  updateEntry: (request: UpdateEntryRequest) => Promise<MobileVaultSnapshotDto>;
+  createEntry: (request: CreateEntryRequest) => Promise<MobileCreatedEntryDto>;
+  deleteEntry: (entryId: EntryId) => Promise<MobileVaultSnapshotDto>;
   moveEntry: (
     entryId: EntryId,
     destinationGroupId: GroupId,
-  ) => Promise<VaultSnapshotDto>;
+  ) => Promise<MobileVaultSnapshotDto>;
   createGroup: (
     parentGroupId: GroupId,
     name: string,
-  ) => Promise<CreatedGroupDto>;
-  renameGroup: (groupId: GroupId, name: string) => Promise<VaultSnapshotDto>;
+  ) => Promise<MobileCreatedGroupDto>;
+  renameGroup: (
+    groupId: GroupId,
+    name: string,
+  ) => Promise<MobileVaultSnapshotDto>;
   moveGroup: (
     groupId: GroupId,
     destinationGroupId: GroupId,
-  ) => Promise<VaultSnapshotDto>;
-  deleteGroup: (groupId: GroupId) => Promise<VaultSnapshotDto>;
+  ) => Promise<MobileVaultSnapshotDto>;
+  deleteGroup: (groupId: GroupId) => Promise<MobileVaultSnapshotDto>;
   setEntryCustomField: (
     request: SetCustomFieldRequest,
-  ) => Promise<VaultSnapshotDto>;
+  ) => Promise<MobileVaultSnapshotDto>;
   deleteEntryCustomField: (
     entryId: EntryId,
     name: string,
-  ) => Promise<VaultSnapshotDto>;
-  saveVault: (password: string) => Promise<VaultSnapshotDto>;
-  reloadVault: (password: string) => Promise<VaultSnapshotDto>;
+  ) => Promise<MobileVaultSnapshotDto>;
+  saveVault: (password: string) => Promise<MobileVaultSnapshotDto>;
+  reloadVault: (password: string) => Promise<MobileVaultSnapshotDto>;
   lockVault: () => Promise<void>;
   discardChangesAndLock: () => Promise<void>;
   securityResume: () => Promise<MobileSecurityResumeDto>;

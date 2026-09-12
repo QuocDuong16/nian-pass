@@ -63,7 +63,7 @@ async function unlock(
   lifecycle: DesktopWindowLifecycle | null = null,
 ) {
   render(<App api={api} windowLifecycle={lifecycle} />);
-  fireEvent.click(screen.getByRole("button", { name: "Choose KDBX file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await act(async () => {
     await Promise.resolve();
   });
@@ -109,7 +109,7 @@ test("clean inactivity locks exactly once and activity resets the deadline", asy
   await expire();
   expect(lockVault).toHaveBeenCalledOnce();
   expect(
-    screen.getByRole("button", { name: "Choose KDBX file" }),
+    screen.getByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
 });
 
@@ -118,6 +118,7 @@ test("Never disables inactivity Lock while preserving the manual control", async
     unlockVault: vi.fn().mockResolvedValue(cleanSnapshot),
   });
   await unlock(api);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.change(screen.getByLabelText("Auto-lock timeout"), {
     target: { value: "never" },
   });
@@ -157,7 +158,7 @@ test("Unlock completion while backgrounded keeps the privacy shield", async () =
     unlockVault: vi.fn().mockReturnValue(pending.promise),
   });
   render(<App api={api} windowLifecycle={harness.lifecycle} />);
-  fireEvent.click(screen.getByRole("button", { name: "Choose KDBX file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await flush();
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: "demopass" },
@@ -211,10 +212,6 @@ test("Save completion while backgrounded never clears the privacy shield", async
   });
   await unlock(api, harness.lifecycle);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  fireEvent.change(screen.getByLabelText("Master password"), {
-    target: { value: "demopass" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   await harness.focus(false);
   expect(screen.getByText("Content hidden")).toBeVisible();
@@ -286,21 +283,14 @@ test("dirty idle Save-and-Lock saves first while failure and conflict never lock
   await unlock(api);
   await expire();
   fireEvent.click(screen.getByRole("button", { name: "Save and lock" }));
-  fireEvent.change(screen.getByLabelText("Master password"), {
-    target: { value: "first" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await flush();
   expect(
     screen.getByText(/in-memory changes are still available/),
   ).toBeVisible();
-  expect(screen.getByLabelText("Master password")).toHaveValue("");
+  expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
   expect(api.lockVault).not.toHaveBeenCalled();
 
-  fireEvent.change(screen.getByLabelText("Master password"), {
-    target: { value: "second" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Try Save again" }));
   await flush();
   expect(
     screen.getByRole("dialog", {
@@ -310,10 +300,6 @@ test("dirty idle Save-and-Lock saves first while failure and conflict never lock
   expect(api.lockVault).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   fireEvent.click(screen.getByRole("button", { name: "Save and lock" }));
-  fireEvent.change(screen.getByLabelText("Master password"), {
-    target: { value: "third" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await flush();
   expect(api.lockVault).toHaveBeenCalledOnce();
   expect(api.discardChangesAndLock).not.toHaveBeenCalled();
@@ -389,7 +375,7 @@ test("explicitly discarding a clean local draft permits one ordinary Lock", asyn
     unlockVault: vi.fn().mockResolvedValue(cleanSnapshot),
   });
   await unlock(api);
-  fireEvent.click(screen.getByRole("button", { name: "New entry" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ New entry" }));
   fireEvent.change(screen.getByLabelText("Title"), {
     target: { value: "unfinished" },
   });
@@ -410,7 +396,8 @@ test("group-operation input also participates in local-draft protection", async 
     unlockVault: vi.fn().mockResolvedValue(cleanSnapshot),
   });
   await unlock(api);
-  fireEvent.click(screen.getByRole("button", { name: "New group" }));
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "New group" }));
   fireEvent.change(screen.getByLabelText("Group name"), {
     target: { value: "unfinished group" },
   });
@@ -446,10 +433,6 @@ test("successful explicit Save after an elapsed deadline restarts inactivity", a
   });
   await unlock(api);
   fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
-  fireEvent.change(screen.getByLabelText("Master password"), {
-    target: { value: "demopass" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await expire();
   expect(screen.getByText("Securing your vault")).toBeVisible();
   await act(async () => {

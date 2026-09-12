@@ -40,6 +40,7 @@ export interface EntryDetailDto {
   url: SummaryTextDto;
   passwordPresent: boolean;
   notesPresent: boolean;
+  tags: string[];
   customFields: CustomFieldSummaryDto[];
 }
 
@@ -52,22 +53,45 @@ export interface LockResultDto {
   clipboard: "cleared" | "not_owned" | "clear_failed";
 }
 
-export interface VaultSnapshotDto {
+export interface VaultCoreSnapshotDto {
   dirty: boolean;
   rootGroupId: string;
   groups: GroupDto[];
   entries: EntrySummaryDto[];
 }
 
-export interface CreatedEntryDto {
-  createdEntryId: EntryId;
-  snapshot: VaultSnapshotDto;
+export type WriteRestriction =
+  | "unsupported_write_format"
+  | "unsupported_persistence_platform"
+  | "read_only_source";
+
+export interface VaultCapabilitiesDto {
+  formatVersion: string;
+  writable: boolean;
+  writeRestriction: WriteRestriction | null;
 }
 
-export interface CreatedGroupDto {
-  createdGroupId: GroupId;
-  snapshot: VaultSnapshotDto;
+export interface VaultSnapshotDto extends VaultCoreSnapshotDto {
+  fileName: string;
+  capabilities: VaultCapabilitiesDto;
 }
+
+export interface CreatedEntryBaseDto<
+  TSnapshot extends VaultCoreSnapshotDto = VaultCoreSnapshotDto,
+> {
+  createdEntryId: EntryId;
+  snapshot: TSnapshot;
+}
+
+export interface CreatedGroupBaseDto<
+  TSnapshot extends VaultCoreSnapshotDto = VaultCoreSnapshotDto,
+> {
+  createdGroupId: GroupId;
+  snapshot: TSnapshot;
+}
+
+export type CreatedEntryDto = CreatedEntryBaseDto<VaultSnapshotDto>;
+export type CreatedGroupDto = CreatedGroupBaseDto<VaultSnapshotDto>;
 
 export interface UpdateEntryRequest {
   entryId: EntryId;
@@ -104,6 +128,8 @@ export type DesktopErrorCode =
   | "no_vault_selected"
   | "unlock_failed"
   | "unsupported_vault"
+  | "vault_create_failed"
+  | "vault_already_exists"
   | "entry_not_found"
   | "group_not_found"
   | "invalid_request"
@@ -114,6 +140,9 @@ export type DesktopErrorCode =
   | "save_failed"
   | "save_authentication_failed"
   | "save_uncertain"
+  | "unsupported_write_format"
+  | "unsupported_persistence_platform"
+  | "read_only_source"
   | "external_change"
   | "reload_failed"
   | "clipboard_failed"

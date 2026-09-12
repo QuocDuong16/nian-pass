@@ -10,7 +10,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { MobileCommandError } from "../../lib/mobile";
 import { createMobileApi, mobileSnapshot } from "../../test/mobile-api";
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { MobileVaultSnapshotDto } from "../../types/mobile";
 import { MobileVaultApp } from "./MobileVaultApp";
 
 afterEach(() => {
@@ -18,7 +18,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const dirtySnapshot: VaultSnapshotDto = { ...mobileSnapshot, dirty: true };
+const dirtySnapshot: MobileVaultSnapshotDto = {
+  ...mobileSnapshot,
+  dirty: true,
+};
 
 async function unlockDirty(overrides = {}) {
   const api = createMobileApi({
@@ -76,10 +79,10 @@ test("clean Lock stays unlocked and disables actions until release failure settl
 });
 
 test("Save password clears before deferred provider transaction resolves", async () => {
-  let resolveSave: ((snapshot: VaultSnapshotDto) => void) | undefined;
+  let resolveSave: ((snapshot: MobileVaultSnapshotDto) => void) | undefined;
   const saveVault = vi.fn().mockImplementation(
     () =>
-      new Promise<VaultSnapshotDto>((resolve) => {
+      new Promise<MobileVaultSnapshotDto>((resolve) => {
         resolveSave = resolve;
       }),
   );

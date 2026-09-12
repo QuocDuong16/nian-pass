@@ -9,15 +9,21 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 
 import { createMobileApi, mobileSnapshot } from "../../test/mobile-api";
-import type { VaultSnapshotDto } from "../../types/desktop";
-import type { MobileApi, MobileSecurityResumeDto } from "../../types/mobile";
+import type {
+  MobileApi,
+  MobileSecurityResumeDto,
+  MobileVaultSnapshotDto,
+} from "../../types/mobile";
 import { MobileVaultApp } from "./MobileVaultApp";
 import {
   DEFAULT_MOBILE_AUTO_LOCK_MS,
   mobileElapsedExpired,
 } from "./useMobileIdleSecurity";
 
-const dirtySnapshot: VaultSnapshotDto = { ...mobileSnapshot, dirty: true };
+const dirtySnapshot: MobileVaultSnapshotDto = {
+  ...mobileSnapshot,
+  dirty: true,
+};
 
 interface SecurityController {
   api: MobileApi;
@@ -30,7 +36,7 @@ interface SecurityController {
 }
 
 function securityController(
-  snapshot: VaultSnapshotDto = mobileSnapshot,
+  snapshot: MobileVaultSnapshotDto = mobileSnapshot,
   overrides: Partial<MobileApi> = {},
 ): SecurityController {
   let hiddenValue = false;
@@ -287,11 +293,11 @@ test("failed lifecycle Lock remains shielded with a generic retry state", async 
 });
 
 test("stale unlock completion after background cannot expose the vault", async () => {
-  let resolveUnlock: ((snapshot: VaultSnapshotDto) => void) | undefined;
+  let resolveUnlock: ((snapshot: MobileVaultSnapshotDto) => void) | undefined;
   const controller = securityController(mobileSnapshot, {
     unlockVault: vi.fn().mockImplementation(
       () =>
-        new Promise<VaultSnapshotDto>((resolve) => {
+        new Promise<MobileVaultSnapshotDto>((resolve) => {
           resolveUnlock = resolve;
         }),
     ),
@@ -330,10 +336,10 @@ test("pending operation keeps the resume shield until real state settles", async
 });
 
 test("Save pending across background reconciles once without autosave or stale reveal", async () => {
-  let resolveSave: ((snapshot: VaultSnapshotDto) => void) | undefined;
+  let resolveSave: ((snapshot: MobileVaultSnapshotDto) => void) | undefined;
   const saveVault = vi.fn().mockImplementation(
     () =>
-      new Promise<VaultSnapshotDto>((resolve) => {
+      new Promise<MobileVaultSnapshotDto>((resolve) => {
         resolveSave = resolve;
       }),
   );
@@ -423,10 +429,10 @@ test("security Save and lock opens a fresh credential prompt over hidden vault c
 });
 
 test("mutation result settling after background cannot dismiss newer dirty attention", async () => {
-  let resolveMutation: ((snapshot: VaultSnapshotDto) => void) | undefined;
+  let resolveMutation: ((snapshot: MobileVaultSnapshotDto) => void) | undefined;
   const updateEntry = vi.fn().mockImplementation(
     () =>
-      new Promise<VaultSnapshotDto>((resolve) => {
+      new Promise<MobileVaultSnapshotDto>((resolve) => {
         resolveMutation = resolve;
       }),
   );

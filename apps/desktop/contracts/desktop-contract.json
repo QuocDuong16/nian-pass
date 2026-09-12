@@ -17,14 +17,27 @@
       {
         "id": "entry-example",
         "groupId": "group-root",
-        "title": { "kind": "visible", "value": "Example" },
-        "username": { "kind": "missing" },
-        "url": { "kind": "protected" },
+        "title": {
+          "kind": "visible",
+          "value": "Example"
+        },
+        "username": {
+          "kind": "missing"
+        },
+        "url": {
+          "kind": "protected"
+        },
         "passwordPresent": true,
         "notesPresent": false,
         "tags": ["test"]
       }
-    ]
+    ],
+    "fileName": "example.kdbx",
+    "capabilities": {
+      "formatVersion": "4.1",
+      "writable": true,
+      "writeRestriction": null
+    }
   },
   "createdEntry": {
     "createdEntryId": "entry-created",
@@ -43,14 +56,27 @@
         {
           "id": "entry-created",
           "groupId": "group-root",
-          "title": { "kind": "visible", "value": "Created" },
-          "username": { "kind": "missing" },
-          "url": { "kind": "missing" },
+          "title": {
+            "kind": "visible",
+            "value": "Created"
+          },
+          "username": {
+            "kind": "missing"
+          },
+          "url": {
+            "kind": "missing"
+          },
           "passwordPresent": false,
           "notesPresent": false,
           "tags": []
         }
-      ]
+      ],
+      "fileName": "example.kdbx",
+      "capabilities": {
+        "formatVersion": "4.1",
+        "writable": true,
+        "writeRestriction": null
+      }
     }
   },
   "createdGroup": {
@@ -72,27 +98,63 @@
           "entryIds": []
         }
       ],
-      "entries": []
+      "entries": [],
+      "fileName": "example.kdbx",
+      "capabilities": {
+        "formatVersion": "4.1",
+        "writable": true,
+        "writeRestriction": null
+      }
     }
   },
-  "closePolicies": [{ "policy": "allow" }, { "policy": "confirm_discard" }],
+  "closePolicies": [
+    {
+      "policy": "allow"
+    },
+    {
+      "policy": "confirm_discard"
+    }
+  ],
   "entryDetail": {
     "id": "entry-example",
-    "title": { "kind": "visible", "value": "Example" },
-    "username": { "kind": "protected" },
-    "url": { "kind": "missing" },
+    "title": {
+      "kind": "visible",
+      "value": "Example"
+    },
+    "username": {
+      "kind": "protected"
+    },
+    "url": {
+      "kind": "missing"
+    },
     "passwordPresent": true,
     "notesPresent": true,
     "customFields": [
-      { "name": "Recovery hint", "protection": "protected" },
-      { "name": "Region", "protection": "unprotected" }
-    ]
+      {
+        "name": "Recovery hint",
+        "protection": "protected"
+      },
+      {
+        "name": "Region",
+        "protection": "unprotected"
+      }
+    ],
+    "tags": ["test"]
   },
-  "clipboardReceipt": { "copied": true, "expiresInMs": 30000 },
+  "clipboardReceipt": {
+    "copied": true,
+    "expiresInMs": 30000
+  },
   "lockResults": [
-    { "clipboard": "cleared" },
-    { "clipboard": "not_owned" },
-    { "clipboard": "clear_failed" }
+    {
+      "clipboard": "cleared"
+    },
+    {
+      "clipboard": "not_owned"
+    },
+    {
+      "clipboard": "clear_failed"
+    }
   ],
   "errorCodes": [
     "already_unlocked",
@@ -124,6 +186,11 @@
     "sync_state_corrupt",
     "sync_unsupported_provider",
     "sync_unsafe_provider",
-    "sync_credentials_required"
+    "sync_credentials_required",
+    "vault_create_failed",
+    "vault_already_exists",
+    "unsupported_write_format",
+    "unsupported_persistence_platform",
+    "read_only_source"
   ]
 }

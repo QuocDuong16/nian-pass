@@ -112,6 +112,7 @@
     "url": { "kind": "protected" },
     "passwordPresent": true,
     "notesPresent": true,
+    "tags": [],
     "customFields": [{ "name": "Account type", "protection": "unprotected" }]
   },
   "autofillStatus": {

@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { DesktopCommandError, type DesktopApi } from "../../lib/desktop";
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { DesktopErrorCode, VaultSnapshotDto } from "../../types/desktop";
 
 export type SaveIntent = "save" | "lock" | "close" | "idle_lock";
 
 export type SaveFlowState =
   | { kind: "closed" }
-  | { kind: "credential"; intent: SaveIntent; error: string | null }
   | { kind: "saving"; intent: SaveIntent }
+  | { kind: "save_error"; intent: SaveIntent; error: string }
   | { kind: "external_conflict" }
   | { kind: "reload_credential"; error: string | null }
   | { kind: "reloading" };
@@ -20,6 +20,25 @@ interface SaveFlowOptions {
   onReloaded: (snapshot: VaultSnapshotDto) => void;
   onSaveBegin: () => void;
   onSaved: (intent: SaveIntent) => Promise<void>;
+}
+
+function saveFailureMessage(code: DesktopErrorCode): string {
+  if (code === "unsupported_write_format") {
+    return "This KDBX version is read-only in Nian Pass and cannot be saved.";
+  }
+  if (code === "unsupported_persistence_platform") {
+    return "Nian Pass cannot safely persist vault changes on this platform.";
+  }
+  if (code === "read_only_source") {
+    return "This vault source is read-only. Nian Pass did not overwrite it.";
+  }
+  if (code === "save_authentication_failed") {
+    return "The unlocked session can no longer authenticate this vault for saving. Lock and reopen the vault before editing further.";
+  }
+  if (code === "operation_in_progress") {
+    return "Another vault operation is still running. Try Save again after it finishes.";
+  }
+  return "Nian Pass could not safely save the vault. Your in-memory changes are still available.";
 }
 
 export function useSaveFlow({
@@ -44,37 +63,17 @@ export function useSaveFlow({
     };
   }, [status]);
 
-  const start = (intent: SaveIntent) => {
-    if (flow.kind !== "closed" || (intent === "save" && !dirty)) return;
-    setPassword("");
-    setFlow({ kind: "credential", intent, error: null });
-  };
-
-  const cancel = () => {
-    setPassword("");
-    setFlow({ kind: "closed" });
-    setStatus("idle");
-  };
-
-  const clearPassword = useCallback(() => {
-    setPassword("");
-  }, []);
-
-  const submitSave = async () => {
-    if (flow.kind !== "credential" || password === "") return;
-    const intent = flow.intent;
-    const suppliedPassword = password;
-    setPassword("");
+  const runSave = async (intent: SaveIntent) => {
     setFlow({ kind: "saving", intent });
     setStatus("saving");
     onSaveBegin();
     try {
-      const snapshot = await api.saveVault(suppliedPassword);
+      const snapshot = await api.saveVault();
       onSnapshot(snapshot);
       setFlow({ kind: "closed" });
       setStatus("saved");
       await onSaved(intent);
-    } catch (error) {
+    } catch (error: unknown) {
       setStatus("idle");
       if (
         error instanceof DesktopCommandError &&
@@ -93,25 +92,40 @@ export function useSaveFlow({
           // The stable save error remains authoritative when refresh also fails.
         }
         setFlow({
-          kind: "credential",
+          kind: "save_error",
           intent,
           error:
-            "The vault may have been written, but Nian Pass could not verify the final on-disk state. Your unlocked session remains available. Review the vault before trying again.",
+            "The vault may have been written, but Nian Pass could not verify the final on-disk state. Review the vault before trying again.",
         });
         return;
       }
-      const authenticationFailed =
-        error instanceof DesktopCommandError &&
-        error.code === "save_authentication_failed";
-      setFlow({
-        kind: "credential",
-        intent,
-        error: authenticationFailed
-          ? "Could not save the vault. Check the master password and try again."
-          : "Could not save the vault. Your in-memory changes are still available.",
-      });
+      const code =
+        error instanceof DesktopCommandError ? error.code : "internal";
+      setFlow({ kind: "save_error", intent, error: saveFailureMessage(code) });
     }
   };
+
+  const start = (intent: SaveIntent) => {
+    if (flow.kind !== "closed" || (intent === "save" && !dirty)) return;
+    setPassword("");
+    void runSave(intent);
+  };
+
+  const retrySave = () => {
+    if (flow.kind !== "save_error") return;
+    const intent = flow.intent;
+    void runSave(intent);
+  };
+
+  const cancel = () => {
+    setPassword("");
+    setFlow({ kind: "closed" });
+    setStatus("idle");
+  };
+
+  const clearPassword = useCallback(() => {
+    setPassword("");
+  }, []);
 
   const beginReload = () => {
     if (flow.kind !== "external_conflict") return;
@@ -151,9 +165,9 @@ export function useSaveFlow({
     saving: flow.kind === "saving",
     busy: flow.kind === "saving" || flow.kind === "reloading",
     start,
+    retrySave,
     cancel,
     clearPassword,
-    submitSave,
     beginReload,
     cancelReload,
     submitReload,

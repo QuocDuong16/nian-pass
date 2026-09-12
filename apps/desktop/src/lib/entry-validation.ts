@@ -29,11 +29,13 @@ export function parseEntryDetail(value: unknown): EntryDetailDto {
     "url",
     "passwordPresent",
     "notesPresent",
+    "tags",
     "customFields",
   ]);
   if (
     typeof object["passwordPresent"] !== "boolean" ||
     typeof object["notesPresent"] !== "boolean" ||
+    !Array.isArray(object["tags"]) ||
     !Array.isArray(object["customFields"])
   ) {
     return invalidContract();
@@ -45,6 +47,7 @@ export function parseEntryDetail(value: unknown): EntryDetailDto {
     url: parseSummaryText(object["url"]),
     passwordPresent: object["passwordPresent"],
     notesPresent: object["notesPresent"],
+    tags: object["tags"].map(nonEmptyString),
     customFields: object["customFields"].map(parseCustomField),
   };
 }

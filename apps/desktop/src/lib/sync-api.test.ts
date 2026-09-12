@@ -24,6 +24,12 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
       conflict: null,
       snapshot: {
         dirty: false,
+        fileName: "fixture.kdbx",
+        capabilities: {
+          formatVersion: "4.1",
+          writable: true,
+          writeRestriction: null,
+        },
         rootGroupId: "root",
         groups: [{ id: "root", name: "Root", childGroupIds: [], entryIds: [] }],
         entries: [],
@@ -34,6 +40,12 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
       conflict: null,
       snapshot: {
         dirty: false,
+        fileName: "fixture.kdbx",
+        capabilities: {
+          formatVersion: "4.1",
+          writable: true,
+          writeRestriction: null,
+        },
         rootGroupId: "root",
         groups: [{ id: "root", name: "Root", childGroupIds: [], entryIds: [] }],
         entries: [],

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { MobileVaultSnapshotDto } from "../../types/mobile";
 import type {
   MobileApi,
   MobileAutofillRequestDto,
@@ -11,7 +11,7 @@ interface Options {
   api: MobileApi;
   enabled: boolean;
   onSelected: (selected: MobileSelectedVaultDto) => void;
-  onUnlocked: (snapshot: VaultSnapshotDto) => void;
+  onUnlocked: (snapshot: MobileVaultSnapshotDto) => void;
 }
 
 export function useMobileAutofillLaunch({

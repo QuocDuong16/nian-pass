@@ -237,7 +237,7 @@ export default function App({
           password={save.password}
           onPassword={save.setPassword}
           onCancel={save.cancel}
-          onSave={() => void save.submitSave()}
+          onRetrySave={save.retrySave}
           onReloadChoice={save.beginReload}
           onReloadCancel={save.cancelReload}
           onReload={() => void save.submitReload()}

@@ -1,28 +1,33 @@
 import { useState } from "react";
 
-import type { DesktopApi } from "../../lib/desktop";
 import type {
   EntryDetailDto,
   GroupDto,
   GroupId,
+  VaultCoreSnapshotDto,
   VaultSnapshotDto,
 } from "../../types/desktop";
+import type { EntryActionsApi } from "../../types/mutation-api";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
 type Action = "move" | "delete";
 
-interface EntryActionsProps {
-  api: Pick<DesktopApi, "deleteEntry" | "moveEntry">;
+interface EntryActionsProps<
+  TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
+> {
+  api: EntryActionsApi<TSnapshot>;
   detail: EntryDetailDto;
   groups: GroupDto[];
   disabled: boolean;
-  onMoved: (snapshot: VaultSnapshotDto, destination: GroupId) => void;
-  onDeleted: (snapshot: VaultSnapshotDto) => void;
+  onMoved: (snapshot: TSnapshot, destination: GroupId) => void;
+  onDeleted: (snapshot: TSnapshot) => void;
   onDraftChange?: (active: boolean) => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
-export function EntryActions({
+export function EntryActions<
+  TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
+>({
   api,
   detail,
   groups,
@@ -31,7 +36,7 @@ export function EntryActions({
   onDeleted,
   onDraftChange,
   onBusyChange,
-}: EntryActionsProps) {
+}: EntryActionsProps<TSnapshot>) {
   const [action, setAction] = useState<Action | null>(null);
   const [destination, setDestination] = useState(groups[0]?.id ?? "");
   const [busy, setBusy] = useState(false);

@@ -101,7 +101,7 @@ test("Forgejo gateway smoke installs pinned source-policy dependencies", () => {
     runs-on: docker
     steps:
       - run: |
-          node_version="26.7.0"
+          node_version="26.8.1"
           npm install --global corepack@0.35.0
           corepack install --global pnpm@11.22.0
       - run: make scripts-install

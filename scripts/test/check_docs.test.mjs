@@ -124,11 +124,11 @@ function fixture(t) {
     "Session control owns Lock. Vault mutation is Rust-owned. Browser approval is opaque. Android remains native.\n",
   );
   write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
-  write(root, ".node-version", "26.7.0\n");
+  write(root, ".node-version", "26.8.1\n");
   write(
     root,
     "package.json",
-    '{"engines":{"node":"26.7.0"},"packageManager":"pnpm@11.22.0"}\n',
+    '{"engines":{"node":"26.8.1"},"packageManager":"pnpm@11.22.0"}\n',
   );
   write(
     root,
@@ -136,7 +136,7 @@ function fixture(t) {
     "jobs:\n" +
       "  desktop-frontend:\n" +
       "    container:\n" +
-      "      image: node:26.7.0-bookworm\n" +
+      "      image: node:26.8.1-bookworm\n" +
       "    steps:\n" +
       "      - run: make browser-source-check browser-extension-check\n" +
       "  desktop-native-check:\n" +
@@ -181,7 +181,7 @@ test("missing explicit Corepack bootstrap is rejected", (t) => {
     "jobs:\n" +
       "  desktop-frontend:\n" +
       "    container:\n" +
-      "      image: node:26.7.0-bookworm\n" +
+      "      image: node:26.8.1-bookworm\n" +
       "  desktop-native-check:\n" +
       "    container:\n" +
       "      image: rust:1.98.0-bookworm\n" +

@@ -36,7 +36,7 @@ test("Save is unavailable while an entry or creation draft is open", async () =>
   const save = screen.getByRole("button", { name: "Save vault" });
   expect(save).toBeEnabled();
 
-  fireEvent.click(screen.getByRole("button", { name: "New entry" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ New entry" }));
   expect(save).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(save).toBeEnabled();
@@ -50,7 +50,7 @@ test("Save is unavailable while an entry or creation draft is open", async () =>
 
 test("create dialog clears local drafts on Cancel and selects a successful creation", async () => {
   const { api, onSnapshot } = renderView();
-  fireEvent.click(screen.getByRole("button", { name: "New entry" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ New entry" }));
   fireEvent.change(screen.getByLabelText("Username"), {
     target: { value: "draft-user" },
   });
@@ -65,7 +65,7 @@ test("create dialog clears local drafts on Cancel and selects a successful creat
   expect(api.createEntry).not.toHaveBeenCalled();
   expect(screen.queryByText("draft secret notes")).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "New entry" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ New entry" }));
   fireEvent.change(screen.getByLabelText("Title"), {
     target: { value: "Created" },
   });
@@ -80,7 +80,8 @@ test("create dialog clears local drafts on Cancel and selects a successful creat
 
 test("parent selection callbacks follow canonical group, move, and delete results", async () => {
   const { api, onSnapshot } = renderView();
-  fireEvent.click(screen.getByRole("button", { name: "New group" }));
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "New group" }));
   fireEvent.change(screen.getByLabelText("Group name"), {
     target: { value: "Child two" },
   });
@@ -118,3 +119,88 @@ test("entry deletion clears the parent selection after Rust succeeds", async () 
     screen.getByText("Select an entry to view its safe details."),
   ).toBeVisible();
 });
+
+test("global search matches safe metadata and Escape restores the selected group", () => {
+  const firstEntry = mutationSnapshot.entries[0];
+  if (firstEntry === undefined) throw new Error("fixture entry missing");
+  const snapshot = {
+    ...mutationSnapshot,
+    entries: [
+      {
+        ...firstEntry,
+        title: { kind: "protected" as const },
+        tags: ["Finance"],
+      },
+    ],
+  };
+  render(
+    <UnlockedView
+      api={mutationApi()}
+      snapshot={snapshot}
+      disabled={false}
+      saveStatus="idle"
+      lockError={null}
+      onSnapshot={vi.fn()}
+      onSave={vi.fn()}
+      onLock={vi.fn()}
+    />,
+  );
+
+  const search = screen.getByRole("searchbox", { name: "Search vault" });
+  fireEvent.change(search, { target: { value: "finance" } });
+  expect(screen.getByRole("heading", { name: "Search results" })).toBeVisible();
+  expect(screen.getByText("1 results")).toBeVisible();
+
+  fireEvent.change(search, { target: { value: "root" } });
+  expect(screen.getByText("1 results")).toBeVisible();
+  fireEvent.keyDown(search, { key: "Escape" });
+  expect(screen.getByRole("heading", { name: "Root" })).toBeVisible();
+});
+
+test("Save shortcut runs only when the vault surface is actionable", () => {
+  const { onSave } = renderView();
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  expect(onSave).toHaveBeenCalledOnce();
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(screen.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  fireEvent.keyDown(window, { key: "S", metaKey: true });
+  expect(onSave).toHaveBeenCalledOnce();
+});
+
+test.each([
+  ["unsupported_write_format", "Read-only in Nian Pass"],
+  ["unsupported_persistence_platform", "Read-only on this platform"],
+  ["read_only_source", "Read-only source"],
+] as const)(
+  "%s capability disables mutation and explains why",
+  (restriction, message) => {
+    const snapshot = {
+      ...mutationSnapshot,
+      capabilities: {
+        ...mutationSnapshot.capabilities,
+        writable: false,
+        writeRestriction: restriction,
+      },
+    };
+    render(
+      <UnlockedView
+        api={mutationApi()}
+        snapshot={snapshot}
+        disabled={false}
+        saveStatus="idle"
+        lockError={null}
+        onSnapshot={vi.fn()}
+        onSave={vi.fn()}
+        onLock={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(new RegExp(message, "i"))).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "+ New entry" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Group actions" }),
+    ).toBeDisabled();
+  },
+);

@@ -19,7 +19,7 @@ Early development. The project is not ready for real vaults.
 
 ## Current milestone
 
-M8 — Security Hardening / Release Engineering — DONE
+M8 — Security Hardening / Release Engineering — IN PROGRESS
 
 `v0.1.0-rc.10` is the accepted M8 release candidate. It completed the reviewed
 GitHub production release path: exact immutable source/tag binding, Forgejo
@@ -30,10 +30,10 @@ release manifest, SHA256SUMS, draft-only tag run, and the publish-only manual
 transaction. Publication preserved the numeric GitHub Release identity, tag,
 commit, prerelease classification, and reviewed payload bytes.
 
-The accepted RC10 completed M8. The current source is promoted to final `0.1.0`
-and is ready for the normal Forgejo review, immutable `v0.1.0` tag, GitHub draft
-build, artifact review, and explicit publication transaction. The stable tag and
-stable GitHub Release have not been created.
+RC10 is accepted release-candidate evidence, but M8 remains in progress until the
+final source generation completes the normal Forgejo review, immutable `v0.1.0`
+tag, GitHub draft build, artifact review, and explicit publication transaction.
+The stable tag and stable GitHub Release have not been created.
 
 M8 now provides pinned release inputs, a single `VERSION`, clean-tree and tag
 consistency gates, hardened release profiles/CSP/filesystem opens, deterministic
@@ -192,12 +192,12 @@ M6   Browser Extension Foundation               DONE
 M6.5 Browser Native Messaging / Desktop Integration DONE
 M7   BYO-cloud Sync Providers                   DONE
 M7.5 Self-hosted Sync Gateway                   DONE
-M8   Security Hardening / Release Engineering  DONE
+M8   Security Hardening / Release Engineering  IN PROGRESS
 M9+  Apple Platform Resume                     DEFERRED
 ```
 
-M8 is complete based on accepted RC10; stable publication remains the next
-release operation for the final source generation. M6.5 uses standard browser
+M8 remains in progress after accepted RC10 evidence; stable publication remains
+the final release operation for the final source generation. M6.5 uses standard browser
 Native Messaging transport but does not implement or claim compatibility with
 the KeePassXC-Browser wire protocol. It requires neither `keepassxc-proxy` nor a
 KeePassXC executable. Chromium development uses the committed public Manifest
@@ -390,10 +390,9 @@ recorded in the compatibility matrix.
 
 There is no CLI mutation command and no raw database escape hatch. Product-level
 recycle-bin behavior, notes editing, TOTP, attachment/icon UI, expiry editing,
-history restore, duplicate, bulk operations, search, Android network sync,
+history restore, duplicate, bulk operations, Android network sync,
 direct cloud OAuth providers, and server/gateway features remain out of scope.
-KDBX 3.1 and 4.0 writing are deliberately rejected rather than upgraded or
-rewritten.
+KDBX 3.1 and 4.0 open read-only on desktop: write capability is identified immediately after unlock, mutation and Save controls are disabled, and backend mutation commands reject the session before editing. KDBX 4.1 is the only currently writable local format; unsupported formats are never silently upgraded or rewritten.
 
 The deletion APIs remain explicitly named `permanently_delete_entry` and
 `permanently_delete_group`: they remove objects from the KDBX tree and create

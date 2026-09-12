@@ -17,9 +17,9 @@ import {
 import { parseEntryDetail, parseSecretString } from "./entry-validation";
 import {
   nonEmptyString,
-  parseCreatedEntry,
-  parseCreatedGroup,
-  parseVaultSnapshot,
+  parseCreatedCoreEntry,
+  parseCreatedCoreGroup,
+  parseVaultCoreSnapshot,
   record,
 } from "./validation";
 
@@ -122,8 +122,8 @@ export const mobileApi: MobileApi = {
       value === null ? null : parseMobileSelection(value),
     ),
   unlockVault: (password) =>
-    call("mobile_unlock_vault", parseVaultSnapshot, { password }),
-  getVaultSnapshot: () => call("mobile_vault_snapshot", parseVaultSnapshot),
+    call("mobile_unlock_vault", parseVaultCoreSnapshot, { password }),
+  getVaultSnapshot: () => call("mobile_vault_snapshot", parseVaultCoreSnapshot),
   getEntryDetail: (entryId) =>
     call("mobile_entry_detail", parseEntryDetail, { entryId }),
   revealEntryTitle: (entryId) =>
@@ -140,40 +140,40 @@ export const mobileApi: MobileApi = {
       name,
     }),
   updateEntry: (request) =>
-    call("mobile_update_entry", parseVaultSnapshot, { request }),
+    call("mobile_update_entry", parseVaultCoreSnapshot, { request }),
   createEntry: (request) =>
-    call("mobile_create_entry", parseCreatedEntry, { request }),
+    call("mobile_create_entry", parseCreatedCoreEntry, { request }),
   deleteEntry: (entryId) =>
-    call("mobile_delete_entry", parseVaultSnapshot, { entryId }),
+    call("mobile_delete_entry", parseVaultCoreSnapshot, { entryId }),
   moveEntry: (entryId, destinationGroupId) =>
-    call("mobile_move_entry", parseVaultSnapshot, {
+    call("mobile_move_entry", parseVaultCoreSnapshot, {
       request: { entryId, destinationGroupId },
     }),
   createGroup: (parentGroupId, name) =>
-    call("mobile_create_group", parseCreatedGroup, {
+    call("mobile_create_group", parseCreatedCoreGroup, {
       request: { parentGroupId, name },
     }),
   renameGroup: (groupId, name) =>
-    call("mobile_rename_group", parseVaultSnapshot, {
+    call("mobile_rename_group", parseVaultCoreSnapshot, {
       request: { groupId, name },
     }),
   moveGroup: (groupId, destinationGroupId) =>
-    call("mobile_move_group", parseVaultSnapshot, {
+    call("mobile_move_group", parseVaultCoreSnapshot, {
       request: { groupId, destinationGroupId },
     }),
   deleteGroup: (groupId) =>
-    call("mobile_delete_group", parseVaultSnapshot, { groupId }),
+    call("mobile_delete_group", parseVaultCoreSnapshot, { groupId }),
   setEntryCustomField: (request) =>
-    call("mobile_set_entry_custom_field", parseVaultSnapshot, { request }),
+    call("mobile_set_entry_custom_field", parseVaultCoreSnapshot, { request }),
   deleteEntryCustomField: (entryId, name) =>
-    call("mobile_delete_entry_custom_field", parseVaultSnapshot, {
+    call("mobile_delete_entry_custom_field", parseVaultCoreSnapshot, {
       entryId,
       name,
     }),
   saveVault: (password) =>
-    call("mobile_save_vault", parseVaultSnapshot, { password }),
+    call("mobile_save_vault", parseVaultCoreSnapshot, { password }),
   reloadVault: (password) =>
-    call("mobile_reload_vault", parseVaultSnapshot, { password }),
+    call("mobile_reload_vault", parseVaultCoreSnapshot, { password }),
   lockVault: () => call("mobile_lock_vault", parseVoid),
   discardChangesAndLock: () =>
     call("mobile_discard_changes_and_lock", parseVoid),

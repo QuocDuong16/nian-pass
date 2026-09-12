@@ -1,11 +1,9 @@
 import { useState, type SyntheticEvent } from "react";
 
-import { DesktopCommandError, type DesktopApi } from "../../lib/desktop";
-import type {
-  DesktopErrorCode,
-  SelectedVaultDto,
-  VaultSnapshotDto,
-} from "../../types/desktop";
+import type { DesktopApi } from "../../lib/desktop";
+import type { SelectedVaultDto, VaultSnapshotDto } from "../../types/desktop";
+import { LockedCreateForm } from "./LockedCreateForm";
+import { lockedErrorCode, lockedOperationMessage } from "./locked-errors";
 
 interface LockedViewProps {
   api: DesktopApi;
@@ -13,85 +11,93 @@ interface LockedViewProps {
   onUnlocked: (snapshot: VaultSnapshotDto) => void;
 }
 
-function unlockMessage(code: DesktopErrorCode): string {
-  switch (code) {
-    case "unlock_failed":
-      return "Could not unlock this vault. Check the password and try again.";
-    case "unsupported_vault":
-      return "This file is not a supported KDBX vault.";
-    case "already_unlocked":
-      return "Lock the current vault before opening another one.";
-    case "entry_not_found":
-    case "group_not_found":
-    case "invalid_request":
-    case "invalid_move":
-    case "reserved_field":
-    case "secret_unavailable":
-    case "unsaved_changes":
-    case "save_failed":
-    case "save_authentication_failed":
-    case "save_uncertain":
-    case "external_change":
-    case "reload_failed":
-    case "clipboard_failed":
-    case "locked":
-    case "no_vault_selected":
-    case "internal":
-    case "operation_in_progress":
-    case "sync_failed":
-    case "sync_remote_changed":
-    case "sync_local_changed":
-    case "sync_local_changed_during_recovery":
-    case "sync_recovery_required":
-    case "sync_state_unsupported":
-    case "sync_state_corrupt":
-    case "sync_unsupported_provider":
-    case "sync_unsafe_provider":
-    case "sync_credentials_required":
-      return "Nian Pass could not open the vault. Try again.";
-  }
-}
-
-function errorCode(error: unknown): DesktopErrorCode {
-  return error instanceof DesktopCommandError ? error.code : "internal";
-}
+type LockedState =
+  | { kind: "home" }
+  | { kind: "credential_required"; selection: SelectedVaultDto }
+  | { kind: "creating" };
 
 export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
-  const [selection, setSelection] = useState<SelectedVaultDto | null>(null);
+  const [state, setState] = useState<LockedState>({ kind: "home" });
   const [password, setPassword] = useState("");
-  const [unlocking, setUnlocking] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [vaultName, setVaultName] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const resetSensitiveFields = () => {
+    setPassword("");
+    setConfirmPassword("");
+  };
+
+  const goHome = () => {
+    if (busy) return;
+    resetSensitiveFields();
+    setVaultName("");
+    setError(null);
+    setState({ kind: "home" });
+  };
+
   const chooseVault = async () => {
+    if (busy) return;
     setError(null);
     try {
       const selected = await api.selectVault();
       if (selected !== null) {
-        setSelection(selected);
-        setPassword("");
+        resetSensitiveFields();
+        setState({ kind: "credential_required", selection: selected });
       }
     } catch (cause: unknown) {
-      setError(unlockMessage(errorCode(cause)));
+      setError(lockedOperationMessage(lockedErrorCode(cause)));
     }
   };
 
-  const submit = async (event: SyntheticEvent<HTMLFormElement>) => {
+  const submitUnlock = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (selection === null || password === "" || unlocking) {
-      return;
-    }
-
-    setUnlocking(true);
+    if (state.kind !== "credential_required" || password === "" || busy) return;
+    setBusy(true);
     setError(null);
     try {
       const snapshot = await api.unlockVault(password);
-      setPassword("");
+      resetSensitiveFields();
       onUnlocked(snapshot);
     } catch (cause: unknown) {
       setPassword("");
-      setError(unlockMessage(errorCode(cause)));
+      setError(lockedOperationMessage(lockedErrorCode(cause)));
     } finally {
-      setUnlocking(false);
+      setBusy(false);
+    }
+  };
+
+  const submitCreate = async (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = vaultName.trim();
+    if (state.kind !== "creating" || busy) return;
+    if (name === "") {
+      setError("Enter a vault name.");
+      return;
+    }
+    if (password === "") {
+      setError("Master password cannot be empty.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Master password confirmation does not match.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const snapshot = await api.createVault(name, password);
+      if (snapshot !== null) {
+        resetSensitiveFields();
+        setVaultName("");
+        onUnlocked(snapshot);
+      }
+    } catch (cause: unknown) {
+      resetSensitiveFields();
+      setError(lockedOperationMessage(lockedErrorCode(cause)));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -102,49 +108,96 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
           N
         </div>
         <p className="eyebrow">Nian Pass</p>
-        <h1 id="unlock-title">Open your vault</h1>
-        <p className="unlock-intro">
-          Choose a local KDBX file, then enter its master password.
-        </p>
+        <h1 id="unlock-title">
+          {state.kind === "home"
+            ? "Your vaults"
+            : state.kind === "creating"
+              ? "Create new vault"
+              : "Unlock vault"}
+        </h1>
 
-        <button
-          className="secondary-button file-button"
-          type="button"
-          onClick={() => void chooseVault()}
-        >
-          Choose KDBX file
-        </button>
-        <p className="selected-file" aria-live="polite">
-          {selection === null ? "No vault selected" : selection.fileName}
-        </p>
         {notice === undefined || notice === null ? null : (
           <p className="lock-notice" role="status">
             {notice}
           </p>
         )}
 
-        <form onSubmit={(event) => void submit(event)}>
-          <label htmlFor="master-password">Master password</label>
-          <input
-            id="master-password"
-            name="master-password"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={password}
-            onChange={(event) => {
-              setPassword(event.target.value);
+        {state.kind === "home" ? (
+          <div className="locked-home-actions">
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                setError(null);
+                setState({ kind: "creating" });
+              }}
+            >
+              Create new vault
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void chooseVault()}
+            >
+              Open existing vault
+            </button>
+          </div>
+        ) : null}
+
+        {state.kind === "credential_required" ? (
+          <form
+            onSubmit={(event) => void submitUnlock(event)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") goHome();
             }}
-            disabled={unlocking}
-          />
-          <button
-            className="primary-button unlock-button"
-            type="submit"
-            disabled={selection === null || password === "" || unlocking}
           >
-            {unlocking ? "Unlocking…" : "Unlock"}
-          </button>
-        </form>
+            <p className="selected-file">{state.selection.fileName}</p>
+            <label htmlFor="master-password">Master password</label>
+            <input
+              id="master-password"
+              name="master-password"
+              type="password"
+              autoComplete="current-password"
+              spellCheck={false}
+              value={password}
+              autoFocus
+              onChange={(event) => {
+                setPassword(event.target.value);
+              }}
+              disabled={busy}
+            />
+            <div className="dialog-actions">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void chooseVault()}
+              >
+                Choose another vault
+              </button>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={password === "" || busy}
+              >
+                {busy ? "Unlocking…" : "Unlock"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        {state.kind === "creating" ? (
+          <LockedCreateForm
+            vaultName={vaultName}
+            password={password}
+            confirmPassword={confirmPassword}
+            busy={busy}
+            onVaultName={setVaultName}
+            onPassword={setPassword}
+            onConfirmPassword={setConfirmPassword}
+            onSubmit={(event) => void submitCreate(event)}
+            onCancel={goHome}
+          />
+        ) : null}
 
         <p className="form-error" role="alert" aria-live="assertive">
           {error ?? ""}

@@ -19,7 +19,7 @@ import type {
 afterEach(cleanup);
 
 async function unlock() {
-  fireEvent.click(screen.getByRole("button", { name: "Choose KDBX file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await screen.findByText("fixture.kdbx");
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: "demopass" },
@@ -50,7 +50,7 @@ test("Rust dirty snapshot drives indicator and explicit discard-lock confirmatio
     expect(api.discardChangesAndLock).toHaveBeenCalledOnce();
   });
   expect(
-    await screen.findByRole("button", { name: "Choose KDBX file" }),
+    await screen.findByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
 });
 
@@ -461,7 +461,7 @@ test("post-discard close failure reports the already-locked state accurately", a
     ),
   ).toBeVisible();
   expect(
-    screen.getByRole("button", { name: "Choose KDBX file" }),
+    screen.getByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
   expect(
     screen.queryByText(/unlocked session remains active/i),
@@ -497,7 +497,7 @@ test("backend unsaved protection opens discard UI even from a stale clean snapsh
     expect(discardChangesAndLock).toHaveBeenCalledOnce();
   });
   expect(
-    await screen.findByRole("button", { name: "Choose KDBX file" }),
+    await screen.findByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
 });
 

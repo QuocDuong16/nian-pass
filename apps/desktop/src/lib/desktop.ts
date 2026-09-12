@@ -41,9 +41,13 @@ export interface RuntimeApi {
 
 export interface DesktopApi extends SyncApi {
   selectVault: () => Promise<SelectedVaultDto | null>;
+  createVault: (
+    vaultName: string,
+    password: string,
+  ) => Promise<VaultSnapshotDto | null>;
   unlockVault: (password: string) => Promise<VaultSnapshotDto>;
   getVaultSnapshot: () => Promise<VaultSnapshotDto>;
-  saveVault: (password: string) => Promise<VaultSnapshotDto>;
+  saveVault: () => Promise<VaultSnapshotDto>;
   reloadVault: (password: string) => Promise<VaultSnapshotDto>;
   getEntryDetail: (entryId: EntryId) => Promise<EntryDetailDto>;
   revealEntryPassword: (entryId: EntryId) => Promise<string>;
@@ -130,11 +134,16 @@ export const desktopApi: DesktopApi = {
     call("select_vault", (value) =>
       value === null ? null : parseSelectedVault(value),
     ),
+  createVault: (vaultName, password) =>
+    call(
+      "create_vault",
+      (value) => (value === null ? null : parseVaultSnapshot(value)),
+      { vaultName, password },
+    ),
   unlockVault: (password) =>
     call("unlock_vault", parseVaultSnapshot, { password }),
   getVaultSnapshot: () => call("vault_snapshot", parseVaultSnapshot),
-  saveVault: (password) =>
-    call("save_vault", parseCleanVaultSnapshot, { password }),
+  saveVault: () => call("save_vault", parseCleanVaultSnapshot),
   reloadVault: (password) =>
     call("reload_vault", parseCleanVaultSnapshot, { password }),
   getEntryDetail: (entryId) =>

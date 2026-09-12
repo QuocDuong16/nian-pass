@@ -1,12 +1,16 @@
 //! Local unlocked vault sessions with verified persistence. This crate owns
 //! filesystem transactions, seals `keepass-rs`, and never retains passwords.
 
+mod create;
 mod fingerprint;
 mod mutations;
+mod open;
 mod platform;
+mod policy;
 mod sync_persistence;
 pub use fingerprint::FileFingerprint;
 use kdbx::{KdbxDocument, KdbxError};
+pub use policy::WriteRestriction;
 use std::{
     ffi::OsString,
     fs::{self, File, Metadata, OpenOptions},
@@ -28,24 +32,8 @@ pub struct VaultSession {
     source_fingerprint: FileFingerprint,
     saved_revision: u64,
 }
+
 impl VaultSession {
-    /// Opens an existing regular vault file into a stable unlocked session.
-    /// Final-component symlinks and non-regular files are rejected. The file is
-    /// fingerprinted before and after parsing through one handle, and the path
-    /// is fingerprinted once more, so an unstable source cannot seed a session.
-    pub fn open(path: impl AsRef<Path>, credential: &SecretString) -> Result<Self, SessionError> {
-        let path = canonical_regular_file(path.as_ref())?;
-        let (document, source_fingerprint) = open_stable_document(&path, credential)?;
-
-        let saved_revision = document.revision();
-        Ok(Self {
-            path,
-            document,
-            source_fingerprint,
-            saved_revision,
-        })
-    }
-
     /// Returns a fresh dependency-neutral snapshot of the current document.
     pub fn projection(&self) -> Result<Vault, SessionError> {
         self.document.projection().map_err(SessionError::Kdbx)
@@ -272,6 +260,10 @@ pub enum SessionError {
     /// The path is a symlink, missing, or not an existing regular file.
     #[error("the vault path is not a supported regular file")]
     UnsupportedPath,
+
+    /// A new vault target could not be created, written, or durably synced.
+    #[error("could not create the vault file")]
+    CreateTarget(#[source] io::Error),
 
     /// Safe local replacement is unavailable on this operating system.
     #[error("safe vault persistence is not supported on this platform")]

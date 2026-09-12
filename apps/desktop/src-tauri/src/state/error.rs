@@ -11,6 +11,8 @@ pub enum DesktopError {
     NoVaultSelected,
     UnlockFailed,
     UnsupportedVault,
+    VaultCreateFailed,
+    VaultAlreadyExists,
     EntryNotFound,
     GroupNotFound,
     InvalidRequest,
@@ -21,6 +23,9 @@ pub enum DesktopError {
     SaveFailed,
     SaveAuthenticationFailed,
     SaveUncertain,
+    UnsupportedWriteFormat,
+    UnsupportedPersistencePlatform,
+    ReadOnlySource,
     ExternalChange,
     ReloadFailed,
     ClipboardFailed,
@@ -52,6 +57,23 @@ pub(crate) fn map_mutation_error(error: SessionError) -> DesktopError {
     }
 }
 
+pub(super) fn map_create_error(error: SessionError) -> DesktopError {
+    match error {
+        SessionError::CreateTarget(source)
+            if source.kind() == std::io::ErrorKind::AlreadyExists =>
+        {
+            DesktopError::VaultAlreadyExists
+        }
+        SessionError::UnsupportedPersistencePlatform => {
+            DesktopError::UnsupportedPersistencePlatform
+        }
+        SessionError::Kdbx(kdbx::KdbxError::UnsupportedWriteFormat) => {
+            DesktopError::UnsupportedWriteFormat
+        }
+        _ => DesktopError::VaultCreateFailed,
+    }
+}
+
 pub(super) fn map_save_error(error: SessionError) -> DesktopError {
     match error {
         SessionError::ExternalModificationDetected
@@ -59,6 +81,12 @@ pub(super) fn map_save_error(error: SessionError) -> DesktopError {
         | SessionError::UnsupportedPath
         | SessionError::ReadSource(_) => DesktopError::ExternalChange,
         SessionError::CredentialMismatch => DesktopError::SaveAuthenticationFailed,
+        SessionError::UnsupportedPersistencePlatform => {
+            DesktopError::UnsupportedPersistencePlatform
+        }
+        SessionError::Kdbx(kdbx::KdbxError::UnsupportedWriteFormat) => {
+            DesktopError::UnsupportedWriteFormat
+        }
         SessionError::FinalVerificationFailed(_)
         | SessionError::FinalReadFailed(_)
         | SessionError::SavedButBackupUpdateFailed(_)
@@ -97,8 +125,8 @@ mod tests {
     use vault_session::SessionError;
 
     use super::{
-        DesktopError, map_clipboard_error, map_mutation_error, map_open_error, map_provider_error,
-        map_save_error,
+        DesktopError, map_clipboard_error, map_create_error, map_mutation_error, map_open_error,
+        map_provider_error, map_save_error,
     };
     use crate::clipboard::ClipboardFailure;
 
@@ -128,6 +156,35 @@ mod tests {
         ] {
             assert_eq!(map_mutation_error(error), expected);
         }
+        assert_eq!(
+            map_create_error(SessionError::CreateTarget(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "synthetic",
+            ))),
+            DesktopError::VaultAlreadyExists
+        );
+        assert_eq!(
+            map_create_error(SessionError::UnsupportedPersistencePlatform),
+            DesktopError::UnsupportedPersistencePlatform
+        );
+        assert_eq!(
+            map_create_error(SessionError::Kdbx(KdbxError::UnsupportedWriteFormat)),
+            DesktopError::UnsupportedWriteFormat
+        );
+        assert_eq!(
+            map_create_error(SessionError::CreateTarget(std::io::Error::other(
+                "synthetic"
+            ))),
+            DesktopError::VaultCreateFailed
+        );
+        assert_eq!(
+            map_save_error(SessionError::UnsupportedPersistencePlatform),
+            DesktopError::UnsupportedPersistencePlatform
+        );
+        assert_eq!(
+            map_save_error(SessionError::Kdbx(KdbxError::UnsupportedWriteFormat)),
+            DesktopError::UnsupportedWriteFormat
+        );
         assert_eq!(
             map_save_error(SessionError::CredentialMismatch),
             DesktopError::SaveAuthenticationFailed

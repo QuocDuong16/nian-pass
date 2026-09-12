@@ -22,6 +22,7 @@ const detail: EntryDetailDto = {
   url: { kind: "visible", value: "https://example.test" },
   passwordPresent: true,
   notesPresent: true,
+  tags: ["work"],
   customFields: [
     { name: "Recovery hint", protection: "protected" },
     { name: "Region", protection: "unprotected" },
@@ -35,6 +36,7 @@ const groups = [
 function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
   return {
     selectVault: vi.fn().mockResolvedValue(null),
+    createVault: vi.fn().mockResolvedValue(null),
     unlockVault: vi.fn().mockRejectedValue(new Error("unused")),
     getVaultSnapshot: vi.fn().mockRejectedValue(new Error("unused")),
     saveVault: vi.fn().mockRejectedValue(new Error("unused")),
@@ -60,6 +62,12 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
       .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
     updateEntry: vi.fn().mockResolvedValue({
       dirty: true,
+      fileName: "fixture.kdbx",
+      capabilities: {
+        formatVersion: "4.1",
+        writable: true,
+        writeRestriction: null,
+      },
       rootGroupId: "group-root",
       groups,
       entries: [],

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   CustomFieldSummaryDto,
   EntryId,
-  VaultSnapshotDto,
+  VaultCoreSnapshotDto,
 } from "../../types/desktop";
 import type { CustomFieldEditorApi } from "../../types/mutation-api";
 import {
@@ -19,17 +19,17 @@ type FieldAction =
   | { kind: "edit"; field: CustomFieldSummaryDto }
   | { kind: "delete"; field: CustomFieldSummaryDto };
 
-interface CustomFieldsEditorProps {
-  api: CustomFieldEditorApi;
+interface CustomFieldsEditorProps<TSnapshot extends VaultCoreSnapshotDto> {
+  api: CustomFieldEditorApi<TSnapshot>;
   entryId: EntryId;
   fields: CustomFieldSummaryDto[];
   disabled: boolean;
-  onApplied: (snapshot: VaultSnapshotDto) => void;
+  onApplied: (snapshot: TSnapshot) => void;
   onDraftChange?: (active: boolean) => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
-export function CustomFieldsEditor({
+export function CustomFieldsEditor<TSnapshot extends VaultCoreSnapshotDto>({
   api,
   entryId,
   fields,
@@ -37,7 +37,7 @@ export function CustomFieldsEditor({
   onApplied,
   onDraftChange,
   onBusyChange,
-}: CustomFieldsEditorProps) {
+}: CustomFieldsEditorProps<TSnapshot>) {
   const [action, setAction] = useState<FieldAction | null>(null);
   const [name, setName] = useState("");
   const [protection, setProtection] = useState<"protected" | "unprotected">(

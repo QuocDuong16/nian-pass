@@ -1,24 +1,34 @@
 import { useEffect, useState } from "react";
 
-import type { DesktopApi } from "../../lib/desktop";
-import type { CreatedEntryDto, GroupId } from "../../types/desktop";
+import type {
+  CreatedEntryBaseDto,
+  GroupId,
+  VaultCoreSnapshotDto,
+  VaultSnapshotDto,
+} from "../../types/desktop";
+import type { EntryCreateApi } from "../../types/mutation-api";
+import { PasswordGenerator } from "./PasswordGenerator";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
-interface EntryCreateDialogProps {
-  api: Pick<DesktopApi, "createEntry">;
+interface EntryCreateDialogProps<
+  TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
+> {
+  api: EntryCreateApi<TSnapshot>;
   groupId: GroupId;
-  onCreated: (result: CreatedEntryDto) => void;
+  onCreated: (result: CreatedEntryBaseDto<TSnapshot>) => void;
   onCancel: () => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
-export function EntryCreateDialog({
+export function EntryCreateDialog<
+  TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
+>({
   api,
   groupId,
   onCreated,
   onCancel,
   onBusyChange,
-}: EntryCreateDialogProps) {
+}: EntryCreateDialogProps<TSnapshot>) {
   const [title, setTitle] = useState("");
   const [username, setUsername] = useState("");
   const [url, setUrl] = useState("");
@@ -125,6 +135,12 @@ export function EntryCreateDialog({
             />
           </>
         )}
+        <PasswordGenerator
+          disabled={busy}
+          onGenerated={(generated) => {
+            setPassword(generated);
+          }}
+        />
         {notes === null ? (
           <button
             type="button"

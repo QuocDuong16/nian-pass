@@ -16,6 +16,12 @@ afterEach(cleanup);
 
 const snapshot: VaultSnapshotDto = {
   dirty: false,
+  fileName: "test-vault.kdbx",
+  capabilities: {
+    formatVersion: "4.1",
+    writable: true,
+    writeRestriction: null,
+  },
   rootGroupId: "group-root",
   groups: [
     {
@@ -62,12 +68,14 @@ const detail: EntryDetailDto = {
   url: { kind: "visible", value: "https://example.com" },
   passwordPresent: true,
   notesPresent: true,
+  tags: [],
   customFields: [],
 };
 
 function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
   return {
     selectVault: vi.fn().mockResolvedValue({ fileName: "test-vault.kdbx" }),
+    createVault: vi.fn().mockResolvedValue(snapshot),
     unlockVault: vi.fn().mockResolvedValue(snapshot),
     getVaultSnapshot: vi.fn().mockResolvedValue(snapshot),
     saveVault: vi.fn().mockResolvedValue(snapshot),
@@ -127,18 +135,27 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
 }
 
 async function selectAndEnterPassword() {
-  fireEvent.click(screen.getByRole("button", { name: "Choose KDBX file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await screen.findByText("test-vault.kdbx");
   fireEvent.change(screen.getByLabelText("Master password"), {
     target: { value: "temporary-password" },
   });
 }
 
-test("locked view exposes selection, password, and safe unlock state", () => {
+test("locked view progressively asks for credentials only after vault selection", async () => {
   render(<App api={api()} />);
   expect(
-    screen.getByRole("button", { name: "Choose KDBX file" }),
+    screen.getByRole("button", { name: "Create new vault" }),
   ).toBeEnabled();
+  const open = screen.getByRole("button", { name: "Open existing vault" });
+  expect(open).toBeEnabled();
+  expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Unlock" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(open);
+  await screen.findByText("test-vault.kdbx");
   expect(screen.getByLabelText("Master password")).toHaveAttribute(
     "type",
     "password",
@@ -226,7 +243,7 @@ test("lock drops the presentation state and restores the locked screen", async (
     expect(desktop.lockVault).toHaveBeenCalledOnce();
   });
   expect(
-    await screen.findByRole("button", { name: "Choose KDBX file" }),
+    await screen.findByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
   expect(screen.queryByText("Example Account")).not.toBeInTheDocument();
 });
@@ -255,7 +272,7 @@ test("Lock clears a revealed secret before the backend promise completes", async
   expect(screen.queryByText("synthetic-password-M4.2")).not.toBeInTheDocument();
   resolveLock({ clipboard: "cleared" });
   expect(
-    await screen.findByRole("button", { name: "Choose KDBX file" }),
+    await screen.findByRole("button", { name: "Open existing vault" }),
   ).toBeVisible();
 });
 

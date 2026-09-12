@@ -35,7 +35,7 @@ use clipboard::TauriClipboard;
 #[cfg(desktop)]
 use commands::{
     close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
-    delete_entry, delete_entry_custom_field, delete_group, delete_sync_profile,
+    create_vault, delete_entry, delete_entry_custom_field, delete_group, delete_sync_profile,
     discard_changes_and_lock, entry_detail, lock_vault, move_entry, move_group, reload_vault,
     rename_group, reset_sync_state, resolve_browser_connection, resolve_sync_conflict,
     reveal_entry_custom_field, reveal_entry_notes, reveal_entry_password, reveal_entry_title,
@@ -98,6 +98,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             runtime_info,
             select_vault,
+            create_vault,
             unlock_vault,
             vault_snapshot,
             save_vault,

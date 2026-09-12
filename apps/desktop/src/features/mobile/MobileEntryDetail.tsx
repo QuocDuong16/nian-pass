@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 
-import type {
-  EntryDetailDto,
-  GroupDto,
-  VaultSnapshotDto,
-} from "../../types/desktop";
-import type { MobileApi } from "../../types/mobile";
+import type { EntryDetailDto, GroupDto } from "../../types/desktop";
+import type { MobileApi, MobileVaultSnapshotDto } from "../../types/mobile";
 import { CustomFieldsEditor } from "../vault/CustomFieldsEditor";
 import { EntryActions } from "../vault/EntryActions";
 import { EntryEditForm } from "../vault/EntryEditForm";
@@ -17,9 +13,9 @@ interface MobileEntryDetailProps {
   groups: GroupDto[];
   disabled: boolean;
   readOnly?: boolean;
-  onSnapshot: (snapshot: VaultSnapshotDto) => void;
-  onDeleted: (snapshot: VaultSnapshotDto) => void;
-  onMoved: (snapshot: VaultSnapshotDto, destination: string) => void;
+  onSnapshot: (snapshot: MobileVaultSnapshotDto) => void;
+  onDeleted: (snapshot: MobileVaultSnapshotDto) => void;
+  onMoved: (snapshot: MobileVaultSnapshotDto, destination: string) => void;
   onDraftChange: (active: boolean) => void;
   onBusyChange: (busy: boolean) => void;
 }

@@ -340,7 +340,7 @@ information to an attacker even when their plaintext remains unavailable.
 - Protected custom fields accidentally downgraded during value updates
 - Mutation responses returning passwords, notes, or custom-field values
 - A stale external KDBX generation overwritten by desktop Save
-- A master password retained to make repeated Save convenient
+- A desktop save credential escaping the Rust-owned unlocked session, surviving Lock, or becoming available to the WebView
 - Wrong Save credentials modifying or re-keying the source
 - Frontend optimism clearing dirty state before persistence commits
 - Save responses exposing credentials, paths, backup names, or fingerprints
@@ -712,12 +712,7 @@ verify mutation/discard leaves the immutable source fixture byte-identical.
 
 ## M4.4 save and reload controls
 
-Desktop Save is explicit and is the only desktop disk-write command. The
-WebView supplies one component-local password string, the command immediately
-moves it into `SecretString`, and the service calls `VaultSession::save`; no
-layer retains the password for another operation. React clears its password
-state before awaiting Save/reload and again on Cancel or transition. JavaScript
-strings still cannot be deterministically zeroized.
+Desktop Save is explicit and is the only desktop disk-write command. Unlock moves the master password into a Rust-owned `SecretString` held only by the active `DesktopVaultService` session authority. Ordinary Save takes no password over IPC and reuses that Rust-side credential; the WebView never receives or persists it after unlock. Lock/discard drops the retained credential together with the unlocked session. External-conflict reload deliberately requests the current master password again before replacing the local session because the on-disk generation may have changed independently. JavaScript strings used for unlock/reload still cannot be deterministically zeroized.
 
 M3 revalidates the encrypted fingerprint at actual Save execution, including
 when an external editor changes the file after the credential dialog opened.
@@ -792,9 +787,7 @@ The privacy shield is not called Locked. While dirty-idle attention is active,
 the decrypted Rust `VaultSession` remains unlocked until explicit Save or
 discard. The shield reduces casual window/app-switcher preview exposure but is
 not universal screenshot prevention, secure re-authentication, process-memory
-encryption, or protection against endpoint malware. M4.5 adds no unsafe native
-screenshot hooks, retained credentials, browser persistence, force-lock,
-autosave, or new Tauri permission/plugin.
+encryption, or protection against endpoint malware. M4.5 adds no unsafe native screenshot hooks, browser persistence, force-lock, autosave, or new Tauri permission/plugin. The later desktop Save flow retains only the active session credential inside Rust and drops it on Lock; it does not create a WebView or disk credential store.
 
 ## Security assumptions
 

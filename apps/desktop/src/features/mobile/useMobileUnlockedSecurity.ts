@@ -7,7 +7,7 @@ import {
 } from "react";
 
 import { MobileCommandError } from "../../lib/mobile";
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { MobileVaultSnapshotDto } from "../../types/mobile";
 import type { MobileApi, MobileSecurityResumeDto } from "../../types/mobile";
 import type { MobileSecurityAttention } from "./MobileSecurityShield";
 import { useMobileIdleSecurity } from "./useMobileIdleSecurity";
@@ -19,7 +19,7 @@ interface Options {
   hidden: boolean;
   securityStatus: MobileSecurityResumeDto | null;
   securityRefreshing: boolean;
-  snapshot: VaultSnapshotDto;
+  snapshot: MobileVaultSnapshotDto;
   hasDraft: boolean;
   mutationPending: boolean;
   flowBusy: boolean;

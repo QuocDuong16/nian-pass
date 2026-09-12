@@ -1,8 +1,9 @@
 use serde_json::{Value, from_str, json, to_value};
 
 use crate::dto::{
-    CreatedEntryDto, CreatedGroupDto, CustomFieldSummaryDto, EntryDetailDto, EntrySummaryDto,
-    FieldProtectionDto, GroupDto, MobileSelectedVaultDto, SummaryTextDto, VaultSnapshotDto,
+    CustomFieldSummaryDto, EntryDetailDto, EntrySummaryDto, FieldProtectionDto, GroupDto,
+    MobileCreatedEntryDto, MobileCreatedGroupDto, MobileSelectedVaultDto, MobileVaultSnapshotDto,
+    SummaryTextDto,
 };
 
 use super::autofill::{
@@ -18,7 +19,7 @@ fn committed_mobile_contract_matches_rust_serialization() {
         file_name: "example.kdbx".to_owned(),
         writable: true,
     };
-    let snapshot = VaultSnapshotDto {
+    let snapshot = MobileVaultSnapshotDto {
         dirty: false,
         root_group_id: "group-root".to_owned(),
         groups: vec![GroupDto {
@@ -49,12 +50,13 @@ fn committed_mobile_contract_matches_rust_serialization() {
         url: SummaryTextDto::Protected,
         password_present: true,
         notes_present: true,
+        tags: Vec::new(),
         custom_fields: vec![CustomFieldSummaryDto {
             name: "Account type".to_owned(),
             protection: FieldProtectionDto::Unprotected,
         }],
     };
-    let dirty_snapshot = VaultSnapshotDto {
+    let dirty_snapshot = MobileVaultSnapshotDto {
         dirty: true,
         ..snapshot.clone()
     };
@@ -105,7 +107,7 @@ fn committed_mobile_contract_matches_rust_serialization() {
         contract["dirtySnapshot"]
     );
     assert_eq!(
-        to_value(CreatedEntryDto {
+        to_value(MobileCreatedEntryDto {
             created_entry_id: "entry-example".to_owned(),
             snapshot: dirty_snapshot.clone(),
         })
@@ -113,7 +115,7 @@ fn committed_mobile_contract_matches_rust_serialization() {
         contract["createdEntry"]
     );
     assert_eq!(
-        to_value(CreatedGroupDto {
+        to_value(MobileCreatedGroupDto {
             created_group_id: "group-root".to_owned(),
             snapshot: dirty_snapshot,
         })

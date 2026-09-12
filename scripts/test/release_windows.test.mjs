@@ -65,7 +65,7 @@ test("Windows release Rust pin parser accepts LF, CRLF, and trailing horizontal 
 
 test("Windows release Rust pin parser fails closed on malformed configuration", () => {
   for (const mise of [
-    "[tools]\nnode = \"26.7.0\"\n",
+    "[tools]\nnode = \"26.8.1\"\n",
     '[tools]\nrust = ""\n',
     '[tools]\nrust = "1.98.0\n',
   ]) {

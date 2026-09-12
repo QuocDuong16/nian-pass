@@ -17,6 +17,7 @@ interface EntryDetailProps {
   entryId: EntryId;
   groups: GroupDto[];
   disabled: boolean;
+  mutationDisabled?: boolean;
   onEditingChange?: (editing: boolean) => void;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
@@ -40,6 +41,7 @@ function EntryDetailContent({
   entryId,
   groups,
   disabled,
+  mutationDisabled = false,
   onEditingChange,
   onSnapshot,
   onDeleted,
@@ -117,7 +119,7 @@ function EntryDetailContent({
         <EntryEditForm
           api={api}
           detail={detail}
-          disabled={disabled}
+          disabled={disabled || mutationDisabled}
           onApplied={changed}
           onCancel={() => {
             setEditing(false);
@@ -131,6 +133,7 @@ function EntryDetailContent({
           detail={detail}
           groups={groups}
           disabled={disabled}
+          mutationDisabled={mutationDisabled}
           onEdit={() => {
             setEditing(true);
             onEditingChange?.(true);

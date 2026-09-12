@@ -52,6 +52,21 @@ test("committed Rust contract fixture passes runtime validation", () => {
   );
 });
 
+test("desktop create adapter accepts canonical snapshots and native cancellation", async () => {
+  invoke.mockResolvedValueOnce(contract.snapshot).mockResolvedValueOnce(null);
+
+  await expect(
+    desktopApi.createVault("Personal", "create-secret"),
+  ).resolves.toEqual(contract.snapshot);
+  expect(invoke).toHaveBeenNthCalledWith(1, "create_vault", {
+    vaultName: "Personal",
+    password: "create-secret",
+  });
+  await expect(
+    desktopApi.createVault("Cancelled", "unused-secret"),
+  ).resolves.toBeNull();
+});
+
 test("desktop adapter validates successful IPC responses", async () => {
   invoke
     .mockResolvedValueOnce(contract.selectedVault)
@@ -291,24 +306,39 @@ test("M4.3 response validators reject expansion and malformed dirty state", () =
   expect(() =>
     parseVaultSnapshot({ ...contract.snapshot, dirty: "yes" }),
   ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseVaultSnapshot({
+      ...contract.snapshot,
+      capabilities: {
+        ...contract.snapshot.capabilities,
+        writeRestriction: "unknown_restriction",
+      },
+    }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseVaultSnapshot({
+      ...contract.snapshot,
+      capabilities: {
+        ...contract.snapshot.capabilities,
+        writable: false,
+        writeRestriction: null,
+      },
+    }),
+  ).toThrow(/invalid desktop contract/);
   expect(() => parseClosePolicy({ policy: "save_then_close" })).toThrow(
     /invalid desktop contract/,
   );
 });
 
-test("M4.4 save and reload use narrow credentials and require clean exact snapshots", async () => {
+test("save uses retained session authority while reload accepts a narrow credential", async () => {
   invoke
     .mockResolvedValueOnce(contract.snapshot)
     .mockResolvedValueOnce(contract.snapshot);
-  await expect(desktopApi.saveVault("M4.4-SAVE-PASSWORD")).resolves.toEqual(
-    contract.snapshot,
-  );
+  await expect(desktopApi.saveVault()).resolves.toEqual(contract.snapshot);
   await expect(desktopApi.reloadVault("M4.4-RELOAD-PASSWORD")).resolves.toEqual(
     contract.snapshot,
   );
-  expect(invoke).toHaveBeenNthCalledWith(1, "save_vault", {
-    password: "M4.4-SAVE-PASSWORD",
-  });
+  expect(invoke).toHaveBeenNthCalledWith(1, "save_vault", undefined);
   expect(invoke).toHaveBeenNthCalledWith(2, "reload_vault", {
     password: "M4.4-RELOAD-PASSWORD",
   });

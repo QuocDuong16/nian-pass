@@ -7,7 +7,7 @@ interface SaveDialogsProps {
   password: string;
   onPassword: (password: string) => void;
   onCancel: () => void;
-  onSave: () => void;
+  onRetrySave: () => void;
   onReloadChoice: () => void;
   onReloadCancel: () => void;
   onReload: () => void;
@@ -44,23 +44,42 @@ export function SaveDialogs(props: SaveDialogsProps) {
     );
   }
 
+  if (props.flow.kind === "save_error") {
+    return (
+      <div className="modal-backdrop">
+        <section
+          className="modal-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="save-error-title"
+        >
+          <h2 id="save-error-title">Vault was not safely saved</h2>
+          <p role="alert">{props.flow.error}</p>
+          <div className="dialog-actions">
+            <button type="button" onClick={props.onCancel}>
+              Continue editing
+            </button>
+            <button type="button" onClick={props.onRetrySave}>
+              Try Save again
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   if (
-    props.flow.kind !== "credential" &&
-    props.flow.kind !== "saving" &&
     props.flow.kind !== "reload_credential" &&
     props.flow.kind !== "reloading"
   ) {
     return null;
   }
 
-  const reload =
-    props.flow.kind === "reload_credential" || props.flow.kind === "reloading";
-  const busy = props.flow.kind === "saving" || props.flow.kind === "reloading";
+  const busy = props.flow.kind === "reloading";
   const error = "error" in props.flow ? props.flow.error : null;
   const submit = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (reload) props.onReload();
-    else props.onSave();
+    props.onReload();
   };
 
   return (
@@ -69,20 +88,18 @@ export function SaveDialogs(props: SaveDialogsProps) {
         className="modal-panel"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="save-credential-title"
+        aria-labelledby="reload-credential-title"
       >
-        <h2 id="save-credential-title">
-          {reload ? "Reload current file" : "Save changes"}
-        </h2>
+        <h2 id="reload-credential-title">Reload current file</h2>
         <p>
-          {reload
-            ? "Reloading will discard your unsaved Nian Pass changes and load the current file from disk."
-            : "Enter the vault master password to encrypt and save this KDBX file."}
+          Reloading discards unsaved Nian Pass changes and loads the current
+          file from disk. Re-enter the master password because the external file
+          may have changed independently.
         </p>
         <form onSubmit={submit}>
-          <label htmlFor="save-master-password">Master password</label>
+          <label htmlFor="reload-master-password">Master password</label>
           <input
-            id="save-master-password"
+            id="reload-master-password"
             type="password"
             autoComplete="current-password"
             spellCheck={false}
@@ -98,18 +115,12 @@ export function SaveDialogs(props: SaveDialogsProps) {
             <button
               type="button"
               disabled={busy}
-              onClick={reload ? props.onReloadCancel : props.onCancel}
+              onClick={props.onReloadCancel}
             >
               Cancel
             </button>
             <button type="submit" disabled={busy || props.password === ""}>
-              {busy
-                ? reload
-                  ? "Reloading…"
-                  : "Saving…"
-                : reload
-                  ? "Discard local changes and reload"
-                  : "Save"}
+              {busy ? "Reloading…" : "Discard local changes and reload"}
             </button>
           </div>
         </form>

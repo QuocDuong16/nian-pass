@@ -13,7 +13,7 @@ import {
   mobileDetail,
   mobileSnapshot,
 } from "../../test/mobile-api";
-import type { VaultSnapshotDto } from "../../types/desktop";
+import type { MobileVaultSnapshotDto } from "../../types/mobile";
 import { MobileVaultApp } from "./MobileVaultApp";
 
 afterEach(() => {
@@ -77,10 +77,10 @@ test("picker failure remains a generic presentation error", async () => {
 });
 
 test("password clears before the deferred unlock promise settles", async () => {
-  let resolveUnlock: ((snapshot: VaultSnapshotDto) => void) | undefined;
+  let resolveUnlock: ((snapshot: MobileVaultSnapshotDto) => void) | undefined;
   const unlockVault = vi.fn().mockImplementation(
     () =>
-      new Promise<VaultSnapshotDto>((resolve) => {
+      new Promise<MobileVaultSnapshotDto>((resolve) => {
         resolveUnlock = resolve;
       }),
   );
@@ -149,11 +149,13 @@ test("unlocked writable browse exposes CRUD but never general Reveal or Copy", a
   expect(screen.getAllByText("Password stored")).toHaveLength(2);
   expect(screen.getAllByText("Notes stored")).toHaveLength(2);
   expect(api.getEntryDetail).toHaveBeenCalledWith("entry-a");
-  for (const action of ["Save", "Edit entry", "New entry", "New group"]) {
+  for (const action of ["Save", "Edit entry", "New entry", "Group actions"]) {
     expect(
       screen.getByRole("button", { name: new RegExp(action, "i") }),
     ).toBeVisible();
   }
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  expect(screen.getByRole("menuitem", { name: "New group" })).toBeVisible();
   for (const action of ["Reveal", "Copy"]) {
     expect(
       screen.queryByRole("button", { name: new RegExp(action, "i") }),
@@ -332,9 +334,9 @@ test("mobile move, delete, and group callbacks follow canonical Rust snapshots",
     target: { value: "demopass" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
-  await screen.findByRole("button", { name: "New group" });
-
-  fireEvent.click(screen.getByRole("button", { name: "New group" }));
+  await screen.findByRole("button", { name: "Group actions" });
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "New group" }));
   fireEvent.change(screen.getByLabelText("Group name"), {
     target: { value: "Created child" },
   });
@@ -359,7 +361,8 @@ test("mobile move, delete, and group callbacks follow canonical Rust snapshots",
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Accounts" }));
-  fireEvent.click(screen.getByRole("button", { name: "Rename group" }));
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Rename group" }));
   fireEvent.change(screen.getByLabelText("Group name"), {
     target: { value: "Renamed accounts" },
   });

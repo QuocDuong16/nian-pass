@@ -4,9 +4,9 @@ import contract from "../../contracts/mobile-contract.json";
 import { MobileCommandError, mobileApi, parseMobileErrorCode } from "./mobile";
 import { parseEntryDetail } from "./entry-validation";
 import {
-  parseCreatedEntry,
-  parseCreatedGroup,
-  parseVaultSnapshot,
+  parseCreatedCoreEntry,
+  parseCreatedCoreGroup,
+  parseVaultCoreSnapshot,
 } from "./validation";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -21,18 +21,33 @@ test("committed mobile contract passes exact runtime validation", () => {
     fileName: "example.kdbx",
     writable: true,
   });
-  expect(parseVaultSnapshot(contract.snapshot)).toEqual(contract.snapshot);
-  expect(parseVaultSnapshot(contract.dirtySnapshot)).toEqual(
+  expect(parseVaultCoreSnapshot(contract.snapshot)).toEqual(contract.snapshot);
+  expect(parseVaultCoreSnapshot(contract.dirtySnapshot)).toEqual(
     contract.dirtySnapshot,
   );
-  expect(parseCreatedEntry(contract.createdEntry)).toEqual(
+  expect(parseCreatedCoreEntry(contract.createdEntry)).toEqual(
     contract.createdEntry,
   );
-  expect(parseCreatedGroup(contract.createdGroup)).toEqual(
+  expect(parseCreatedCoreGroup(contract.createdGroup)).toEqual(
     contract.createdGroup,
   );
   expect(parseEntryDetail(contract.entryDetail)).toEqual(contract.entryDetail);
   expect(contract.errors.map(parseMobileErrorCode)).toEqual(contract.errors);
+});
+
+test("core creation receipts reject identifiers absent from their snapshots", () => {
+  expect(() =>
+    parseCreatedCoreEntry({
+      ...contract.createdEntry,
+      createdEntryId: "ghost-entry",
+    }),
+  ).toThrow(/invalid desktop contract/);
+  expect(() =>
+    parseCreatedCoreGroup({
+      ...contract.createdGroup,
+      createdGroupId: "ghost-group",
+    }),
+  ).toThrow(/invalid desktop contract/);
 });
 
 test("autofill adapter accepts only secret-free exact-key contracts", async () => {
