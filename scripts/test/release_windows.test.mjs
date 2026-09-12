@@ -84,6 +84,16 @@ test("Windows release script invokes the tested TOML toolchain helper", (t) => {
   assert.ok(pnpmInstall >= 0);
   assert.ok(script.indexOf('Assert-PrivateNodeToolCommand "pnpm"') < pnpmInstall);
   assert.ok(script.indexOf('Get-CheckedOutput $pnpmPath @("--version")') < pnpmInstall);
+  assert.match(
+    script,
+    /Get-Command \$Name -CommandType Application -All -ErrorAction Stop/,
+  );
+  assert.match(script, /\$selected\s*=\s*\$commands\[0\]/);
+  assert.match(script, /\$source\s*=\s*\[string\] \$selected\.Path/);
+  assert.doesNotMatch(
+    script,
+    /\(Get-Command \$Name -CommandType Application[^)]*\)\.Source/,
+  );
 
   const root = mkdtempSync(join(tmpdir(), "nian-pass-release-toolchain-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

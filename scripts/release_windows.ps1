@@ -21,12 +21,17 @@ function Get-NormalizedWindowsPath([string] $Path) {
 }
 
 function Assert-PrivateNodeToolCommand([string] $Name, [string] $ToolRoot) {
-    $source = (Get-Command $Name -CommandType Application -ErrorAction Stop).Source
+    $commands = @(Get-Command $Name -CommandType Application -All -ErrorAction Stop)
+    if ($commands.Count -eq 0) { throw "$Name is not available" }
+    $selected = $commands[0]
+    $source = [string] $selected.Path
+    if ([string]::IsNullOrWhiteSpace($source)) { throw "$Name effective command has no executable path" }
     $normalizedSource = Get-NormalizedWindowsPath $source
     $normalizedToolRoot = Get-NormalizedWindowsPath $ToolRoot
     $toolRootPrefix = "$normalizedToolRoot$([System.IO.Path]::DirectorySeparatorChar)"
     if ($normalizedSource -ne $normalizedToolRoot -and -not $normalizedSource.StartsWith($toolRootPrefix)) {
-        throw "$Name must resolve under NIAN_PASS_WINDOWS_NODE_TOOL_ROOT; found $source"
+        $discovered = @($commands | Select-Object -First 4 | ForEach-Object { [string] $_.Path }) -join "`n- "
+        throw "$Name effective command is outside NIAN_PASS_WINDOWS_NODE_TOOL_ROOT:`neffective: $source`ndiscovered candidates:`n- $discovered"
     }
     return $source
 }

@@ -446,6 +446,9 @@ export function windowsNodeBootstrapViolations(root) {
   require(/Join-Path \$env:RUNNER_TEMP "nian-pass-corepack-home"/, "must use a private RUNNER_TEMP COREPACK_HOME");
   require(/npm install --global --prefix \$toolRoot "corepack@\$env:COREPACK_VERSION"/, "must install Corepack with an explicit private npm prefix");
   require(/\$env:COREPACK_HOME\s*=\s*\$corepackHome/, "must isolate COREPACK_HOME");
+  require(/Get-Command \$Name -CommandType Application -All -ErrorAction Stop/, "must enumerate Application command candidates");
+  require(/\$selected\s*=\s*\$commands\[0\]/, "must select exactly the effective first command candidate");
+  require(/\$source\s*=\s*\[string\] \$selected\.Path/, "must use the selected command scalar executable path");
   require(/Assert-PrivateToolCommand "corepack" \$[Tt]oolRoot/, "must require a private Corepack executable");
   require(/Assert-PrivateToolCommand "pnpm" \$[Tt]oolRoot/, "must require a private pnpm executable");
   require(/\$corepackVersion\s+-ne\s+\$env:COREPACK_VERSION/, "must require the exact Corepack version");
@@ -462,6 +465,8 @@ export function windowsNodeBootstrapViolations(root) {
   require(/Assert-PrivateToolchain \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT/, "VerifyOnly must reverify the private toolchain");
   require(/Assert-PnpmRuntimeNode \$ToolRoot \$pnpmPath/, "must run the pnpm runtime Node guard through the shared verification path");
   require(/WINDOWS_NODE_VERIFY=PASS/, "VerifyOnly must emit successful post-step verification evidence");
+  require(/WINDOWS_COREPACK_COMMAND=\$\(\$toolchain\.CorepackCommand\)/, "must report the selected Corepack command");
+  require(/WINDOWS_PNPM_COMMAND=\$\(\$toolchain\.PnpmCommand\)/, "must report the selected pnpm command");
   const forbiddenVerifyOnlyOperations = [
     /npm\s+install/i,
     /corepackPath\s+enable/i,
@@ -483,6 +488,9 @@ export function windowsNodeBootstrapViolations(root) {
   }
   if (/npm install\s+--global\s+"corepack@/i.test(helper)) {
     violations.push(`${helperPath}: runner-global Corepack installation is forbidden`);
+  }
+  if (/\(Get-Command \$Name -CommandType Application[^)]*\)\.Source/.test(helper)) {
+    violations.push(`${helperPath}: unbounded Get-Command .Source resolution is forbidden`);
   }
   return violations;
 }
@@ -749,6 +757,20 @@ export function sourcePolicyViolations(root) {
   ) {
     violations.push(
       "scripts/release_windows.ps1: PE reserve verification and distinct desktop startup/shutdown/native-host smoke evidence are required",
+    );
+  }
+  if (
+    !/Get-Command \$Name -CommandType Application -All -ErrorAction Stop/.test(
+      windowsRelease,
+    ) ||
+    !/\$selected\s*=\s*\$commands\[0\]/.test(windowsRelease) ||
+    !/\$source\s*=\s*\[string\] \$selected\.Path/.test(windowsRelease) ||
+    /\(Get-Command \$Name -CommandType Application[^)]*\)\.Source/.test(
+      windowsRelease,
+    )
+  ) {
+    violations.push(
+      "scripts/release_windows.ps1: private Corepack/pnpm resolution must select and validate one effective Application command path",
     );
   }
   const releaseWorkflow = read(root, ".github/workflows/release.yml");

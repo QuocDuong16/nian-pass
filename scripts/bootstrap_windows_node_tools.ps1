@@ -39,12 +39,17 @@ function Assert-PathUnderRunnerTemp {
 
 function Assert-PrivateToolCommand {
   param([string] $Name, [string] $ToolRoot)
-  $source = (Get-Command $Name -CommandType Application -ErrorAction Stop).Source
+  $commands = @(Get-Command $Name -CommandType Application -All -ErrorAction Stop)
+  if ($commands.Count -eq 0) { throw "$Name is not available" }
+  $selected = $commands[0]
+  $source = [string] $selected.Path
+  if ([string]::IsNullOrWhiteSpace($source)) { throw "$Name effective command has no executable path" }
   $normalizedSource = Get-NormalizedWindowsPath $source
   $normalizedToolRoot = Get-NormalizedWindowsPath $ToolRoot
   $toolRootPrefix = "$normalizedToolRoot$([System.IO.Path]::DirectorySeparatorChar)"
   if ($normalizedSource -ne $normalizedToolRoot -and -not $normalizedSource.StartsWith($toolRootPrefix)) {
-    throw "$Name must resolve under the private tool root; found $source"
+    $discovered = @($commands | Select-Object -First 4 | ForEach-Object { [string] $_.Path }) -join "`n- "
+    throw "$Name effective command is outside the private tool root:`neffective: $source`ndiscovered candidates:`n- $discovered"
   }
   return $source
 }
@@ -100,7 +105,7 @@ function Assert-PrivateToolchain {
   $pnpmPath = Assert-PrivateToolCommand "pnpm" $ToolRoot
   Assert-PnpmRuntimeNode $ToolRoot $pnpmPath
   $pnpmVersion = Assert-PnpmVersion $pnpmPath
-  return [PSCustomObject]@{ NodeVersion = $nodeVersion; CorepackVersion = $corepackVersion; PnpmVersion = $pnpmVersion }
+  return [PSCustomObject]@{ NodeVersion = $nodeVersion; CorepackVersion = $corepackVersion; PnpmVersion = $pnpmVersion; CorepackCommand = $corepackPath; PnpmCommand = $pnpmPath }
 }
 
 function Set-WorkflowEnvironment {
@@ -128,6 +133,8 @@ if ($VerifyOnly) {
   Write-Host "WINDOWS_NODE_VERSION=$($toolchain.NodeVersion)"
   Write-Host "WINDOWS_COREPACK_VERSION=$($toolchain.CorepackVersion)"
   Write-Host "WINDOWS_PNPM_VERSION=$($toolchain.PnpmVersion)"
+  Write-Host "WINDOWS_COREPACK_COMMAND=$($toolchain.CorepackCommand)"
+  Write-Host "WINDOWS_PNPM_COMMAND=$($toolchain.PnpmCommand)"
   Write-Host "WINDOWS_PNPM_RUNTIME_NODE=$($toolchain.NodeVersion)"
 } else {
   Assert-PinnedNode | Out-Null
@@ -151,6 +158,8 @@ if ($VerifyOnly) {
   Write-Host "WINDOWS_NODE_VERSION=$($toolchain.NodeVersion)"
   Write-Host "WINDOWS_COREPACK_VERSION=$($toolchain.CorepackVersion)"
   Write-Host "WINDOWS_PNPM_VERSION=$($toolchain.PnpmVersion)"
+  Write-Host "WINDOWS_COREPACK_COMMAND=$($toolchain.CorepackCommand)"
+  Write-Host "WINDOWS_PNPM_COMMAND=$($toolchain.PnpmCommand)"
   Write-Host "WINDOWS_NODE_TOOL_ROOT=$toolRoot"
   Write-Host "WINDOWS_PNPM_RUNTIME_NODE=$($toolchain.NodeVersion)"
 }

@@ -660,6 +660,30 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
+      "$selected = $commands[0]",
+      "$selected = $commands[1]",
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /effective first command candidate/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
+      "$source = [string] $selected.Path",
+      "$source = (Get-Command $Name -CommandType Application -ErrorAction Stop).Source",
+    ),
+  );
+  assert.match(
+    windowsNodeBootstrapViolations(root).join("\n"),
+    /selected command scalar executable path|unbounded Get-Command \.Source resolution is forbidden/,
+  );
+
+  writeFileSync(
+    helperPath,
+    helper.replace(
       '$pnpmVersion -ne $env:PNPM_VERSION',
       '$pnpmVersion -eq $env:PNPM_VERSION',
     ),
