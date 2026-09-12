@@ -394,15 +394,18 @@ label {
 /* Desktop vault chrome */
 
 .vault-shell {
+  width: 100%;
   height: 100vh;
-  min-height: 560px;
-  display: grid;
-  grid-template-rows: 52px auto auto minmax(0, 1fr) 24px;
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--np-bg);
 }
 
 .top-bar {
+  flex: 0 0 52px;
   height: 52px;
   display: grid;
   grid-template-columns: minmax(180px, 250px) minmax(220px, 460px) auto;
@@ -472,6 +475,7 @@ label {
 }
 
 .read-only-notice {
+  flex: 0 0 auto;
   min-height: 30px;
   display: flex;
   align-items: center;
@@ -484,6 +488,7 @@ label {
 }
 
 .shell-error {
+  flex: 0 0 auto;
   min-height: 0;
   margin: 0;
   padding: 0 12px;
@@ -502,6 +507,8 @@ label {
 }
 
 .vault-layout {
+  flex: 1 1 0;
+  width: 100%;
   min-height: 0;
   display: grid;
   grid-template-columns: 196px 320px minmax(420px, 1fr);
@@ -1106,6 +1113,8 @@ label {
 /* Footer */
 
 .vault-status-bar {
+  flex: 0 0 24px;
+  height: 24px;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1157,10 +1166,6 @@ label {
 }
 
 @media (max-width: 880px) {
-  .vault-shell {
-    min-height: 520px;
-  }
-
   .top-bar {
     grid-template-columns: 40px minmax(180px, 1fr) auto;
   }
