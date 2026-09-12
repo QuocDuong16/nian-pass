@@ -39,7 +39,10 @@ function GroupNode({
         <span className="folder-glyph" aria-hidden="true">
           ▸
         </span>
-        <span>{group.name || "Unnamed group"}</span>
+        <span className="group-name">{group.name || "Unnamed group"}</span>
+        <span className="group-count" aria-hidden="true">
+          {group.entryIds.length}
+        </span>
       </button>
       {group.childGroupIds.length > 0 ? (
         <ul>
@@ -61,7 +64,6 @@ function GroupNode({
 export function GroupTree(props: GroupTreeProps) {
   return (
     <nav className="group-sidebar" aria-label="Vault groups">
-      <h2>Groups</h2>
       <ul className="group-tree">
         <GroupNode groupId={props.rootGroupId} {...props} />
       </ul>

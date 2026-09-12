@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Button } from "../../components/Button";
 import type {
   EntryDetailDto,
   SummaryTextDto,
@@ -89,13 +90,37 @@ export function EntryEditForm<
 
   return (
     <form
-      className="mutation-form"
+      className="mutation-form detail-edit-form"
       onSubmit={(event) => {
         event.preventDefault();
         void apply();
       }}
     >
-      <h2>Edit entry</h2>
+      <div className="detail-edit-header">
+        <div>
+          <p className="eyebrow">Entry</p>
+          <h2>Edit entry</h2>
+        </div>
+        <div className="detail-edit-actions">
+          <Button
+            size="sm"
+            variant="ghost"
+            type="button"
+            disabled={applying}
+            onClick={cancel}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            type="submit"
+            disabled={disabled || applying}
+          >
+            {applying ? "Applying…" : "Apply changes"}
+          </Button>
+        </div>
+      </div>
       <EditableMetadataField
         label="Title"
         summary={detail.title}
@@ -188,14 +213,6 @@ export function EntryEditForm<
         ) : null}
       </div>
       {failed ? <p role="alert">Could not update this entry.</p> : null}
-      <div className="dialog-actions">
-        <button type="button" disabled={applying} onClick={cancel}>
-          Cancel
-        </button>
-        <button type="submit" disabled={disabled || applying}>
-          {applying ? "Applying…" : "Apply changes"}
-        </button>
-      </div>
     </form>
   );
 }

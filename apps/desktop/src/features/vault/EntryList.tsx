@@ -9,6 +9,7 @@ interface EntryListProps {
   heading?: string | undefined;
   eyebrow?: string;
   emptyMessage?: string;
+  hideHeader?: boolean;
 }
 
 export function EntryList({
@@ -19,20 +20,26 @@ export function EntryList({
   heading,
   eyebrow = "Selected group",
   emptyMessage = "No entries in this group.",
+  hideHeader = false,
 }: EntryListProps) {
+  const label = heading ?? (group.name || "Unnamed group");
   return (
-    <section className="entry-pane" aria-labelledby="entries-title">
-      <header className="entry-heading">
-        <div>
-          <p className="eyebrow">{eyebrow}</p>
-          <h2 id="entries-title">
-            {heading ?? (group.name || "Unnamed group")}
-          </h2>
-        </div>
-        <span className="entry-count">
-          {entries.length} {entries.length === 1 ? "entry" : "entries"}
-        </span>
-      </header>
+    <section
+      className={hideHeader ? "entry-pane entry-pane-compact" : "entry-pane"}
+      aria-label={hideHeader ? label : undefined}
+      aria-labelledby={hideHeader ? undefined : "entries-title"}
+    >
+      {hideHeader ? null : (
+        <header className="entry-heading">
+          <div>
+            <p className="eyebrow">{eyebrow}</p>
+            <h2 id="entries-title">{label}</h2>
+          </div>
+          <span className="entry-count">
+            {entries.length} {entries.length === 1 ? "entry" : "entries"}
+          </span>
+        </header>
+      )}
 
       {entries.length === 0 ? (
         <div className="empty-state">{emptyMessage}</div>

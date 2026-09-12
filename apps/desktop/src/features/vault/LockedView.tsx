@@ -112,9 +112,17 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
           {state.kind === "home"
             ? "Your vaults"
             : state.kind === "creating"
-              ? "Create new vault"
+              ? "Create a vault"
               : "Unlock vault"}
         </h1>
+
+        <p className="unlock-intro">
+          {state.kind === "home"
+            ? "Open an existing KeePass database or create a new local vault."
+            : state.kind === "creating"
+              ? "Choose a name and master password. You will pick the .kdbx save location next."
+              : "Enter the master password for the selected vault."}
+        </p>
 
         {notice === undefined || notice === null ? null : (
           <p className="lock-notice" role="status">
@@ -127,19 +135,19 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
             <button
               className="primary-button"
               type="button"
+              onClick={() => void chooseVault()}
+            >
+              Open existing vault
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
               onClick={() => {
                 setError(null);
                 setState({ kind: "creating" });
               }}
             >
               Create new vault
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => void chooseVault()}
-            >
-              Open existing vault
             </button>
           </div>
         ) : null}

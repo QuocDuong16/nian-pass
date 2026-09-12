@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Button } from "../../components/Button";
 import type {
   EntryDetailDto,
   GroupDto,
@@ -65,25 +66,30 @@ export function EntryActions<
 
   return (
     <div className="detail-actions destructive-actions">
-      <button
+      <Button
+        size="sm"
+        variant="ghost"
         type="button"
+        aria-label="Move entry"
         disabled={disabled}
         onClick={() => {
           setAction("move");
         }}
       >
-        Move entry
-      </button>
-      <button
-        className="danger-button"
+        Move
+      </Button>
+      <Button
+        size="sm"
+        variant="danger"
         type="button"
+        aria-label="Permanently delete entry"
         disabled={disabled}
         onClick={() => {
           setAction("delete");
         }}
       >
-        Permanently delete entry
-      </button>
+        Delete
+      </Button>
       {failed ? (
         <p role="alert">Could not complete the entry operation.</p>
       ) : null}
@@ -122,7 +128,9 @@ export function EntryActions<
               </>
             )}
             <div className="dialog-actions">
-              <button
+              <Button
+                size="sm"
+                variant="secondary"
                 type="button"
                 disabled={busy}
                 onClick={() => {
@@ -130,19 +138,23 @@ export function EntryActions<
                 }}
               >
                 Cancel
-              </button>
-              <button
-                className={action === "delete" ? "danger-button" : ""}
+              </Button>
+              <Button
+                size="sm"
+                variant={action === "delete" ? "danger" : "primary"}
                 type="button"
+                aria-label={
+                  action === "delete" ? "Permanently delete" : "Move entry"
+                }
                 disabled={busy || (action === "move" && destination === "")}
                 onClick={() => void apply()}
               >
                 {busy
                   ? "Applying…"
                   : action === "delete"
-                    ? "Permanently delete"
-                    : "Move entry"}
-              </button>
+                    ? "Delete permanently"
+                    : "Move"}
+              </Button>
             </div>
           </section>
         </div>

@@ -163,6 +163,21 @@ test("entry creation password generator materializes only the new local password
   expect(api.createEntry).not.toHaveBeenCalled();
 });
 
+test("entry creation Escape cancels the local draft", () => {
+  const onCancel = vi.fn();
+  render(
+    <EntryCreateDialog
+      api={mutationApi()}
+      groupId="group-root"
+      onCreated={vi.fn()}
+      onCancel={onCancel}
+    />,
+  );
+
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(onCancel).toHaveBeenCalledOnce();
+});
+
 test("entry creation keeps secrets local, selects result, and clears on failure or Cancel", async () => {
   const api = mutationApi();
   const onCreated = vi.fn();

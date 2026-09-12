@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { ApplicationRoot } from "./app/ApplicationRoot";
 import { ErrorBoundary } from "./app/ErrorBoundary";
 import "./styles.css";
+import "./product-ui.css";
 
 const root = document.getElementById("root");
 if (root === null) {

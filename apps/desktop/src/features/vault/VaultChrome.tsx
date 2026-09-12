@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import { Button } from "../../components/Button";
 import { SearchInput } from "../../components/Input";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -14,6 +16,7 @@ interface VaultTopBarProps {
   hasDraft: boolean;
   disabled: boolean;
   mutationPending: boolean;
+  shortcutsDisabled: boolean;
   onSearch: (value: string) => void;
   onSave: () => void;
   onLock: () => void;
@@ -22,16 +25,38 @@ interface VaultTopBarProps {
 
 export function VaultTopBar(props: VaultTopBarProps) {
   const readOnly = !props.snapshot.capabilities.writable;
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if (props.shortcutsDisabled || event.altKey) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => {
+      window.removeEventListener("keydown", focusSearch);
+    };
+  }, [props.shortcutsDisabled]);
   return (
     <header className="top-bar">
       <div className="product-lockup compact">
         <span className="brand-mark small" aria-hidden="true">
           N
         </span>
-        <strong>Nian Pass</strong>
+        <span className="product-context">
+          <strong>Nian Pass</strong>
+          <span className="top-file-name" title={props.snapshot.fileName}>
+            {props.snapshot.fileName}
+          </span>
+        </span>
       </div>
       <SearchInput
+        ref={searchRef}
         aria-label="Search vault"
+        title="Search vault (Ctrl/Cmd+K)"
         placeholder="Search vault…"
         value={props.searchQuery}
         onChange={(event) => {
@@ -145,6 +170,19 @@ interface VaultSettingsDialogProps {
 }
 
 export function VaultSettingsDialog(props: VaultSettingsDialogProps) {
+  const { onClose } = props;
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose]);
+
   return (
     <div className="modal-backdrop">
       <section

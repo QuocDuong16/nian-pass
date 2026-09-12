@@ -157,6 +157,30 @@ test("global search matches safe metadata and Escape restores the selected group
   expect(screen.getByRole("heading", { name: "Root" })).toBeVisible();
 });
 
+test("search shortcut focuses the vault search and Settings closes on Escape", () => {
+  renderView();
+  const search = screen.getByRole("searchbox", { name: "Search vault" });
+
+  fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+  expect(search).toHaveFocus();
+
+  const settings = screen.getByRole("button", { name: "Settings" });
+  settings.focus();
+  fireEvent.click(settings);
+  expect(screen.getByRole("dialog", { name: "Settings" })).toBeVisible();
+
+  fireEvent.keyDown(window, { key: "k", metaKey: true });
+  expect(search).not.toHaveFocus();
+
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(
+    screen.queryByRole("dialog", { name: "Settings" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "K", metaKey: true });
+  expect(search).toHaveFocus();
+});
+
 test("Save shortcut runs only when the vault surface is actionable", () => {
   const { onSave } = renderView();
   fireEvent.keyDown(window, { key: "s", ctrlKey: true });

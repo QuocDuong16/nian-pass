@@ -100,13 +100,14 @@ export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
       <button
         className="group-menu-trigger"
         type="button"
+        aria-label="Group actions"
         disabled={disabled}
         aria-expanded={menuOpen}
         onClick={() => {
           setMenuOpen((value) => !value);
         }}
       >
-        Group actions
+        Actions
       </button>
       {menuOpen ? (
         <div className="group-action-menu" role="menu">

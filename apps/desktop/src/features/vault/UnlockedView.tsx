@@ -6,6 +6,7 @@ import { EntryCreateDialog } from "./EntryCreateDialog";
 import { EntryDetail } from "./EntryDetail";
 import { GroupActions } from "./GroupActions";
 import { GroupTree } from "./GroupTree";
+import { VaultEmptyDetail } from "./VaultEmptyDetail";
 import { VaultEntryPane } from "./VaultEntryPane";
 import {
   VaultReadOnlyNotice,
@@ -129,6 +130,9 @@ export function UnlockedView({
         hasDraft={hasDraft}
         disabled={disabled}
         mutationPending={mutationPending}
+        shortcutsDisabled={
+          disabled || settingsOpen || hasDraft || mutationPending
+        }
         onSearch={setSearchQuery}
         onSave={onSave}
         onLock={onLock}
@@ -178,9 +182,7 @@ export function UnlockedView({
         />
 
         {selectedEntryId === null ? (
-          <aside className="detail-pane detail-empty" aria-label="Entry detail">
-            Select an entry to view its safe details.
-          </aside>
+          <VaultEmptyDetail />
         ) : (
           <EntryDetail
             key={selectedEntryId}

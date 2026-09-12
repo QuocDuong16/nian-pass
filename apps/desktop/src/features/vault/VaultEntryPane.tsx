@@ -16,11 +16,18 @@ export function VaultEntryPane(props: VaultEntryPaneProps) {
   return (
     <div className="entry-column">
       <div className="entry-toolbar">
-        <span>
-          {props.searchActive
-            ? `${String(props.entries.length)} results`
-            : "Entries"}
-        </span>
+        <div className="entry-toolbar-context">
+          <h2>
+            {props.searchActive
+              ? "Search results"
+              : props.group.name || "Unnamed group"}
+          </h2>
+          <span>
+            {props.searchActive
+              ? `${String(props.entries.length)} results`
+              : `${String(props.entries.length)} ${props.entries.length === 1 ? "entry" : "entries"}`}
+          </span>
+        </div>
         <Button
           size="sm"
           variant="primary"
@@ -38,6 +45,7 @@ export function VaultEntryPane(props: VaultEntryPaneProps) {
         onSelect={props.onSelectEntry}
         eyebrow={props.searchActive ? "Global search" : "Selected group"}
         heading={props.searchActive ? "Search results" : undefined}
+        hideHeader
         emptyMessage={
           props.searchActive
             ? "No matching entries."

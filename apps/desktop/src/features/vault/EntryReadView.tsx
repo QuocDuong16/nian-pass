@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { Button } from "../../components/Button";
 import type { DesktopApi } from "../../lib/desktop";
 import type {
   EntryDetailDto,
@@ -9,7 +10,7 @@ import type {
 } from "../../types/desktop";
 import { CustomFieldsEditor } from "./CustomFieldsEditor";
 import { EntryActions } from "./EntryActions";
-import { EntryTags } from "./EntryTags";
+import { EntryIdentityFields } from "./EntryIdentityFields";
 import { Summary } from "./summary";
 import { useSecretReveal } from "./useSecretReveal";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
@@ -118,44 +119,24 @@ export function EntryReadView({
             />
           </h2>
         </div>
-        <button
+        <Button
+          size="sm"
+          variant="secondary"
           type="button"
+          aria-label="Edit entry"
           disabled={disabled || mutationDisabled}
           onClick={onEdit}
         >
-          Edit entry
-        </button>
+          Edit
+        </Button>
       </div>
-      <section className="detail-field" aria-labelledby="username-label">
-        <h3 id="username-label">Username</h3>
-        <div className="detail-value-row">
-          <span className="detail-value">
-            <Summary
-              value={detail.username}
-              missingLabel="No username"
-              emptyLabel="Empty username"
-            />
-          </span>
-          <button
-            type="button"
-            disabled={
-              disabled || detail.username.kind === "missing" || copying !== null
-            }
-            onClick={() => void copy("username")}
-          >
-            {copying === "username" ? "Copying…" : "Copy username"}
-          </button>
-        </div>
-      </section>
-      <section className="detail-field" aria-labelledby="url-label">
-        <h3 id="url-label">URL</h3>
-        <Summary
-          value={detail.url}
-          missingLabel="No URL"
-          emptyLabel="Empty URL"
-        />
-      </section>
-      <EntryTags tags={detail.tags} />
+      <EntryIdentityFields
+        detail={detail}
+        disabled={disabled}
+        copyDisabled={copying !== null}
+        copyingUsername={copying === "username"}
+        onCopyUsername={() => void copy("username")}
+      />
       <section className="detail-field" aria-labelledby="password-label">
         <h3 id="password-label">Password</h3>
         <div className="secret-block">
@@ -167,8 +148,17 @@ export function EntryReadView({
             <pre className="secret-value">{password.secret}</pre>
           )}
           <div className="detail-actions">
-            <button
+            <Button
+              size="sm"
+              variant="secondary"
               type="button"
+              aria-label={
+                password.loading
+                  ? "Revealing…"
+                  : password.secret === null
+                    ? "Reveal password"
+                    : "Hide password"
+              }
               disabled={disabled || !detail.passwordPresent || password.loading}
               onClick={() => {
                 if (password.secret === null) void password.reveal();
@@ -178,16 +168,19 @@ export function EntryReadView({
               {password.loading
                 ? "Revealing…"
                 : password.secret === null
-                  ? "Reveal password"
-                  : "Hide password"}
-            </button>
-            <button
+                  ? "Reveal"
+                  : "Hide"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               type="button"
+              aria-label="Copy password"
               disabled={disabled || !detail.passwordPresent || copying !== null}
               onClick={() => void copy("password")}
             >
-              {copying === "password" ? "Copying…" : "Copy password"}
-            </button>
+              {copying === "password" ? "Copying…" : "Copy"}
+            </Button>
           </div>
           {password.failed ? (
             <p role="alert">Could not reveal the password.</p>
@@ -201,7 +194,9 @@ export function EntryReadView({
         ) : (
           <pre className="notes-value">{notes.secret}</pre>
         )}
-        <button
+        <Button
+          size="sm"
+          variant="secondary"
           type="button"
           disabled={disabled || !detail.notesPresent || notes.loading}
           onClick={() => {
@@ -214,7 +209,7 @@ export function EntryReadView({
             : notes.secret === null
               ? "Reveal notes"
               : "Hide notes"}
-        </button>
+        </Button>
       </section>
       <CustomFieldsEditor
         api={api}

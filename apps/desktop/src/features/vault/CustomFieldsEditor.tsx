@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { Button } from "../../components/Button";
 import type {
   CustomFieldSummaryDto,
   EntryId,
   VaultCoreSnapshotDto,
 } from "../../types/desktop";
 import type { CustomFieldEditorApi } from "../../types/mutation-api";
-import {
-  fieldActionLabel,
-  fieldLabel,
-  requireLoaded,
-} from "./custom-field-labels";
+import { requireLoaded } from "./custom-field-labels";
+import { CustomFieldList } from "./CustomFieldList";
 import { useSecretDraft } from "./useSecretDraft";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
@@ -99,49 +97,20 @@ export function CustomFieldsEditor<TSnapshot extends VaultCoreSnapshotDto>({
 
   return (
     <section className="detail-field" aria-labelledby="custom-fields-label">
-      <div className="section-heading-row">
-        <h3 id="custom-fields-label">Custom fields</h3>
-        <button
-          className="compact-button"
-          type="button"
-          disabled={disabled}
-          onClick={() => {
-            setAction({ kind: "add" });
-            value.set("");
-          }}
-        >
-          Add custom field
-        </button>
-      </div>
-      {fields.length === 0 ? <p>No custom fields.</p> : null}
-      <ul className="custom-field-list">
-        {fields.map((field) => (
-          <li key={`${field.name}:${field.protection}`}>
-            <span>{fieldLabel(field.name)}</span>
-            <span>
-              {field.protection === "protected" ? "Protected" : "Unprotected"}
-            </span>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => {
-                setAction({ kind: "edit", field });
-              }}
-            >
-              {fieldActionLabel("Edit", field.name)}
-            </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => {
-                setAction({ kind: "delete", field });
-              }}
-            >
-              {fieldActionLabel("Delete", field.name)}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <CustomFieldList
+        fields={fields}
+        disabled={disabled}
+        onAdd={() => {
+          setAction({ kind: "add" });
+          value.set("");
+        }}
+        onEdit={(field) => {
+          setAction({ kind: "edit", field });
+        }}
+        onDelete={(field) => {
+          setAction({ kind: "delete", field });
+        }}
+      />
       {failed ? <p role="alert">Could not change the custom field.</p> : null}
 
       {action !== null ? (
@@ -208,23 +177,32 @@ export function CustomFieldsEditor<TSnapshot extends VaultCoreSnapshotDto>({
                   <>
                     <p role="alert">Could not load this custom field value.</p>
                     {action.kind === "edit" ? (
-                      <button
+                      <Button
+                        size="sm"
+                        variant="secondary"
                         type="button"
                         onClick={() => void loadExistingValue(action.field)}
                       >
                         Retry loading custom field value
-                      </button>
+                      </Button>
                     ) : null}
                   </>
                 ) : null}
               </>
             )}
             <div className="dialog-actions">
-              <button type="button" disabled={busy} onClick={close}>
+              <Button
+                size="sm"
+                variant="secondary"
+                type="button"
+                disabled={busy}
+                onClick={close}
+              >
                 Cancel
-              </button>
-              <button
-                className={action.kind === "delete" ? "danger-button" : ""}
+              </Button>
+              <Button
+                size="sm"
+                variant={action.kind === "delete" ? "danger" : "primary"}
                 type="button"
                 disabled={
                   busy ||
@@ -239,7 +217,7 @@ export function CustomFieldsEditor<TSnapshot extends VaultCoreSnapshotDto>({
                   : action.kind === "delete"
                     ? "Delete field"
                     : "Apply"}
-              </button>
+              </Button>
             </div>
           </section>
         </div>

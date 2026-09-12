@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { Button } from "../../components/Button";
 import type {
   CreatedEntryBaseDto,
   GroupId,
@@ -85,12 +86,24 @@ export function EntryCreateDialog<
           event.preventDefault();
           void submit();
         }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !busy) cancel();
+        }}
       >
-        <h2 id="create-entry-title">New entry</h2>
+        <div className="dialog-heading">
+          <div>
+            <p className="eyebrow">Selected group</p>
+            <h2 id="create-entry-title">New entry</h2>
+          </div>
+          <span className="dialog-hint">
+            Create locally, then Save the vault.
+          </span>
+        </div>
         <label htmlFor="create-entry-name">Title</label>
         <input
           id="create-entry-name"
           value={title}
+          autoFocus
           onChange={(event) => {
             setTitle(event.currentTarget.value);
           }}
@@ -112,14 +125,16 @@ export function EntryCreateDialog<
           }}
         />
         {password === null ? (
-          <button
+          <Button
+            size="sm"
+            variant="secondary"
             type="button"
             onClick={() => {
               setPassword("");
             }}
           >
             Add password
-          </button>
+          </Button>
         ) : (
           <>
             <label htmlFor="create-entry-password">Password</label>
@@ -142,14 +157,16 @@ export function EntryCreateDialog<
           }}
         />
         {notes === null ? (
-          <button
+          <Button
+            size="sm"
+            variant="ghost"
             type="button"
             onClick={() => {
               setNotes("");
             }}
           >
             Add notes
-          </button>
+          </Button>
         ) : (
           <>
             <label htmlFor="create-entry-notes">Notes</label>
@@ -164,12 +181,18 @@ export function EntryCreateDialog<
         )}
         {failed ? <p role="alert">Could not create the entry.</p> : null}
         <div className="dialog-actions">
-          <button type="button" disabled={busy} onClick={cancel}>
+          <Button
+            size="sm"
+            variant="secondary"
+            type="button"
+            disabled={busy}
+            onClick={cancel}
+          >
             Cancel
-          </button>
-          <button type="submit" disabled={busy}>
+          </Button>
+          <Button size="sm" variant="primary" type="submit" disabled={busy}>
             {busy ? "Creating…" : "Create entry"}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
