@@ -93,8 +93,8 @@ export function SaveDialogs(props: SaveDialogsProps) {
         <h2 id="reload-credential-title">Reload current file</h2>
         <p>
           Reloading discards unsaved Nian Pass changes and loads the current
-          file from disk. Re-enter the master password because the external file
-          may have changed independently.
+          file from disk. Re-enter the master password when this vault uses one.
+          Keyfile-only vaults can leave it blank.
         </p>
         <form onSubmit={submit}>
           <label htmlFor="reload-master-password">Master password</label>
@@ -119,7 +119,7 @@ export function SaveDialogs(props: SaveDialogsProps) {
             >
               Cancel
             </button>
-            <button type="submit" disabled={busy || props.password === ""}>
+            <button type="submit" disabled={busy}>
               {busy ? "Reloading…" : "Discard local changes and reload"}
             </button>
           </div>

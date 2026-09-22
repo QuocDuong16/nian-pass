@@ -66,11 +66,14 @@ Controls are fail-closed and layered:
   means the last proven common generation, not the last attempted upload. Their
   metadata binds both the local source and a normalized remote-target digest;
   one profile ID cannot be retargeted to reuse that state.
-- Provider credentials and the master password are one-shot secret values.
-  They are absent from profiles, BASE metadata, journal, browser state,
-  Android, logs, errors, and startup behavior. The S3 client is constructed
-  directly from explicit credentials and never invokes environment, shared
-  file, SSO, ECS, or EC2 IMDS providers.
+- Provider credentials and an optionally entered master password are one-shot
+  operation inputs. They are temporarily held in React form state and cross
+  desktop IPC, then the form clears them after the operation; JavaScript memory
+  cannot promise immediate zeroization. Neither those secrets nor keyfile bytes
+  are persisted in sync profiles, BASE, or recovery journals, or included in
+  application logs or error responses. The keyfile remains Rust-owned. The S3
+  client is constructed directly from explicit credentials and never invokes
+  environment, shared file, SSO, ECS, or EC2 IMDS providers.
 - Conflict reports expose kinds/counts and safe identities only. Destructive
   whole-vault resolution requires explicit confirmation plus a random,
   process-local single-use token bound to profile, source, BASE presence/digest,
@@ -263,6 +266,7 @@ Privacy-sensitive vault metadata includes at least:
 - Group names
 - URLs
 - Usernames
+- Entry tags
 - Custom-field names
 - Entry and group identifiers
 - Database paths
@@ -272,6 +276,13 @@ These values are not necessarily secret cryptographic material, but they can
 reveal accounts, organizations, finances, health services, or other private
 context. Privacy-sensitive vault metadata must not be written to application
 logs, telemetry, crash reports, or remote diagnostics by default.
+
+Desktop external URL opening is restricted to entry URLs that are already projected as
+visible/unprotected metadata. Rust re-resolves the entry by ID and rejects protected or
+missing URLs, non-HTTP(S) schemes, missing hosts, and embedded URL userinfo before invoking
+the OS opener. The launcher receives one canonical URL as a direct argv value; Nian Pass
+does not compose a shell command. This avoids turning protected URL fields into process-list
+arguments and blocks `file:`, `javascript:`, and custom-scheme execution through this path.
 
 The explicit `list` CLI command may print group names and entry titles because
 the user directly requested that output. This is command output, not
@@ -335,6 +346,7 @@ information to an attacker even when their plaintext remains unavailable.
 - External clipboard replacement between ownership verification and clear
 - Secret-bearing edit drafts lingering in the WebView
 - Partial multi-field edits or multiple history snapshots for one Apply
+- Unbounded, empty, or duplicate entry-tag mutations bypassing reviewed KDBX semantics
 - Dirty in-memory edits silently discarded by Lock or window close
 - Mutation-versus-Lock races and stale selected IDs after structural changes
 - Protected custom fields accidentally downgraded during value updates
@@ -694,7 +706,15 @@ manageable by exact identity, while the ordinary new-field UI rejects blank
 names. Creation receipts must name an entry/group contained in their returned
 snapshot, preventing stale post-create selection.
 
-Password editing never preloads the existing password. Notes, custom values,
+Password editing never preloads the existing password. Character-password
+and passphrase generation use Web Crypto `getRandomValues` with rejection sampling
+(no modulo bias, `Math.random`, remote wordlist fetch, or fallback on RNG error).
+The 7,772-word EFF-derived dictionary is a static bundled asset; words are
+independently selected, including repeats, with a minimum of six words.
+Generated plaintext is intentionally delivered only to the existing local
+React new-password draft and cannot be deterministically zeroized as a JavaScript
+string. Generation itself does not call mutation IPC, persist, or Save.
+Notes, custom values,
 and protected metadata require explicit narrow loads. Drafts are component-local
 and clear on Apply, Cancel, failure, navigation, Lock, and unmount; browser
 persistence and logging remain forbidden. Mutation receipts and bulk/detail
@@ -706,13 +726,84 @@ Rust is authoritative for dirty state. Plain Lock refuses dirty sessions and
 does not drop them; explicit discard-lock shares the Copy/Lock lifecycle gate,
 drops the session before best-effort clipboard cleanup, and never saves. Window
 close calls a testable Rust policy and is prevented for dirty sessions until
-explicit discard. Permanent entry and recursive group deletion use explicit
-warnings and remain tombstone-based, not recycle-bin operations. Service tests
-verify mutation/discard leaves the immutable source fixture byte-identical.
+explicit discard. Product Delete is recoverable: entries and complete group
+subtrees move into the database's KDBX recycle bin without creating deleted-
+object tombstones. Restore is allowed only from the recycle-bin subtree and
+uses the recorded previous parent when that parent still exists outside Trash,
+otherwise the vault root. Permanent deletion is a separate explicit desktop
+action available only for already-recycled objects and creates the normal KDBX
+tombstones. An explicit database `RecycleBinEnabled=false` is respected instead
+of being silently overridden. Service tests verify mutation/discard leaves the
+immutable source fixture byte-identical.
+
+Bulk entry mutations are bounded and transactional rather than a frontend loop of
+single-entry commands. The desktop boundary accepts at most 1024 IDs and rejects
+empty batches, blank IDs, and duplicate IDs before mutation. Bulk Move additionally
+rejects recycle-bin destinations and entries already in Trash, preserving the
+separate Restore authorization path. Bulk Restore and Bulk Permanent Delete require
+every selected entry to be currently recycled, preventing either command from acting
+as a second live-entry mutation path. Restore destinations are resolved before commit
+and use only an existing non-Trash previous parent or the vault root. KDBX mutation
+resolves the complete batch, applies it to a cloned candidate database, and commits
+only after every operation succeeds. Unknown entries, invalid destinations, mixed
+live/recycled selections, recycle-bin policy failure, or any other batch error therefore
+produce no partial mutation and no revision advance; a successful changed batch
+advances the document revision once.
+
+Recycle-bin membership is also an authorization boundary for credential
+providers, not merely presentation state. Browser candidates, Android/iOS
+password identities, and final credential release all exclude recycled entries;
+final release revalidates membership and fails closed. Restoring an entry makes
+it eligible for the ordinary exact-target checks again. This prevents a
+soft-deleted credential from continuing to autofill while it remains recoverable
+in the encrypted database.
 
 ## M4.4 save and reload controls
 
-Desktop Save is explicit and is the only desktop disk-write command. Unlock moves the master password into a Rust-owned `SecretString` held only by the active `DesktopVaultService` session authority. Ordinary Save takes no password over IPC and reuses that Rust-side credential; the WebView never receives or persists it after unlock. Lock/discard drops the retained credential together with the unlocked session. External-conflict reload deliberately requests the current master password again before replacing the local session because the on-disk generation may have changed independently. JavaScript strings used for unlock/reload still cannot be deterministically zeroized.
+Desktop persistence is explicit. Ordinary `save_vault` and clean-session
+credential-rotation commands are the only desktop commands that replace the canonical KDBX
+source. Unlock moves the optional master password into a Rust-owned `SecretString`;
+desktop keyfile selection uses a native picker and returns only a filename to React. Rust
+rejects keyfile symlinks, non-regular/empty files, and files larger than 1 MiB, then keeps
+the bytes in `SecretBytes`. Successful unlock retains the exact password/keyfile components
+only inside `DesktopVaultService` for ordinary Save and verified credential rotation.
+Lock/discard drops that authority. External-conflict Reload combines an optional freshly
+entered password with the retained Rust keyfile; keyfile-only Reload sends no password.
+Credential rotation is refused while dirty, authenticates the current source with retained
+authority, verifies the replacement generation under the full replacement credential before
+commit, and changes retained authority only after success. `change_master_password` preserves
+the retained keyfile; `replace_keyfile` uses the native picker and preserves the Rust-owned
+password; `remove_master_password` requires the retained keyfile and rewrites the clean vault
+under keyfile-only authority after an explicit UI acknowledgement that losing the keyfile loses
+access. `remove_keyfile` requires a *nonempty* retained password, including when a direct IPC
+caller used an explicit empty password alongside a keyfile. Existing `.bak` generations may
+still be unlockable with previous credentials: rotation does not revoke or sanitize backups.
+Standalone desktop generation reuses the offline Web Crypto character/passphrase
+algorithms without creating an entry, requiring a writable vault, or initiating
+Save. Character length validation rejects invalid, out-of-range and noninteger
+values instead of truncating the output. The ephemeral result exists in a React
+string; hiding or unmounting clears application state but cannot guarantee
+zeroization of JavaScript/runtime copies or browser memory. Blur, hidden
+visibility, and idle privacy changes close the dialog, invalidating pending UI
+copy status. An explicit Copy sends the generated value across IPC once and
+wraps it in `SecretString` in Rust. The native command requires an unlocked vault,
+rejects empty, nonprintable or over-256-byte input, returns no plaintext, and
+uses the established 30-second clipboard lease with generation and fingerprint
+checks so stale expiry cannot clear a newer or externally replaced clipboard.
+OS clipboard history and interception remain outside application control.
+
+The sync engine now accepts a zeroizing per-operation password/keyfile authority: Rust
+copies the currently retained keyfile only for the active sync, and React sends an
+optional password (null for keyfile-only). The engine verifies every LOCAL, BASE,
+REMOTE, merge candidate and crash-recovery generation using the full authority.
+Neither keyfile bytes nor paths cross WebView IPC or enter profiles, BASE or journals.
+A different keyfile or missing composite password rejects authentication before
+remote mutation.
+Keyfile bytes and paths never cross the WebView boundary. Post-replacement uncertain failures trigger a narrow
+authority reconciliation: Rust tries the canonical generation with both old and new
+credentials and adopts the replacement only when the new authority opens while the old one
+does not. Rotation shares the same platform-safe replacement policy as ordinary Save and
+therefore also fails closed where ordinary persistence is unsupported.
 
 M3 revalidates the encrypted fingerprint at actual Save execution, including
 when an external editor changes the file after the credential dialog opened.
@@ -807,15 +898,48 @@ encryption, or protection against endpoint malware. M4.5 adds no unsafe native s
 The CLI reads the master password from an interactive terminal without echo and
 does not accept a password argument. Its input buffer is cleared on drop, and
 the adapter returns generic credential and format errors without embedding the
-password. The bulk domain projection exposes privacy-sensitive visible title,
-username, URL, tags, and identifiers plus password/notes presence flags, but
+password. The ordinary bulk domain projection exposes privacy-sensitive visible title,
+username, URL, tags, and identifiers plus password/notes/TOTP presence flags, but
 excludes protected Title/UserName/URL plaintext, password and notes plaintext,
-TOTP seeds, attachment contents, history, and all custom-field values. Protected
-standard metadata maps to an opaque `SummaryText::Protected` state, and the
-adapter checks protection before copying any visible text into the projection.
+TOTP seeds and generated codes, attachment contents, custom-icon UUID/image bytes,
+history, and all custom-field values. Entry icon projection is limited to none, custom,
+non-standard, or a bounded standard ID 0–68. Protected standard metadata maps to an opaque `SummaryText::Protected`
+state, and the adapter checks protection before copying any visible text into the
+projection. Desktop and mobile history are separate explicit reads: they return only the same
+protected-aware metadata/presence classes for historical revisions plus an opaque
+document-revision token. Mobile history is read-only; restore remains desktop-only. Historical secret values and attachment bytes do not cross
+the IPC boundary. Restore revalidates that token before using an index, remains
+inside Rust/KDBX, and fails closed for attachment/custom-icon revisions rather than
+risking silent reference loss. Desktop attachment listing likewise returns metadata
+only. Import accepts only a native-picked regular file, bounds reads to 64 MiB, stores
+new data as protected KDBX attachment content, and rejects duplicate names. Export
+reads one explicitly named attachment into zeroizing Rust storage and writes it to the
+native-picked target; attachment bytes and native paths never enter React. Export to
+the currently open vault file is rejected. Attachment delete/replace remains disabled
+until historical binary references can be preserved safely. Desktop custom-icon upload is
+also native-picked: the final path is never returned to React, the Rust reader rejects final
+symlinks/non-regular files and bounds input to 4 MiB, and KDBX accepts only bounded PNG
+chunk structure with a first IHDR, at least one IDAT, a terminal IEND, and dimensions from
+1 through 4096 on each axis. Replacement uses tracked history and deliberately retains old
+custom-icon objects so historical back-references are not invalidated. The on-demand desktop
+password-health report runs entirely inside the retained Rust/KDBX trust boundary, excludes
+Trash, and returns only reviewed issue metadata. Reuse detection compares SHA-256 digests
+inside Rust; neither password plaintext nor those digests, raw password length, or reuse
+grouping identifiers cross WebView IPC. A bounded 0–4 local strength heuristic is computed
+directly from the existing password `&str` plus current title/username/URL context; only the
+numeric score and weak/not-weak flag cross IPC. The scorer recognizes coarse length and
+character-class signals plus a deliberately small set of repeated, sequential, common, and
+entry-context patterns. It does not claim entropy, crack time, or breach intelligence and
+does not contact a network service. The independent under-policy flag remains a fixed
+12-character minimum.
 
 Password and notes reads require an exact `EntryId` and return one owned
-`SecretString`. Its backing `String` is zeroized on drop through `zeroize`; the
+`SecretString`. Desktop TOTP generation likewise requires an exact current
+entry identity; provisioning material remains inside KDBX/Rust and the explicit
+reveal surface returns only the current short-lived code plus non-secret timing
+metadata. TOTP clipboard copy routes the generated code directly through the
+Rust clipboard service. Existing TOTP seed/URI material is never preloaded into
+the WebView for editing. Its backing `String` is zeroized on drop through `zeroize`; the
 type intentionally has no `Debug`, `Display`, `Clone`, serialization, deref, or
 implicit string-borrowing implementation. Callers must explicitly invoke
 `expose_secret()` for the shortest practical lifetime. The adapter makes one
@@ -826,7 +950,11 @@ Custom-field enumeration returns `CustomFieldSummary` values containing only a
 privacy-sensitive name and protection state. Even an unprotected custom value
 requires an explicit entry UUID plus field name and returns `SecretString`.
 Generic custom-field APIs reject the five standard fields, supported legacy and
-current TOTP storage names, and KeePassXC passkey attribute names. Existing
+current TOTP storage names, and KeePassXC passkey attribute names. TOTP
+configure/replace/remove instead uses a typed atomic entry mutation, validates
+provisioning data before changing the document, stores new canonical `otp` data
+protected, and clears recognized legacy TOTP fields when replacing/removing a
+configuration. Existing
 custom fields retain their protected/unprotected mode on update, while callers
 must select protection for new fields. Add, update, and delete operations retain
 the prior field state in entry history; same-value updates and deletion of a
@@ -863,14 +991,19 @@ reject root, self, and descendant targets. Same-parent moves and same-name group
 renames are complete no-ops. Projections remain immutable snapshots, so a fresh
 projection is required to observe document changes.
 
-Permanent deletion is named explicitly and is separate from KeePassXC's
-user-facing recycle-bin policy. Entry deletion creates a timestamped tombstone.
-Recursive group deletion tombstones the parent, every nested group, and every
-contained entry, matching KeePassXC 2.7.12 deletion tests; it also clears
-represented custom-icon back-references and metadata UUID pointers before
-removal. Root deletion is rejected. Tests verify unknown and invalid operations
-leave the complete database unchanged and verify all tombstones after
-save/reopen.
+The adapter keeps permanent deletion explicit and separate from recoverable
+recycle-bin moves. `trash_entry` and `trash_group` move live objects into the
+KDBX recycle-bin subtree without tombstones; `restore_entry` and `restore_group`
+require current recycle-bin membership and choose a safe non-Trash destination.
+`permanently_delete_recycled_entry` and
+`permanently_delete_recycled_group` reject live objects outside Trash before
+calling the lower-level tombstone deletion primitives. Permanent entry deletion
+creates a timestamped tombstone. Recursive permanent group deletion tombstones
+the parent, every nested group, and every contained entry, matching KeePassXC
+2.7.12 deletion tests; it also clears represented custom-icon back-references
+and metadata UUID pointers before removal. Root and recycle-bin-root deletion are
+rejected. Tests verify unknown/invalid operations leave complete database state
+unchanged and distinguish soft delete, restore, and permanent-delete tombstones.
 
 Tests serialize to memory, reopen the result, verify preservation invariants,
 exercise wrong credentials and writer failure, and confirm the source fixture
@@ -997,6 +1130,10 @@ must not become a second unlocked-vault owner. Controls are:
 - `SummaryText::Protected` maps to a marker-only DTO. Missing, visible empty,
   visible text, and protected remain distinct; protected standard-field
   plaintext is never fetched for list rendering.
+- Global search runs locally over the existing validated summary projection. Its
+  text and structured tag/group/presence/expiry/protection filters cannot inspect
+  protected field plaintext, query TOTP seeds or call reveal IPC. Search always
+  excludes Trash descendants; it does not create mutations or Save authority.
 - Opening an entry never fetches password or notes. Separate fixed commands
   resolve an exact entry UUID and return only one password or notes string after
   the corresponding Reveal action. Runtime validation rejects non-string or
@@ -1010,14 +1147,15 @@ must not become a second unlocked-vault owner. Controls are:
   A is ignored after selecting B, and starting Lock invalidates pending requests
   before the backend result. This controls stale async population of the wrong
   entry or a locking view.
-- Copy Username and Copy Password are semantic Rust commands. They resolve the
-  UUID through narrow secret-bearing getters and write through `ClipboardPort`;
-  password copy returns only a safe receipt, so copy does not introduce password
-  plaintext into React. Browser clipboard APIs and the JavaScript clipboard
-  plugin are rejected by ESLint and the repository security guard.
-- Copy Username, Copy Password, and Lock share one secret-operation lifecycle
-  gate. The order is gate, then vault-service mutex; the service mutex is
-  released before clipboard I/O, and clipboard state never acquires the gate.
+- Copy Title, Username, URL, Notes, Password, and Custom Field are semantic Rust
+  commands. They resolve the UUID through narrow secret-bearing getters and write
+  through `ClipboardPort`; copy returns only a safe receipt, so protected title,
+  URL, notes, password, or custom-field plaintext does not need to enter React.
+  Browser clipboard APIs and the JavaScript clipboard plugin are rejected by
+  ESLint and the repository security guard.
+- Those semantic copy commands and Lock share one secret-operation lifecycle gate.
+  The order is gate, then vault-service mutex; the service mutex is released before
+  clipboard I/O, and clipboard state never acquires the gate.
   If copy wins, Lock waits for its write and lease before dropping the session
   and cleaning up. If Lock wins, it drops the session first and the later copy
   returns `Locked` without writing. Thus no already-started gated copy can write
@@ -1058,7 +1196,7 @@ process-local mutex. Clearing the active clipboard also cannot remove copies hel
 by OS clipboard history, desktop clipboard managers, cloud clipboard sync, or
 third-party utilities. Auto-clear is best-effort at the OS boundary, not secure
 erasure. Privacy-sensitive metadata remains visible while unlocked, and native
-runtime smoke testing still needs a graphical host. M4.4 has no Save As,
+runtime smoke testing still needs a graphical host. M4.4 has no canonical-path retargeting Save As,
 force overwrite, automatic conflict merge, sync transport, autosave, auto-lock,
 biometrics, or screenshot protection.
 
@@ -1179,3 +1317,8 @@ writes in a uniquely created temporary directory removed on drop. A shell
 timeout bounds the suite. The immutable source fixture is copied before use and
 its bytes are checked again after the external round-trip. Local absence is an
 explicit skip; the dedicated CI job uses `--require`, so absence is a failure.
+
+
+### Export-copy boundary
+
+Desktop export copy is intentionally distinct from Save. A native save picker selects a new destination, the shared vault-operation gate remains held across the picker and filesystem work, and attachment/database bytes never cross the WebView. Rust refuses an existing destination, verifies both the prepared and published KDBX against the current in-memory document, and removes a just-created destination if post-publication verification fails. Export does not mark a dirty session clean, change its canonical path, refresh its source fingerprint, or retarget sync state.

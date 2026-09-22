@@ -1,4 +1,8 @@
-import type { ClosePolicyDto, SelectedVaultDto } from "../types/desktop";
+import type {
+  ClosePolicyDto,
+  SelectedKeyfileDto,
+  SelectedVaultDto,
+} from "../types/desktop";
 import {
   invalidContract,
   nonEmptyString,
@@ -9,6 +13,7 @@ export { parseDesktopErrorCode } from "./desktop-errors";
 export {
   invalidContract,
   nonEmptyString,
+  nullableSafeInteger,
   parseSummaryText,
   record,
   stringValue,
@@ -24,6 +29,11 @@ export {
 } from "./snapshot-validation";
 
 export function parseSelectedVault(value: unknown): SelectedVaultDto {
+  const object = record(value, ["fileName"]);
+  return { fileName: nonEmptyString(object["fileName"]) };
+}
+
+export function parseSelectedKeyfile(value: unknown): SelectedKeyfileDto {
   const object = record(value, ["fileName"]);
   return { fileName: nonEmptyString(object["fileName"]) };
 }

@@ -353,6 +353,35 @@ test("conflict reload succeeds cleanly while reload failure retains local dirty 
   expect(reloadVault).toHaveBeenNthCalledWith(2, "current-password");
 });
 
+test("keyfile-only conflict reload can submit without a master password", async () => {
+  const reloadVault = vi.fn().mockResolvedValue(cleanSnapshot);
+  const api = mutationApi({
+    unlockVault: vi.fn().mockResolvedValue(mutationSnapshot),
+    saveVault: vi
+      .fn()
+      .mockRejectedValue(new DesktopCommandError("external_change")),
+    reloadVault,
+  });
+  await unlock(api);
+  fireEvent.click(screen.getByRole("button", { name: "Save vault" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Discard local changes and reload",
+    }),
+  );
+  const reload = screen.getByRole("button", {
+    name: "Discard local changes and reload",
+  });
+  expect(screen.getByLabelText("Master password")).toHaveValue("");
+  expect(reload).toBeEnabled();
+  fireEvent.click(reload);
+
+  await waitFor(() => {
+    expect(reloadVault).toHaveBeenCalledWith(null);
+  });
+  expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
+});
+
 test("dirty Lock saves before ordinary Lock and never locks on save failure", async () => {
   const saveVault = vi
     .fn()

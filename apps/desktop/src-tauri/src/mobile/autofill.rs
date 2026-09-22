@@ -2,7 +2,7 @@
 
 use credential_provider_core::{CredentialTarget, ProviderError};
 use serde::{Deserialize, Serialize};
-use vault_core::SecretString;
+use vault_core::{EntryId, SecretString};
 
 use crate::dto::SummaryTextDto;
 
@@ -190,6 +190,7 @@ pub(crate) struct PreparedAutofillFulfillment {
     pub(crate) entry_id: String,
     pub(crate) username: SecretString,
     pub(crate) password: SecretString,
+    pub(crate) totp: Option<SecretString>,
 }
 
 impl MobileVaultSession {
@@ -223,6 +224,24 @@ impl MobileVaultSession {
             &target.provider_target()?,
         )
         .map_err(map_provider_error)?;
+        let id = EntryId::new(entry_id);
+        let has_totp = self
+            .document
+            .projection()
+            .map_err(|_| MobileError::Internal)?
+            .find_entry(&id)
+            .ok_or(MobileError::CredentialUnavailable)?
+            .has_totp();
+        let totp = if has_totp {
+            Some(
+                self.document
+                    .entry_totp_code(&id)
+                    .map_err(|_| MobileError::CredentialUnavailable)?
+                    .into_code(),
+            )
+        } else {
+            None
+        };
         let (username, password) = credential.into_secrets();
         Ok(PreparedAutofillFulfillment {
             operation,
@@ -230,6 +249,7 @@ impl MobileVaultSession {
             entry_id: entry_id.to_owned(),
             username,
             password,
+            totp,
         })
     }
 }

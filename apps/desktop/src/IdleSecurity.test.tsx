@@ -119,6 +119,7 @@ test("Never disables inactivity Lock while preserving the manual control", async
   });
   await unlock(api);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(screen.getByRole("button", { name: /Security/ }));
   fireEvent.change(screen.getByLabelText("Auto-lock timeout"), {
     target: { value: "never" },
   });

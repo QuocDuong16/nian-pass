@@ -4,8 +4,10 @@ import type { SyncConflictOperation, SyncProfileDto } from "../../lib/sync";
 import type { ConflictChoice } from "./SyncConflictPanel";
 import { projectSyncForm } from "./form-values";
 import { syncErrorMessage } from "./sync-errors";
+import { syncProfileStatus } from "./sync-profile-status";
 import type { ProviderKind, SyncSectionOptions } from "./types";
 import { useSyncFormState } from "./useSyncFormState";
+import { useSyncKeyfileStatus } from "./useSyncKeyfileStatus";
 
 export function useSyncSection({
   api,
@@ -36,6 +38,8 @@ export function useSyncSection({
   );
   const [confirmReset, setConfirmReset] = useState(false);
 
+  const hasKeyfile = useSyncKeyfileStatus(api, setError);
+
   const selectProfile = useCallback(
     (profile: SyncProfileDto) => {
       setSelectedId(profile.profileId);
@@ -55,13 +59,7 @@ export function useSyncSection({
       setConflict(null);
       setConfirmChoice(null);
       setConfirmReset(false);
-      setStatus(
-        profile.recoveryStatus === "required"
-          ? "Sync recovery required."
-          : profile.recoveryStatus === "unsupported"
-            ? "Older or unsupported sync metadata must be reset explicitly."
-            : "Idle",
-      );
+      setStatus(syncProfileStatus(profile.recoveryStatus));
     },
     [
       setBucket,
@@ -153,7 +151,7 @@ export function useSyncSection({
           const result = await api.syncNow(
             selected.profileId,
             credentials,
-            form.masterPassword,
+            form.masterPassword === "" ? null : form.masterPassword,
           );
           onSnapshot(result.snapshot);
           setConflict(result.conflict);
@@ -173,7 +171,7 @@ export function useSyncSection({
             conflict.conflictOperationId,
             choice,
             credentials,
-            form.masterPassword,
+            form.masterPassword === "" ? null : form.masterPassword,
           );
           onSnapshot(result.snapshot);
           setConflict(null);
@@ -218,7 +216,8 @@ export function useSyncSection({
     selected === null ||
     selected.recoveryStatus === "unsupported" ||
     !credentialsComplete ||
-    form.masterPassword === "";
+    hasKeyfile === null ||
+    (form.masterPassword === "" && !hasKeyfile);
   return {
     profiles,
     selectedId,
@@ -233,6 +232,7 @@ export function useSyncSection({
     providerConfigComplete,
     credentialsComplete,
     syncUnavailable,
+    hasKeyfile,
     setSelectedId,
     setConfirmChoice,
     setConfirmReset,

@@ -139,8 +139,8 @@ export function useSaveFlow({
   };
 
   const submitReload = async () => {
-    if (flow.kind !== "reload_credential" || password === "") return;
-    const suppliedPassword = password;
+    if (flow.kind !== "reload_credential") return;
+    const suppliedPassword = password === "" ? null : password;
     setPassword("");
     setFlow({ kind: "reloading" });
     try {

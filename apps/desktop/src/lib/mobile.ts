@@ -14,7 +14,14 @@ import {
   parseMobileSecurityAcknowledgement,
   parseMobileSecurityResume,
 } from "./mobile-security-validation";
-import { parseEntryDetail, parseSecretString } from "./entry-validation";
+import {
+  parseAttachmentExportReceipt,
+  parseEntryAttachments,
+  parseEntryDetail,
+  parseEntryHistory,
+  parseSecretString,
+  parseTotpCode,
+} from "./entry-validation";
 import {
   nonEmptyString,
   parseCreatedCoreEntry,
@@ -126,6 +133,22 @@ export const mobileApi: MobileApi = {
   getVaultSnapshot: () => call("mobile_vault_snapshot", parseVaultCoreSnapshot),
   getEntryDetail: (entryId) =>
     call("mobile_entry_detail", parseEntryDetail, { entryId }),
+  getEntryHistory: (entryId) =>
+    call("mobile_entry_history", parseEntryHistory, { entryId }),
+  getEntryAttachments: (entryId) =>
+    call("mobile_entry_attachments", parseEntryAttachments, { entryId }),
+  importEntryAttachment: (entryId) =>
+    call(
+      "mobile_import_entry_attachment",
+      (value) => (value === null ? null : parseVaultCoreSnapshot(value)),
+      { entryId },
+    ),
+  exportEntryAttachment: (entryId, name) =>
+    call(
+      "mobile_export_entry_attachment",
+      (value) => (value === null ? null : parseAttachmentExportReceipt(value)),
+      { entryId, name },
+    ),
   revealEntryTitle: (entryId) =>
     call("mobile_load_entry_title", parseSecretString, { entryId }),
   revealEntryUsername: (entryId) =>
@@ -134,6 +157,8 @@ export const mobileApi: MobileApi = {
     call("mobile_load_entry_url", parseSecretString, { entryId }),
   revealEntryNotes: (entryId) =>
     call("mobile_load_entry_notes", parseSecretString, { entryId }),
+  revealEntryTotp: (entryId) =>
+    call("mobile_entry_totp_code", parseTotpCode, { entryId }),
   revealEntryCustomField: (entryId, name) =>
     call("mobile_load_entry_custom_field", parseSecretString, {
       entryId,
@@ -141,6 +166,10 @@ export const mobileApi: MobileApi = {
     }),
   updateEntry: (request) =>
     call("mobile_update_entry", parseVaultCoreSnapshot, { request }),
+  setEntryTags: (entryId, tags) =>
+    call("mobile_set_entry_tags", parseVaultCoreSnapshot, {
+      request: { entryId, tags },
+    }),
   createEntry: (request) =>
     call("mobile_create_entry", parseCreatedCoreEntry, { request }),
   deleteEntry: (entryId) =>

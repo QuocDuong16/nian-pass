@@ -9,6 +9,7 @@ import type {
 import type { CustomFieldEditorApi } from "../../types/mutation-api";
 import { requireLoaded } from "./custom-field-labels";
 import { CustomFieldList } from "./CustomFieldList";
+import { useCustomFieldClipboard } from "./useCustomFieldClipboard";
 import { useSecretDraft } from "./useSecretDraft";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
@@ -45,8 +46,18 @@ export function CustomFieldsEditor<TSnapshot extends VaultCoreSnapshotDto>({
   const [failed, setFailed] = useState(false);
   const value = useSecretDraft();
   const loadValue = value.load;
+  const fieldClipboard = useCustomFieldClipboard({
+    copyEntryCustomField: api.copyEntryCustomField,
+    entryId,
+    disabled,
+  });
 
-  useSecurityFormTelemetry(action !== null, busy, onDraftChange, onBusyChange);
+  useSecurityFormTelemetry(
+    action !== null,
+    busy || fieldClipboard.copyingFieldName !== null,
+    onDraftChange,
+    onBusyChange,
+  );
 
   const loadExistingValue = useCallback(
     (field: CustomFieldSummaryDto) =>
@@ -100,6 +111,9 @@ export function CustomFieldsEditor<TSnapshot extends VaultCoreSnapshotDto>({
       <CustomFieldList
         fields={fields}
         disabled={disabled}
+        copyAvailable={fieldClipboard.available}
+        copyingFieldName={fieldClipboard.copyingFieldName}
+        onCopy={(field) => void fieldClipboard.copy(field.name)}
         onAdd={() => {
           setAction({ kind: "add" });
           value.set("");
@@ -111,6 +125,11 @@ export function CustomFieldsEditor<TSnapshot extends VaultCoreSnapshotDto>({
           setAction({ kind: "delete", field });
         }}
       />
+      {fieldClipboard.available ? (
+        <p className="copy-status" aria-live="polite">
+          {fieldClipboard.status ?? ""}
+        </p>
+      ) : null}
       {failed ? <p role="alert">Could not change the custom field.</p> : null}
 
       {action !== null ? (

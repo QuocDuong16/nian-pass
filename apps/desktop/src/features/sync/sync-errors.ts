@@ -30,7 +30,7 @@ export function syncErrorMessage(reason: unknown): string {
     return "This provider does not expose compatible conditional-write and revision semantics.";
   }
   if (reason.code === "sync_credentials_required") {
-    return "Provider credentials and the vault master password are required.";
+    return "A valid vault password and/or the active keyfile is required, along with provider credentials.";
   }
   if (reason.code === "operation_in_progress") {
     return "Another vault operation is already in progress.";

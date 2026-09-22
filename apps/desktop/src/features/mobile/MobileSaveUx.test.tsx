@@ -221,7 +221,9 @@ test("read-only provider keeps browse but disables editing and Save", async () =
     await screen.findByText(/editing and Save are disabled/i),
   ).toBeVisible();
   expect(screen.getByRole("button", { name: "Save vault" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "New entry" })).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "New entry" }),
+  ).not.toBeInTheDocument();
   expect(screen.getByText("Synthetic account")).toBeVisible();
 });
 

@@ -1,12 +1,24 @@
+export type * from "./database-settings";
+
 export type SummaryTextDto =
   | { kind: "missing" }
   | { kind: "visible"; value: string }
   | { kind: "protected" };
 
+export type EntryIconDto =
+  | { kind: "none" }
+  | { kind: "built_in"; id: number }
+  | { kind: "custom" }
+  | { kind: "non_standard" };
+
 export type EntryId = string;
 export type GroupId = string;
 
 export interface SelectedVaultDto {
+  fileName: string;
+}
+
+export interface SelectedKeyfileDto {
   fileName: string;
 }
 
@@ -25,7 +37,10 @@ export interface EntrySummaryDto {
   url: SummaryTextDto;
   passwordPresent: boolean;
   notesPresent: boolean;
+  totpPresent: boolean;
   tags: string[];
+  expiresAtUnixSeconds: number | null;
+  icon: EntryIconDto;
 }
 
 export interface CustomFieldSummaryDto {
@@ -40,8 +55,66 @@ export interface EntryDetailDto {
   url: SummaryTextDto;
   passwordPresent: boolean;
   notesPresent: boolean;
+  totpPresent: boolean;
   tags: string[];
+  expiresAtUnixSeconds: number | null;
+  icon: EntryIconDto;
   customFields: CustomFieldSummaryDto[];
+}
+
+export interface TotpCodeDto {
+  code: string;
+  validForSeconds: number;
+  periodSeconds: number;
+}
+
+export interface EntryHistoryItemDto {
+  index: number;
+  modifiedAtUnixSeconds: number | null;
+  title: SummaryTextDto;
+  username: SummaryTextDto;
+  url: SummaryTextDto;
+  passwordPresent: boolean;
+  notesPresent: boolean;
+  totpPresent: boolean;
+  tags: string[];
+  expiresAtUnixSeconds: number | null;
+  restorable: boolean;
+}
+
+export interface EntryHistoryDto {
+  documentRevision: string;
+  items: EntryHistoryItemDto[];
+}
+
+export interface EntryAttachmentSummaryDto {
+  name: string;
+  sizeBytes: number;
+  protected: boolean;
+}
+
+export interface AttachmentExportReceiptDto {
+  exported: true;
+}
+
+export interface PasswordHealthIssueDto {
+  entryId: EntryId;
+  groupId: GroupId;
+  title: SummaryTextDto;
+  missingPassword: boolean;
+  emptyPassword: boolean;
+  reusedPassword: boolean;
+  belowMinimumLength: boolean;
+  weakPassword: boolean;
+  strengthScore: number | null;
+}
+
+export interface PasswordHealthReportDto {
+  totalEntries: number;
+  passwordEntries: number;
+  minimumLength: number;
+  weakScoreThreshold: number;
+  issues: PasswordHealthIssueDto[];
 }
 
 export interface ClipboardReceiptDto {
@@ -55,6 +128,8 @@ export interface LockResultDto {
 
 export interface VaultCoreSnapshotDto {
   dirty: boolean;
+  recycleBinEnabled: boolean;
+  recycleBinGroupId: GroupId | null;
   rootGroupId: string;
   groups: GroupDto[];
   entries: EntrySummaryDto[];
@@ -100,6 +175,11 @@ export interface UpdateEntryRequest {
   url?: string;
   password?: string;
   notes?: string;
+  expires?: boolean;
+  expiryUnixSeconds?: number;
+  totpEnabled?: boolean;
+  totpUri?: string;
+  icon?: { kind: "none" } | { kind: "built_in"; id: number };
 }
 
 export interface CreateEntryRequest {
@@ -134,6 +214,12 @@ export type DesktopErrorCode =
   | "group_not_found"
   | "invalid_request"
   | "invalid_move"
+  | "history_changed"
+  | "history_restore_unsupported"
+  | "attachment_not_found"
+  | "attachment_already_exists"
+  | "attachment_too_large"
+  | "attachment_io_failed"
   | "reserved_field"
   | "secret_unavailable"
   | "unsaved_changes"

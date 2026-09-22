@@ -95,6 +95,150 @@ test("one Apply sends intentional fields and clears password and notes drafts", 
   expect(screen.queryByDisplayValue("M4.3-NEW-NOTES")).not.toBeInTheDocument();
 });
 
+test("entry built-in icon is applied atomically while an unchanged icon is omitted", async () => {
+  const api = mutationApi();
+  render(
+    <EntryEditForm
+      api={api}
+      detail={mutationDetail}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByLabelText<HTMLSelectElement>("Icon").value).toBe("none");
+  fireEvent.change(screen.getByLabelText("Icon"), {
+    target: { value: "built_in:68" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      title: "Account A",
+      username: "user-a",
+      url: "m4.3://a",
+      icon: { kind: "built_in", id: 68 },
+    });
+  });
+});
+
+test("custom icon stays untouched until the user explicitly replaces or clears it", async () => {
+  const api = mutationApi();
+  const { rerender } = render(
+    <EntryEditForm
+      api={api}
+      detail={{ ...mutationDetail, icon: { kind: "custom" } }}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  const icon = screen.getByLabelText<HTMLSelectElement>("Icon");
+  expect(icon.value).toBe("preserve");
+  expect(icon).toHaveTextContent("Keep current: Custom icon");
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledOnce();
+  });
+  expect(api.updateEntry).toHaveBeenLastCalledWith({
+    entryId: "entry-a",
+    title: "Account A",
+    username: "user-a",
+    url: "m4.3://a",
+  });
+
+  vi.mocked(api.updateEntry).mockClear();
+  rerender(
+    <EntryEditForm
+      api={api}
+      detail={{ ...mutationDetail, icon: { kind: "custom" } }}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Icon"), {
+    target: { value: "none" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      title: "Account A",
+      username: "user-a",
+      url: "m4.3://a",
+      icon: { kind: "none" },
+    });
+  });
+});
+
+test("entry expiry validates locally and is applied atomically with metadata", async () => {
+  const api = mutationApi();
+  render(
+    <EntryEditForm
+      api={api}
+      detail={mutationDetail}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(
+    screen.getByRole("checkbox", { name: "Entry expires" }),
+  ).not.toBeChecked();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Entry expires" }));
+  expect(screen.getByRole("button", { name: "Apply changes" })).toBeDisabled();
+  expect(screen.getByRole("alert")).toHaveTextContent("Choose a valid expiry");
+
+  const localExpiry = "2030-01-02T03:04";
+  fireEvent.change(screen.getByLabelText("Expiry date and time"), {
+    target: { value: localExpiry },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      title: "Account A",
+      username: "user-a",
+      url: "m4.3://a",
+      expires: true,
+      expiryUnixSeconds: Math.floor(new Date(localExpiry).getTime() / 1000),
+    });
+  });
+});
+
+test("entry expiry can be disabled without sending a stale timestamp", async () => {
+  const api = mutationApi();
+  render(
+    <EntryEditForm
+      api={api}
+      detail={{ ...mutationDetail, expiresAtUnixSeconds: 1_893_456_000 }}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("checkbox", { name: "Entry expires" })).toBeChecked();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Entry expires" }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledWith({
+      entryId: "entry-a",
+      title: "Account A",
+      username: "user-a",
+      url: "m4.3://a",
+      expires: false,
+    });
+  });
+});
+
 test("entry edit failure clears secret drafts while retaining non-secret metadata", async () => {
   const api = mutationApi({
     updateEntry: vi.fn().mockRejectedValue(new Error("synthetic")),
@@ -161,6 +305,64 @@ test("entry creation password generator materializes only the new local password
   const password = screen.getByLabelText<HTMLInputElement>("Password");
   expect(password.value).not.toBe("");
   expect(api.createEntry).not.toHaveBeenCalled();
+});
+
+test("passphrase generation changes only the edit draft until explicit Apply", async () => {
+  const api = mutationApi();
+  render(
+    <EntryEditForm
+      api={api}
+      detail={mutationDetail}
+      disabled={false}
+      onApplied={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Generate password" }));
+  fireEvent.click(screen.getByRole("button", { name: "Passphrase" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+  const password = screen.getByLabelText<HTMLInputElement>("Password");
+  expect(password).toHaveAttribute("type", "password");
+  expect(password.value.split("-")).toHaveLength(6);
+  expect(api.updateEntry).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+  await waitFor(() => {
+    expect(api.updateEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ password: password.value }),
+    );
+  });
+  expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+});
+
+test("passphrase creation sends plaintext only on explicit Create", async () => {
+  const api = mutationApi();
+  render(
+    <EntryCreateDialog
+      api={api}
+      groupId="group-root"
+      onCreated={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "Passphrase entry" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Generate password" }));
+  fireEvent.click(screen.getByRole("button", { name: "Passphrase" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+  const password = screen.getByLabelText<HTMLInputElement>("Password");
+  expect(password.value.split("-")).toHaveLength(6);
+  const generated = password.value;
+  expect(api.createEntry).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Create entry" }));
+  await waitFor(() => {
+    expect(api.createEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ password: generated }),
+    );
+  });
+  expect(screen.queryByDisplayValue(generated)).not.toBeInTheDocument();
 });
 
 test("entry creation Escape cancels the local draft", () => {
@@ -285,6 +487,39 @@ test("custom field edit is explicit, preserves protection, and ignores a late lo
       protection: "protected",
     });
   });
+});
+
+test("protected and unprotected custom fields copy without revealing plaintext", async () => {
+  const api = mutationApi();
+  render(
+    <CustomFieldsEditor
+      api={api}
+      entryId="entry-a"
+      fields={[
+        { name: "Private", protection: "protected" },
+        { name: "Region", protection: "unprotected" },
+      ]}
+      disabled={false}
+      onApplied={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy Private" }));
+  await waitFor(() => {
+    expect(api.copyEntryCustomField).toHaveBeenCalledWith("entry-a", "Private");
+  });
+  expect(api.revealEntryCustomField).not.toHaveBeenCalled();
+  expect(document.body).not.toHaveTextContent("custom secret");
+
+  const regionCopy = screen.getByRole("button", { name: "Copy Region" });
+  await waitFor(() => {
+    expect(regionCopy).not.toBeDisabled();
+  });
+  fireEvent.click(regionCopy);
+  await waitFor(() => {
+    expect(api.copyEntryCustomField).toHaveBeenCalledWith("entry-a", "Region");
+  });
+  expect(api.revealEntryCustomField).not.toHaveBeenCalled();
 });
 
 test("custom field load failure cannot mutate and leaves Apply disabled", async () => {
@@ -523,7 +758,62 @@ test("protected metadata enters the edit draft only after explicit load", async 
   expect(api.revealEntryTitle).toHaveBeenCalledWith("entry-a");
 });
 
-test("entry destructive dialogs explain permanent deletion and move by GroupId", async () => {
+test("entry duplicate uses the semantic API without revealing secrets", async () => {
+  const duplicateEntry = vi.fn().mockResolvedValue({
+    createdEntryId: "entry-duplicate",
+    snapshot: mutationSnapshot,
+  });
+  const api = mutationApi({ duplicateEntry });
+  const onDuplicated = vi.fn();
+  render(
+    <EntryActions
+      api={api}
+      detail={mutationDetail}
+      groups={mutationSnapshot.groups}
+      disabled={false}
+      onDeleted={vi.fn()}
+      onDuplicated={onDuplicated}
+      onMoved={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Duplicate entry" }));
+  await waitFor(() => {
+    expect(duplicateEntry).toHaveBeenCalledWith("entry-a");
+  });
+  expect(api.revealEntryPassword).not.toHaveBeenCalled();
+  expect(api.revealEntryNotes).not.toHaveBeenCalled();
+  expect(onDuplicated).toHaveBeenCalledWith({
+    createdEntryId: "entry-duplicate",
+    snapshot: mutationSnapshot,
+  });
+});
+
+test("entry duplicate failure stays local and reports a generic error", async () => {
+  const api = mutationApi({
+    duplicateEntry: vi
+      .fn()
+      .mockRejectedValue(new Error("synthetic duplicate failure")),
+  });
+  render(
+    <EntryActions
+      api={api}
+      detail={mutationDetail}
+      groups={mutationSnapshot.groups}
+      disabled={false}
+      onDeleted={vi.fn()}
+      onDuplicated={vi.fn()}
+      onMoved={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Duplicate entry" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Could not complete the entry operation",
+  );
+});
+
+test("normal entry moves to Trash instead of permanent deletion and still moves by GroupId", async () => {
   const api = mutationApi();
   const onDeleted = vi.fn();
   const onMoved = vi.fn();
@@ -537,12 +827,23 @@ test("entry destructive dialogs explain permanent deletion and move by GroupId",
       onMoved={onMoved}
     />,
   );
+
+  expect(
+    screen.queryByRole("button", { name: "Permanently delete entry" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Move entry to Trash" }));
+  expect(screen.getByText(/can be restored later/)).toBeVisible();
+  expect(
+    screen.getByText(/without creating a deletion tombstone/),
+  ).toBeVisible();
   fireEvent.click(
-    screen.getByRole("button", { name: "Permanently delete entry" }),
+    screen.getByRole("button", { name: "Confirm move entry to Trash" }),
   );
-  expect(screen.getByText(/records a deletion tombstone/)).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(api.deleteEntry).not.toHaveBeenCalled();
+  await waitFor(() => {
+    expect(api.deleteEntry).toHaveBeenCalledWith("entry-a");
+  });
+  expect(onDeleted).toHaveBeenCalledWith(mutationSnapshot);
+  expect(api.permanentlyDeleteEntry).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole("button", { name: "Move entry" }));
   fireEvent.change(screen.getByLabelText("Destination group"), {
@@ -557,4 +858,78 @@ test("entry destructive dialogs explain permanent deletion and move by GroupId",
     expect(api.moveEntry).toHaveBeenCalledWith("entry-a", "group-child");
   });
   expect(onMoved).toHaveBeenCalledWith(mutationSnapshot, "group-child");
+});
+
+test("recycled entry can restore or be permanently deleted only from Trash", async () => {
+  const api = mutationApi();
+  const onDeleted = vi.fn();
+  const onMoved = vi.fn();
+  const { rerender } = render(
+    <EntryActions
+      api={api}
+      detail={mutationDetail}
+      groups={mutationSnapshot.groups}
+      disabled={false}
+      recycled
+      onDeleted={onDeleted}
+      onMoved={onMoved}
+    />,
+  );
+
+  expect(
+    screen.queryByRole("button", { name: "Move entry" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Restore entry" })).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Permanently delete entry" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Restore entry" }));
+  await waitFor(() => {
+    expect(api.restoreEntry).toHaveBeenCalledWith("entry-a");
+  });
+  expect(onMoved).toHaveBeenCalledWith(mutationSnapshot, "group-root");
+
+  rerender(
+    <EntryActions
+      api={api}
+      detail={mutationDetail}
+      groups={mutationSnapshot.groups}
+      disabled={false}
+      recycled
+      onDeleted={onDeleted}
+      onMoved={onMoved}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Permanently delete entry" }),
+  );
+  expect(screen.getByText(/records a deletion tombstone/)).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Confirm permanent entry deletion" }),
+  );
+  await waitFor(() => {
+    expect(api.permanentlyDeleteEntry).toHaveBeenCalledWith("entry-a");
+  });
+  expect(onDeleted).toHaveBeenCalledWith(mutationSnapshot);
+});
+
+test("entry Trash action is absent when the database explicitly disables recycle bin", () => {
+  render(
+    <EntryActions
+      api={mutationApi()}
+      detail={mutationDetail}
+      groups={mutationSnapshot.groups}
+      disabled={false}
+      recycleBinEnabled={false}
+      onDeleted={vi.fn()}
+      onMoved={vi.fn()}
+    />,
+  );
+  expect(
+    screen.queryByRole("button", { name: "Move entry to Trash" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Permanently delete entry" }),
+  ).not.toBeInTheDocument();
 });

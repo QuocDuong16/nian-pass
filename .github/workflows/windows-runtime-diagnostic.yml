@@ -41,6 +41,36 @@ jobs:
           rustup target add x86_64-pc-windows-msvc --toolchain $env:RUST_VERSION
           pnpm install --frozen-lockfile
           if (((rustc --version) -split ' ')[1] -ne $env:RUST_VERSION) { throw "Pinned Rust is required" }
+      - name: Prove native Windows persistence boundaries
+        shell: pwsh
+        run: |
+          cargo test --locked --target x86_64-pc-windows-msvc -p windows-safe-replace
+          if ($LASTEXITCODE -ne 0) { throw "windows-safe-replace native tests failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session platform::tests::
+          if ($LASTEXITCODE -ne 0) { throw "vault-session Windows replacement transaction tests failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_dirty_save_pipeline_preserves_previous_generation
+          if ($LASTEXITCODE -ne 0) { throw "candidate ordinary Windows Save pipeline failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_second_save_rotates_backup_to_exact_previous_primary
+          if ($LASTEXITCODE -ne 0) { throw "candidate ordinary Windows Save backup rotation failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_wrong_credential_preserves_primary_and_backup
+          if ($LASTEXITCODE -ne 0) { throw "candidate ordinary Windows Save wrong-credential boundary failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_external_change_preserves_external_primary_and_backup
+          if ($LASTEXITCODE -ne 0) { throw "candidate ordinary Windows Save external-conflict boundary failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_keyfile_and_composite_credentials_save_and_reopen
+          if ($LASTEXITCODE -ne 0) { throw "candidate ordinary Windows Save composite-credential boundary failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_dirty_save_fails_closed_without_touching_primary_or_backup
+          if ($LASTEXITCODE -ne 0) { throw "ordinary Windows Save fail-closed regression failed" }
+          @(
+            "WINDOWS_REPLACEFILE_NATIVE_TESTS=PASS",
+            "WINDOWS_REPLACEFILE_DACL_PRESERVATION=PASS",
+            "WINDOWS_REPLACEMENT_TRANSACTION_TESTS=PASS",
+            "WINDOWS_ORDINARY_SAVE_CANDIDATE_PIPELINE=PASS",
+            "WINDOWS_ORDINARY_SAVE_BACKUP_ROTATION=PASS",
+            "WINDOWS_ORDINARY_SAVE_WRONG_CREDENTIAL=PASS",
+            "WINDOWS_ORDINARY_SAVE_EXTERNAL_CONFLICT=PASS",
+            "WINDOWS_ORDINARY_SAVE_COMPOSITE_CREDENTIALS=PASS",
+            "WINDOWS_ORDINARY_SAVE_FAIL_CLOSED=PASS"
+          ) | Set-Content -LiteralPath "windows-persistence-evidence.txt" -Encoding utf8
       - name: Build and validate Windows desktop runtime
         shell: pwsh
         run: |
@@ -172,6 +202,7 @@ jobs:
           path: |
             target/x86_64-pc-windows-msvc/release/nian-pass-desktop.exe
             windows-runtime-diagnostic-evidence.txt
+            windows-persistence-evidence.txt
           if-no-files-found: error
           retention-days: 3
       - name: Upload close-path trace

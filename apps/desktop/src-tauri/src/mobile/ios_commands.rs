@@ -5,7 +5,10 @@ use std::sync::MutexGuard;
 use tauri::State;
 use vault_core::SecretString;
 
-use crate::dto::{EntryDetailDto, MobileSelectedVaultDto, MobileVaultSnapshotDto};
+use crate::dto::{
+    EntryAttachmentSummaryDto, EntryDetailDto, EntryHistoryDto, MobileSelectedVaultDto,
+    MobileVaultSnapshotDto, TotpCodeDto,
+};
 
 use super::{
     MobileAppState, MobileError,
@@ -102,6 +105,41 @@ pub(crate) fn mobile_entry_detail(
     lock_service(&state)?
         .entry_detail(&entry_id)
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) fn mobile_entry_history(
+    entry_id: String,
+    state: State<'_, MobileAppState>,
+) -> Result<EntryHistoryDto, MobileErrorDto> {
+    lock_service(&state)?
+        .entry_history(&entry_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) fn mobile_entry_attachments(
+    entry_id: String,
+    state: State<'_, MobileAppState>,
+) -> Result<Vec<EntryAttachmentSummaryDto>, MobileErrorDto> {
+    lock_service(&state)?
+        .entry_attachments(&entry_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) fn mobile_entry_totp_code(
+    entry_id: String,
+    state: State<'_, MobileAppState>,
+) -> Result<TotpCodeDto, MobileErrorDto> {
+    let value = lock_service(&state)?
+        .entry_totp_code(&entry_id)
+        .map_err(MobileErrorDto::from)?;
+    Ok(TotpCodeDto {
+        code: value.code().expose_secret().to_owned(),
+        valid_for_seconds: value.valid_for_seconds(),
+        period_seconds: value.period_seconds(),
+    })
 }
 
 #[tauri::command]

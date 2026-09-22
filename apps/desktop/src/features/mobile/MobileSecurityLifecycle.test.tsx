@@ -418,9 +418,12 @@ test("security Save and lock opens a fresh credential prompt over hidden vault c
   await unlock(controller);
   controller.background();
   controller.resume();
-  fireEvent.click(await screen.findByRole("button", { name: "Save and lock" }));
+  expect(
+    await screen.findByText("Unsaved changes are still open"),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Save and lock" }));
 
-  expect(screen.getByRole("dialog")).toBeVisible();
+  expect(await screen.findByRole("dialog")).toBeVisible();
   expect(screen.getByLabelText("Master password")).toHaveValue("");
   expect(screen.getByText("fixture.kdbx")).not.toBeVisible();
   expect(

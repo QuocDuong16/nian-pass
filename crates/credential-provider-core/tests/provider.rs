@@ -80,8 +80,36 @@ fn shared_web_matcher_projects_metadata_then_revalidates_final_secret() {
     );
 
     document
-        .permanently_delete_entry(&entry_id)
-        .expect("synthetic entry must delete");
+        .trash_entry(&entry_id)
+        .expect("synthetic entry must move to recycle bin");
+    assert!(
+        candidates(&document, &exact)
+            .unwrap_or_else(|_| panic!("recycled candidate projection must succeed"))
+            .iter()
+            .all(|candidate| candidate.entry_id() != entry_id.as_str())
+    );
+    assert!(
+        password_identities(&document)
+            .unwrap_or_else(|_| panic!("recycled identity projection must succeed"))
+            .iter()
+            .all(|identity| identity.record_identifier() != entry_id.as_str())
+    );
+    assert!(matches!(
+        credential(&document, entry_id.as_str(), &exact),
+        Err(ProviderError::CredentialUnavailable)
+    ));
+
+    document
+        .restore_entry(&entry_id)
+        .expect("restored entry should become available again");
+    assert!(credential(&document, entry_id.as_str(), &exact).is_ok());
+
+    document
+        .trash_entry(&entry_id)
+        .expect("entry should return to recycle bin");
+    document
+        .permanently_delete_recycled_entry(&entry_id)
+        .expect("recycled entry must delete permanently");
     assert!(matches!(
         credential(&document, entry_id.as_str(), &exact),
         Err(ProviderError::CredentialUnavailable)

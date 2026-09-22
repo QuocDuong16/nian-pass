@@ -10,9 +10,12 @@ import type {
   VaultSnapshotDto,
   WriteRestriction,
 } from "../types/desktop";
+import { parseEntryIcon } from "./entry-icon-validation";
+import { validateSnapshotRelations } from "./snapshot-relations";
 import {
   invalidContract,
   nonEmptyString,
+  nullableSafeInteger,
   parseSummaryText,
   record,
   stringValue,
@@ -42,11 +45,15 @@ function parseEntry(value: unknown): EntrySummaryDto {
     "url",
     "passwordPresent",
     "notesPresent",
+    "totpPresent",
     "tags",
+    "expiresAtUnixSeconds",
+    "icon",
   ]);
   if (
     typeof object["passwordPresent"] !== "boolean" ||
-    typeof object["notesPresent"] !== "boolean"
+    typeof object["notesPresent"] !== "boolean" ||
+    typeof object["totpPresent"] !== "boolean"
   ) {
     return invalidContract();
   }
@@ -58,7 +65,10 @@ function parseEntry(value: unknown): EntrySummaryDto {
     url: parseSummaryText(object["url"]),
     passwordPresent: object["passwordPresent"],
     notesPresent: object["notesPresent"],
+    totpPresent: object["totpPresent"],
     tags: strings(object["tags"]),
+    expiresAtUnixSeconds: nullableSafeInteger(object["expiresAtUnixSeconds"]),
+    icon: parseEntryIcon(object["icon"]),
   };
 }
 
@@ -90,82 +100,43 @@ function parseVaultCapabilities(value: unknown): VaultCapabilitiesDto {
   };
 }
 
-function unique(values: readonly string[]): boolean {
-  return new Set(values).size === values.length;
-}
-
-function validateRelations(snapshot: VaultCoreSnapshotDto): void {
-  const groups = new Map(snapshot.groups.map((group) => [group.id, group]));
-  const entries = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
-  if (
-    groups.size !== snapshot.groups.length ||
-    entries.size !== snapshot.entries.length ||
-    !groups.has(snapshot.rootGroupId)
-  ) {
-    return invalidContract();
-  }
-
-  const childParents = new Map<string, string>();
-  const entryParents = new Map<string, string>();
-  for (const group of snapshot.groups) {
-    if (!unique(group.childGroupIds) || !unique(group.entryIds)) {
-      return invalidContract();
-    }
-    for (const childId of group.childGroupIds) {
-      if (
-        !groups.has(childId) ||
-        childId === snapshot.rootGroupId ||
-        childParents.has(childId)
-      ) {
-        return invalidContract();
-      }
-      childParents.set(childId, group.id);
-    }
-    for (const entryId of group.entryIds) {
-      const entry = entries.get(entryId);
-      if (entry?.groupId !== group.id || entryParents.has(entryId)) {
-        return invalidContract();
-      }
-      entryParents.set(entryId, group.id);
-    }
-  }
-  if (entryParents.size !== entries.size) return invalidContract();
-
-  const visited = new Set<string>();
-  const visit = (groupId: string): void => {
-    if (visited.has(groupId)) return invalidContract();
-    visited.add(groupId);
-    const group = groups.get(groupId);
-    if (group === undefined) return invalidContract();
-    group.childGroupIds.forEach(visit);
-  };
-  visit(snapshot.rootGroupId);
-  if (visited.size !== groups.size) return invalidContract();
-}
-
 function parseVaultCoreRecord(
   object: Record<string, unknown>,
 ): VaultCoreSnapshotDto {
   if (
     typeof object["dirty"] !== "boolean" ||
+    typeof object["recycleBinEnabled"] !== "boolean" ||
     !Array.isArray(object["groups"]) ||
     !Array.isArray(object["entries"])
   ) {
     return invalidContract();
   }
+  const rawRecycleBinGroupId = object["recycleBinGroupId"];
   const snapshot: VaultCoreSnapshotDto = {
     dirty: object["dirty"],
+    recycleBinEnabled: object["recycleBinEnabled"],
+    recycleBinGroupId:
+      rawRecycleBinGroupId === null
+        ? null
+        : nonEmptyString(rawRecycleBinGroupId),
     rootGroupId: nonEmptyString(object["rootGroupId"]),
     groups: object["groups"].map(parseGroup),
     entries: object["entries"].map(parseEntry),
   };
-  validateRelations(snapshot);
+  validateSnapshotRelations(snapshot);
   return snapshot;
 }
 
 export function parseVaultCoreSnapshot(value: unknown): VaultCoreSnapshotDto {
   return parseVaultCoreRecord(
-    record(value, ["dirty", "rootGroupId", "groups", "entries"]),
+    record(value, [
+      "dirty",
+      "recycleBinEnabled",
+      "recycleBinGroupId",
+      "rootGroupId",
+      "groups",
+      "entries",
+    ]),
   );
 }
 
@@ -174,6 +145,8 @@ export function parseVaultSnapshot(value: unknown): VaultSnapshotDto {
     "dirty",
     "fileName",
     "capabilities",
+    "recycleBinEnabled",
+    "recycleBinGroupId",
     "rootGroupId",
     "groups",
     "entries",

@@ -10,6 +10,8 @@ import type {
 
 export const mobileSnapshot: MobileVaultSnapshotDto = {
   dirty: false,
+  recycleBinEnabled: true,
+  recycleBinGroupId: null,
   rootGroupId: "group-root",
   groups: [
     {
@@ -34,7 +36,10 @@ export const mobileSnapshot: MobileVaultSnapshotDto = {
       url: { kind: "protected" },
       passwordPresent: true,
       notesPresent: true,
+      totpPresent: false,
       tags: ["synthetic"],
+      expiresAtUnixSeconds: null,
+      icon: { kind: "none" },
     },
   ],
 };
@@ -46,7 +51,10 @@ export const mobileDetail: EntryDetailDto = {
   url: { kind: "protected" },
   passwordPresent: true,
   notesPresent: true,
+  totpPresent: false,
   tags: [],
+  expiresAtUnixSeconds: null,
+  icon: { kind: "none" },
   customFields: [{ name: "Account type", protection: "unprotected" }],
 };
 
@@ -60,12 +68,25 @@ export function createMobileApi(overrides: Partial<MobileApi> = {}): MobileApi {
     unlockVault: vi.fn().mockResolvedValue(mobileSnapshot),
     getVaultSnapshot: vi.fn().mockResolvedValue(mobileSnapshot),
     getEntryDetail: vi.fn().mockResolvedValue(mobileDetail),
+    getEntryAttachments: vi.fn().mockResolvedValue([]),
+    importEntryAttachment: vi.fn().mockResolvedValue(null),
+    exportEntryAttachment: vi.fn().mockResolvedValue(null),
+    getEntryHistory: vi.fn().mockResolvedValue({
+      documentRevision: "1",
+      items: [],
+    }),
     revealEntryTitle: vi.fn().mockResolvedValue("Synthetic account"),
     revealEntryUsername: vi.fn().mockResolvedValue("mobile-user"),
     revealEntryUrl: vi.fn().mockResolvedValue("https://example.test"),
     revealEntryNotes: vi.fn().mockResolvedValue("synthetic notes"),
+    revealEntryTotp: vi.fn().mockResolvedValue({
+      code: "fixture-code",
+      validForSeconds: 20,
+      periodSeconds: 30,
+    }),
     revealEntryCustomField: vi.fn().mockResolvedValue("personal"),
     updateEntry: vi.fn().mockResolvedValue({ ...mobileSnapshot, dirty: true }),
+    setEntryTags: vi.fn().mockResolvedValue({ ...mobileSnapshot, dirty: true }),
     createEntry: vi.fn().mockResolvedValue({
       createdEntryId: "entry-created",
       snapshot: mobileSnapshot,

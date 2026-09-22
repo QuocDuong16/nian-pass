@@ -20,6 +20,12 @@ export function lockedOperationMessage(code: DesktopErrorCode): string {
     case "group_not_found":
     case "invalid_request":
     case "invalid_move":
+    case "history_changed":
+    case "history_restore_unsupported":
+    case "attachment_not_found":
+    case "attachment_already_exists":
+    case "attachment_too_large":
+    case "attachment_io_failed":
     case "reserved_field":
     case "secret_unavailable":
     case "unsaved_changes":

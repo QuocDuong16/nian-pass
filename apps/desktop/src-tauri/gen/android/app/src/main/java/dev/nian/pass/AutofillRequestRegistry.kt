@@ -21,6 +21,7 @@ internal data class CredentialTarget(
 internal data class ParsedAutofillFields(
   val usernameIds: List<AutofillId>,
   val passwordIds: List<AutofillId>,
+  val totpIds: List<AutofillId>,
 )
 
 internal sealed class AndroidRequestRecord(

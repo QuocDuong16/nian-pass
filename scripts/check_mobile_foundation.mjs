@@ -128,6 +128,11 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillRequestRegistry.kt",
     violations,
   );
+  const autofillFieldParser = requireFile(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillFieldParser.kt",
+    violations,
+  );
   const autofillIntents = requireFile(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillIntents.kt",
@@ -169,10 +174,15 @@ export function runChecks(root) {
     "apps/desktop/src-tauri/src/mobile/autofill_commands.rs",
     "apps/desktop/src-tauri/src/mobile/mutations.rs",
     "apps/desktop/src-tauri/src/mobile/persistence.rs",
+    "apps/desktop/src-tauri/src/mobile/read_commands.rs",
     "apps/desktop/src-tauri/src/mobile/session.rs",
     "apps/desktop/src-tauri/src/mobile/state.rs",
+    "apps/desktop/src-tauri/src/mobile/state_reads.rs",
+    "apps/desktop/src-tauri/src/mobile/state_attachments.rs",
+    "apps/desktop/src-tauri/src/mobile/attachment_commands.rs",
     "apps/desktop/src-tauri/src/mobile/source.rs",
     "apps/desktop/src-tauri/src/mobile/source_autofill.rs",
+    "apps/desktop/src-tauri/src/mobile/source_attachments.rs",
     "apps/desktop/src-tauri/src/mobile/state_autofill.rs",
     "apps/desktop/src-tauri/src/mobile/security_commands.rs",
     "apps/desktop/src-tauri/src/mobile/source_security.rs",
@@ -271,7 +281,9 @@ export function runChecks(root) {
     "NIAN_PASS_ANDROID_KEY_PASSWORD",
   ]) {
     if (!gradle.includes(`System.getenv("${variable}")`)) {
-      violations.push(`Android release signing must read ${variable} from the environment`);
+      violations.push(
+        `Android release signing must read ${variable} from the environment`,
+      );
     }
   }
   if (
@@ -279,10 +291,14 @@ export function runChecks(root) {
     !gradle.includes("releaseSigningEnvironment.values.any") ||
     !gradle.includes('create("releaseFromEnvironment")')
   ) {
-    violations.push("Android release signing must fail closed on partial environment configuration");
+    violations.push(
+      "Android release signing must fail closed on partial environment configuration",
+    );
   }
   if (/storePassword\s*=\s*"|keyPassword\s*=\s*"/.test(gradle)) {
-    violations.push("Android signing passwords may not be declared in Gradle source");
+    violations.push(
+      "Android signing passwords may not be declared in Gradle source",
+    );
   }
   if (
     !/crate-type\s*=\s*\[\s*"staticlib"\s*,\s*"cdylib"\s*,\s*"rlib"\s*\]/.test(
@@ -318,13 +334,19 @@ export function runChecks(root) {
     !manifest.includes('android:excludeFromRecents="true"') ||
     !manifest.includes('android:exported="false"')
   ) {
-    violations.push("M5.3 credential Activity must be private and excluded from recents");
+    violations.push(
+      "M5.3 credential Activity must be private and excluded from recents",
+    );
   }
   if (
-    !credentialProviderXml.includes("android.credentials.TYPE_PASSWORD_CREDENTIAL") ||
+    !credentialProviderXml.includes(
+      "android.credentials.TYPE_PASSWORD_CREDENTIAL",
+    ) ||
     /PUBLIC_KEY|PASSKEY/i.test(credentialProviderXml)
   ) {
-    violations.push("M5.3 Credential Provider capability must be password-only");
+    violations.push(
+      "M5.3 Credential Provider capability must be password-only",
+    );
   }
   if (!autofillServiceXml.includes("autofill-service")) {
     violations.push("M5.3 AutofillService metadata XML is missing");
@@ -332,8 +354,14 @@ export function runChecks(root) {
   if (!/androidx\.credentials:credentials:1\.6\.0/.test(gradle)) {
     violations.push("M5.3 must pin androidx.credentials:credentials:1.6.0");
   }
-  if (/credentials-play-services-auth|credentials:[^"\n]*(?:\+|latest|alpha)/i.test(gradle)) {
-    violations.push("M5.3 credential dependencies must not float, use alpha, or add Play Services auth");
+  if (
+    /credentials-play-services-auth|credentials:[^"\n]*(?:\+|latest|alpha)/i.test(
+      gradle,
+    )
+  ) {
+    violations.push(
+      "M5.3 credential dependencies must not float, use alpha, or add Play Services auth",
+    );
   }
   if (
     /FileProvider|FILE_PROVIDER_PATHS|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|READ_MEDIA_/.test(
@@ -416,7 +444,7 @@ export function runChecks(root) {
     "FileOutputStream",
     "takePersistableUriPermission",
     "releasePersistableUriPermission",
-    "openFileDescriptor(uri, \"rwt\")",
+    'openFileDescriptor(uri, "rwt")',
     "WRITE_STARTED",
     "fingerprint(save.candidate)",
     "fingerprint(save.readBack)",
@@ -429,29 +457,58 @@ export function runChecks(root) {
     ["Uri.getPath", /\.getPath\s*\(/],
     ["historical _data column", /["']_data["']/],
     ["whole-document byte loading", /readBytes\s*\(|readAllBytes\s*\(|Base64/],
-    ["external staging", /externalFilesDir|getExternal|Environment\.DIRECTORY_/],
+    [
+      "external staging",
+      /externalFilesDir|getExternal|Environment\.DIRECTORY_/,
+    ],
   ]) {
     if (pattern.test(nativeBridge)) {
       violations.push(`M5.2 native bridge must not use ${label}`);
     }
   }
   if (!/ByteArray\(DEFAULT_BUFFER_SIZE\)/.test(nativeBridge)) {
-    violations.push("M5.2 native bridge must retain a bounded streaming buffer");
+    violations.push(
+      "M5.2 native bridge must retain a bounded streaming buffer",
+    );
   }
   if (!/UUID\.randomUUID\(\)/.test(nativePolicy)) {
     violations.push("M5.2 staging filenames must remain opaque and random");
   }
   if (!nativePolicyTest.includes("isManagedStagingName")) {
-    violations.push("M5.2 native staging policy must retain focused unit tests");
+    violations.push(
+      "M5.2 native staging policy must retain focused unit tests",
+    );
   }
   if (/\bVaultSession\b/.test(mobileRust)) {
     violations.push("M5.2 mobile Rust must not use VaultSession semantics");
   }
   if (!mobileRust.includes("KdbxDocument::open")) {
-    violations.push("M5.2 mobile Rust must reuse the authoritative KdbxDocument parser");
+    violations.push(
+      "M5.2 mobile Rust must reuse the authoritative KdbxDocument parser",
+    );
   }
-  if (/\b(?:AES|Argon2|ChaCha|KeyDerivation|Database\.open)\b/i.test(nativeBridge)) {
-    violations.push("M5.1 native Kotlin must not implement KDBX or cryptography");
+  if (
+    /\b(?:AES|Argon2|ChaCha|KeyDerivation|Database\.open)\b/i.test(nativeBridge)
+  ) {
+    violations.push(
+      "M5.1 native Kotlin must not implement KDBX or cryptography",
+    );
+  }
+  for (const required of [
+    "selectAttachmentImport",
+    "Intent.ACTION_OPEN_DOCUMENT",
+    "prepareAttachmentExport",
+    "Intent.ACTION_CREATE_DOCUMENT",
+    "attachmentImports",
+    "attachmentExports",
+    "MAX_ATTACHMENT_BYTES",
+    "copyStreamBounded",
+  ]) {
+    if (!nativeBridge.includes(required)) {
+      violations.push(
+        `M5.3 Android attachment transport must stay native, bounded, and private: missing ${required}`,
+      );
+    }
   }
   const androidHandler = rustHost.match(
     /fn run_mobile\(\)[\s\S]*?generate_handler!\[([\s\S]*?)\][\s\S]*?Android runtime failed/,
@@ -462,12 +519,18 @@ export function runChecks(root) {
     "mobile_unlock_vault",
     "mobile_vault_snapshot",
     "mobile_entry_detail",
+    "mobile_entry_history",
+    "mobile_entry_attachments",
+    "mobile_entry_totp_code",
+    "mobile_import_entry_attachment",
+    "mobile_export_entry_attachment",
     "mobile_load_entry_title",
     "mobile_load_entry_username",
     "mobile_load_entry_url",
     "mobile_load_entry_notes",
     "mobile_load_entry_custom_field",
     "mobile_update_entry",
+    "mobile_set_entry_tags",
     "mobile_create_entry",
     "mobile_delete_entry",
     "mobile_move_entry",
@@ -497,14 +560,26 @@ export function runChecks(root) {
     violations.push("M5.1 Android semantic command handler is missing");
   } else {
     const commands = androidHandler.match(/[a-z][a-z0-9_]*/g) ?? [];
-    const unexpected = commands.filter((command) => !allowedCommands.has(command));
-    const missing = [...allowedCommands].filter((command) => !commands.includes(command));
+    const unexpected = commands.filter(
+      (command) => !allowedCommands.has(command),
+    );
+    const missing = [...allowedCommands].filter(
+      (command) => !commands.includes(command),
+    );
     if (unexpected.length > 0 || missing.length > 0) {
-      violations.push("M5.2 Android command surface must match the reviewed semantic whitelist");
+      violations.push(
+        "M5.2 Android command surface must match the reviewed semantic whitelist",
+      );
     }
   }
-  if (/plugin:(?:vault-source|autofill|credential)|content:\/\//.test(mobileFrontend)) {
-    violations.push("M5.2 frontend must not receive or invoke native document transport");
+  if (
+    /plugin:(?:vault-source|autofill|credential)|content:\/\//.test(
+      mobileFrontend,
+    )
+  ) {
+    violations.push(
+      "M5.2 frontend must not receive or invoke native document transport",
+    );
   }
   for (const required of [
     "FLAG_SECURE",
@@ -518,7 +593,11 @@ export function runChecks(root) {
     'contentDescription = "Nian Pass locked"',
     "acknowledgeSafeUi",
   ]) {
-    if (!(mainActivity + mobileSecurityRuntime + mobileSecurityPolicy).includes(required)) {
+    if (
+      !(mainActivity + mobileSecurityRuntime + mobileSecurityPolicy).includes(
+        required,
+      )
+    ) {
       violations.push(`M5.5 native security lifecycle must retain ${required}`);
     }
   }
@@ -530,7 +609,9 @@ export function runChecks(root) {
     "policy.acknowledgeSafeUi(activity, generation)",
   ]) {
     if (!mobileSecurityRuntime.includes(required)) {
-      violations.push(`M5.5 native lifecycle authority must be Activity-scoped via ${required}`);
+      violations.push(
+        `M5.5 native lifecycle authority must be Activity-scoped via ${required}`,
+      );
     }
   }
   for (const required of [
@@ -582,7 +663,9 @@ export function runChecks(root) {
     "latest?.generation === generation",
   ]) {
     if (!mobileSecurityLifecycle.includes(required)) {
-      violations.push(`M5.5 frontend acknowledgement guard must retain ${required}`);
+      violations.push(
+        `M5.5 frontend acknowledgement guard must retain ${required}`,
+      );
     }
   }
   const mobileSecuritySources = [
@@ -590,13 +673,24 @@ export function runChecks(root) {
     mobileSecurityPolicy,
     mobileFrontend,
   ].join("\n");
-  if (/System\.currentTimeMillis\s*\(|Date\.now\s*\(/.test(mobileSecuritySources)) {
-    violations.push("M5.5 lifecycle expiry must use monotonic time, never wall clock time");
+  if (
+    /System\.currentTimeMillis\s*\(|Date\.now\s*\(/.test(mobileSecuritySources)
+  ) {
+    violations.push(
+      "M5.5 lifecycle expiry must use monotonic time, never wall clock time",
+    );
   }
-  if (/\b(?:localStorage|sessionStorage|indexedDB|caches)\b|document\.cookie/.test(mobileFrontend)) {
-    violations.push("M5.5 mobile security state must remain application-memory only");
+  if (
+    /\b(?:localStorage|sessionStorage|indexedDB|caches)\b|document\.cookie/.test(
+      mobileFrontend,
+    )
+  ) {
+    violations.push(
+      "M5.5 mobile security state must remain application-memory only",
+    );
   }
-  const biometricBoundary = mobileSecuritySources + credentialActivity + autofillMetadata;
+  const biometricBoundary =
+    mobileSecuritySources + credentialActivity + autofillMetadata;
   if (/BiometricPrompt/.test(biometricBoundary)) {
     violations.push("M5.5 biometric quick unlock must remain deferred");
   }
@@ -605,7 +699,9 @@ export function runChecks(root) {
       biometricBoundary,
     )
   ) {
-    violations.push("M5.5 must never persist master-password or password-equivalent unlock material");
+    violations.push(
+      "M5.5 must never persist master-password or password-equivalent unlock material",
+    );
   }
   for (const required of [
     "retireForBackground",
@@ -613,11 +709,19 @@ export function runChecks(root) {
     "completeCurrentRequest",
   ]) {
     if (!credentialActivity.includes(required)) {
-      violations.push(`M5.5 CredentialActivity lifecycle must retain ${required}`);
+      violations.push(
+        `M5.5 CredentialActivity lifecycle must retain ${required}`,
+      );
     }
   }
-  if (/supportsPictureInPicture\s*=\s*["']true["']|AccessibilityService|foregroundServiceType/.test(manifest)) {
-    violations.push("M5.5 manifest must not enable PiP, accessibility, or a foreground service");
+  if (
+    /supportsPictureInPicture\s*=\s*["']true["']|AccessibilityService|foregroundServiceType/.test(
+      manifest,
+    )
+  ) {
+    violations.push(
+      "M5.5 manifest must not enable PiP, accessibility, or a foreground service",
+    );
   }
   const nativeCredential = [
     credentialProvider,
@@ -625,6 +729,7 @@ export function runChecks(root) {
     credentialActivity,
     autofillMetadata,
     autofillRegistry,
+    autofillFieldParser,
     autofillIntents,
     credentialTargetPolicy,
     credentialReconstructor,
@@ -645,7 +750,9 @@ export function runChecks(root) {
     "noBackupFilesDir",
   ]) {
     if (!nativeCredential.includes(required)) {
-      violations.push(`M5.3 native credential boundary must retain ${required}`);
+      violations.push(
+        `M5.3 native credential boundary must retain ${required}`,
+      );
     }
   }
   for (const forbidden of [
@@ -661,14 +768,24 @@ export function runChecks(root) {
     "master password",
   ]) {
     if (nativeCredential.toLowerCase().includes(forbidden.toLowerCase())) {
-      violations.push(`M5.3 native credential boundary must not contain ${forbidden}`);
+      violations.push(
+        `M5.3 native credential boundary must not contain ${forbidden}`,
+      );
     }
   }
-  if (/\bnew\s+SaveInfo\b|\bSaveInfo\s*\(|setSaveInfo|mobile_(?:create|update|save)_/i.test(autofillService)) {
-    violations.push("M5.3 Autofill SaveRequest must not mutate or advertise SaveInfo");
+  if (
+    /\bnew\s+SaveInfo\b|\bSaveInfo\s*\(|setSaveInfo|mobile_(?:create|update|save)_/i.test(
+      autofillService,
+    )
+  ) {
+    violations.push(
+      "M5.3 Autofill SaveRequest must not mutate or advertise SaveInfo",
+    );
   }
   if (!autofillService.includes("callback.onSuccess()")) {
-    violations.push("M5.3 Autofill SaveRequest must complete without persistence");
+    violations.push(
+      "M5.3 Autofill SaveRequest must complete without persistence",
+    );
   }
   if (
     !credentialTargetPolicy.includes("isOriginPopulated()") ||
@@ -676,7 +793,9 @@ export function runChecks(root) {
     !credentialTargetPolicy.includes("credential_privileged_apps_v1") ||
     !privilegedAllowlist.includes('"package_name": "com.android.chrome"')
   ) {
-    violations.push("M5.3 Credential Manager web origins require a bundled privileged caller allowlist");
+    violations.push(
+      "M5.3 Credential Manager web origins require a bundled privileged caller allowlist",
+    );
   }
   if (
     !credentialReconstructor.includes("retrieveBeginGetCredentialRequest") ||
@@ -685,7 +804,9 @@ export function runChecks(root) {
     !credentialActivity.includes("onNewIntent") ||
     !credentialActivity.includes("setIntent(intent)")
   ) {
-    violations.push("M5.3 credential Activity must reconstruct framework requests and refresh singleTop intents");
+    violations.push(
+      "M5.3 credential Activity must reconstruct framework requests and refresh singleTop intents",
+    );
   }
   if (
     autofillIntents.includes("AtomicInteger") ||
@@ -693,7 +814,9 @@ export function runChecks(root) {
     !autofillIntents.includes("data = Uri.parse") ||
     autofillIntents.includes("FLAG_UPDATE_CURRENT")
   ) {
-    violations.push("M5.3 PendingIntent identity must be random, process-independent, and collision-safe");
+    violations.push(
+      "M5.3 PendingIntent identity must be random, process-independent, and collision-safe",
+    );
   }
   if (
     !autofillGrantPolicy.includes("bookmarkFlags") ||
@@ -702,41 +825,96 @@ export function runChecks(root) {
     !autofillMetadata.includes("AutofillGrantPolicy.normalize") ||
     !nativeBridge.includes("retainAutofillReadGrant")
   ) {
-    violations.push("M5.3 remembered Autofill sources must retain READ only and cold-rehydrate read-only");
+    violations.push(
+      "M5.3 remembered Autofill sources must retain READ only and cold-rehydrate read-only",
+    );
   }
   if (
     /BeginGetCredentialRequest|ProviderGetCredentialRequest|AssistStructure|AutofillId|\bBundle\b|\bParcel\b/.test(
       autofillMetadata,
     )
   ) {
-    violations.push("M5.3 framework request objects must never enter durable Autofill metadata");
+    violations.push(
+      "M5.3 framework request objects must never enter durable Autofill metadata",
+    );
   }
-  if (!mobileRust.includes("AndroidApp") || !sharedCredentialCore.includes("entry_password")) {
-    violations.push("M5.3 candidate matching and narrow final secret reads must remain Rust-owned");
+  if (
+    !mobileRust.includes("AndroidApp") ||
+    !sharedCredentialCore.includes("entry_password")
+  ) {
+    violations.push(
+      "M5.3 candidate matching and narrow final secret reads must remain Rust-owned",
+    );
+  }
+  if (
+    !/enum class AutofillFieldRole\s*\{[^}]*\bTOTP\b[^}]*\}/.test(
+      autofillFieldParser,
+    ) ||
+    !autofillFieldParser.includes("AutofillFieldRole.TOTP") ||
+    !autofillRegistry.includes("val totpIds") ||
+    !nativeBridge.includes('args.optString("totp", "")') ||
+    !nativeBridge.includes("record.fields.totpIds")
+  ) {
+    violations.push(
+      "M5.3 Android Autofill TOTP must use explicit OTP fields and ephemeral fulfillment only",
+    );
+  }
+  if (/otpauth:\/\/|totpUri|TOTP Seed|TimeOtp-/i.test(nativeCredential)) {
+    violations.push(
+      "M5.3 native Android code must never receive TOTP provisioning URI or seed material",
+    );
+  }
+  if (
+    !mobileRust.includes("entry_totp_code") ||
+    !mobileRust.includes("totp: Option<SecretString>")
+  ) {
+    violations.push(
+      "M5.3 TOTP generation and optional ephemeral code authority must remain Rust-owned",
+    );
   }
   const candidateContract = mobileFrontend.match(
     /export interface AutofillCandidateDto\s*\{([\s\S]*?)\n\}/,
   )?.[1];
   if (
     candidateContract === undefined ||
-    /password|secret|uri|certificate|autofillId|assistStructure/i.test(candidateContract)
+    /password|secret|uri|certificate|autofillId|assistStructure/i.test(
+      candidateContract,
+    )
   ) {
-    violations.push("M5.3 candidate DTO must exist and remain secret/native-identifier free");
+    violations.push(
+      "M5.3 candidate DTO must exist and remain secret/native-identifier free",
+    );
   }
   if (
     /\b(?:contentUri|stagedPath|absolutePath|provider|documentId|uri|path)\s*[?:]/i.test(
       mobileFrontend,
     )
   ) {
-    violations.push("M5.2 mobile TypeScript DTOs must not expose URI or path properties");
+    violations.push(
+      "M5.2 mobile TypeScript DTOs must not expose URI or path properties",
+    );
   }
-  if (!nativeJournal.includes("AtomicFile") || !nativeJournal.includes("WRITE_STARTED")) {
-    violations.push("M5.2 destructive provider writes require an AtomicFile recovery journal");
+  if (
+    !nativeJournal.includes("AtomicFile") ||
+    !nativeJournal.includes("WRITE_STARTED")
+  ) {
+    violations.push(
+      "M5.2 destructive provider writes require an AtomicFile recovery journal",
+    );
   }
-  if (!mobileRust.includes("verify_semantic_equivalence") || !mobileRust.includes("EncryptedGeneration")) {
-    violations.push("M5.2 Rust Save must verify candidate semantics and encrypted generations");
+  if (
+    !mobileRust.includes("verify_semantic_equivalence") ||
+    !mobileRust.includes("EncryptedGeneration")
+  ) {
+    violations.push(
+      "M5.2 Rust Save must verify candidate semantics and encrypted generations",
+    );
   }
-  if (/force_save|overwrite_anyway|ignore_baseline|skip_external_check/i.test(rustHost + mobileFrontend)) {
+  if (
+    /force_save|overwrite_anyway|ignore_baseline|skip_external_check/i.test(
+      rustHost + mobileFrontend,
+    )
+  ) {
     violations.push("M5.2 must not expose a force-save or baseline bypass");
   }
 
@@ -747,7 +925,9 @@ export function runChecks(root) {
     "CredentialTarget::web_domain",
   ]) {
     if (!mobileRust.includes(required)) {
-      violations.push(`M5.4 Android must reuse shared credential core through ${required}`);
+      violations.push(
+        `M5.4 Android must reuse shared credential core through ${required}`,
+      );
     }
   }
   for (const required of [
@@ -770,7 +950,8 @@ export function runChecks(root) {
     "np_ios_free_secret_result",
     "catch_unwind",
   ]) {
-    if (!iosFfi.includes(required)) violations.push(`M5.4 iOS FFI is missing ${required}`);
+    if (!iosFfi.includes(required))
+      violations.push(`M5.4 iOS FFI is missing ${required}`);
   }
   if (
     !iosSession.includes("verified_mirror(&path)") ||
@@ -781,7 +962,11 @@ export function runChecks(root) {
       "M5.4 extension FFI must verify and parse the same encrypted mirror handle",
     );
   }
-  if (/password[^\n]{0,80}serde_json|serde_json[^\n]{0,80}password/i.test(iosSession)) {
+  if (
+    /password[^\n]{0,80}serde_json|serde_json[^\n]{0,80}password/i.test(
+      iosSession,
+    )
+  ) {
     violations.push("M5.4 final password must not use the JSON DTO path");
   }
   for (const required of [
@@ -793,13 +978,20 @@ export function runChecks(root) {
     "disableAutofill",
     "openCredentialProviderSettings",
   ]) {
-    if (!(iosSource + iosCommands).includes(required)) violations.push(`M5.4 iOS semantic source adapter is missing ${required}`);
+    if (!(iosSource + iosCommands).includes(required))
+      violations.push(
+        `M5.4 iOS semantic source adapter is missing ${required}`,
+      );
   }
-  const iosRegisteredBlock = rustHost.match(/#\[cfg\(target_os = "ios"\)\][\s\S]*?fn run_mobile\(\)[\s\S]*?\.run\(/)?.[0] ?? "";
+  const iosRegisteredBlock =
+    rustHost.match(
+      /#\[cfg\(target_os = "ios"\)\][\s\S]*?fn run_mobile\(\)[\s\S]*?\.run\(/,
+    )?.[0] ?? "";
   for (const forbidden of [
     "mobile_save_vault",
     "mobile_reload_vault",
     "mobile_update_entry",
+    "mobile_set_entry_tags",
     "mobile_create_entry",
     "mobile_delete_entry",
     "mobile_move_entry",
@@ -812,14 +1004,23 @@ export function runChecks(root) {
     "mobile_discard_changes_and_lock",
   ]) {
     if (iosRegisteredBlock.includes(forbidden)) {
-      violations.push(`M5.4 iOS read-only command surface must not register ${forbidden}`);
+      violations.push(
+        `M5.4 iOS read-only command surface must not register ${forbidden}`,
+      );
     }
   }
   if (/plugin:ios-vault-source|plugin:.*ios/i.test(mobileFrontend)) {
-    violations.push("M5.4 React must not call the native iOS plugin namespace directly");
+    violations.push(
+      "M5.4 React must not call the native iOS plugin namespace directly",
+    );
   }
-  if (!iosCommands.includes("IdentityProjection") || !iosCommands.includes("password_identities")) {
-    violations.push("M5.4 identity publication must originate from a Rust secret-free projection");
+  if (
+    !iosCommands.includes("IdentityProjection") ||
+    !iosCommands.includes("password_identities")
+  ) {
+    violations.push(
+      "M5.4 identity publication must originate from a Rust secret-free projection",
+    );
   }
 
   return violations;

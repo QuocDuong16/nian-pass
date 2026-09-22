@@ -118,8 +118,7 @@ export function MobileUnlockedView(props: Props) {
       ? !props.securityStatus.foreground ||
         props.securityStatus.screenState !== "active"
       : props.hidden;
-  const editsDisabled =
-    busy || !props.selected.writable || flow.blocked || contentHidden;
+  const browseDisabled = busy || flow.blocked || contentHidden;
   const saveDisabled =
     busy ||
     hasDraft ||
@@ -175,8 +174,9 @@ export function MobileUnlockedView(props: Props) {
             key={draftVersion}
             api={props.api}
             snapshot={snapshot}
-            disabled={editsDisabled}
-            readOnly={readOnly}
+            disabled={browseDisabled}
+            readOnly={readOnly || !props.selected.writable}
+            nativeAttachmentActions={props.platform === "android"}
             onSnapshot={setSnapshot}
             onDraftChange={setHasDraft}
             onBusyChange={setMutationPending}

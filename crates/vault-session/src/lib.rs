@@ -2,19 +2,22 @@
 //! filesystem transactions, seals `keepass-rs`, and never retains passwords.
 
 mod create;
+mod database_settings;
+mod export;
 mod fingerprint;
 mod mutations;
 mod open;
 mod platform;
 mod policy;
+mod save;
 mod sync_persistence;
 pub use fingerprint::FileFingerprint;
-use kdbx::{KdbxDocument, KdbxError};
+use kdbx::{KdbxCredential, KdbxDocument, KdbxError};
 pub use policy::WriteRestriction;
 use std::{
     ffi::OsString,
     fs::{self, File, Metadata, OpenOptions},
-    io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{self, BufReader, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 pub use sync_persistence::EncryptedVaultSnapshot;
@@ -22,6 +25,7 @@ use thiserror::Error;
 use vault_core::{SecretString, Vault};
 
 const SAVE_TEMP_PREFIX: &str = ".nian-pass-save-";
+const EXPORT_TEMP_PREFIX: &str = ".nian-pass-export-";
 const BACKUP_TEMP_PREFIX: &str = ".nian-pass-backup-";
 const TEMP_SUFFIX: &str = ".tmp";
 const TEMP_CREATE_ATTEMPTS: usize = 128;
@@ -62,104 +66,6 @@ impl VaultSession {
         &mut self.document
     }
 
-    /// Saves a dirty session to its canonical source through a verified atomic
-    /// replacement transaction. A clean session performs no filesystem I/O.
-    pub fn save(&mut self, credential: &SecretString) -> Result<SaveOutcome, SessionError> {
-        self.save_with_observer(credential, &mut NoopObserver)
-    }
-
-    /// Consumes the session and drops its decrypted database representation.
-    /// This does not autosave and cannot promise physical erasure of every
-    /// plaintext allocation previously owned by `keepass-rs`.
-    pub fn lock(self) {}
-
-    fn save_with_observer(
-        &mut self,
-        credential: &SecretString,
-        observer: &mut impl SaveObserver,
-    ) -> Result<SaveOutcome, SessionError> {
-        if !self.is_dirty() {
-            return Ok(SaveOutcome::Unchanged);
-        }
-        if !platform::SAVE_SUPPORTED {
-            return Err(SessionError::UnsupportedPersistencePlatform);
-        }
-        #[cfg(unix)]
-        let source_metadata = validate_current_target(&self.path)?;
-        #[cfg(windows)]
-        validate_current_target(&self.path)?;
-        self.require_source_unchanged()?;
-        self.verify_save_credential(credential)?;
-        let parent = self.path.parent().ok_or(SessionError::UnsupportedPath)?;
-        let mut serialized = ManagedTemp::create(parent, SAVE_TEMP_PREFIX)?;
-        observer.checkpoint(SavePhase::AfterTempCreate, serialized.path())?;
-        {
-            let mut writer = BufWriter::new(serialized.file_mut()?);
-            observer.serialize(&self.document, &mut writer, credential)?;
-            writer.flush().map_err(SessionError::WriteTemp)?;
-        }
-        observer.checkpoint(SavePhase::AfterSerialize, serialized.path())?;
-        serialized
-            .file_mut()?
-            .sync_all()
-            .map_err(SessionError::SyncTemp)?;
-        serialized.close();
-        observer.checkpoint(SavePhase::AfterTempSync, serialized.path())?;
-        let reopened_temp = open_document(serialized.path(), credential)
-            .map_err(SessionError::TempVerificationFailed)?;
-        self.document
-            .verify_semantic_equivalence(&reopened_temp)
-            .map_err(SessionError::TempVerificationFailed)?;
-        observer.checkpoint(SavePhase::AfterTempVerify, serialized.path())?;
-        self.require_source_unchanged()?;
-        observer.checkpoint(SavePhase::AfterFinalExternalCheck, &self.path)?;
-        #[cfg(unix)]
-        {
-            apply_restricted_permissions(serialized.path(), &source_metadata)
-                .map_err(SessionError::WriteTemp)?;
-            sync_path(serialized.path()).map_err(SessionError::SyncTemp)?;
-        }
-        let backup_path = backup_path(&self.path);
-        #[cfg(unix)]
-        let prepared_backup = self.prepare_backup(&backup_path, &source_metadata, observer)?;
-        // A third check narrows the unavoidable cooperative-locking race and
-        // detects changes that happened while the exact backup was prepared.
-        observer.checkpoint(SavePhase::BeforeTargetReplace, serialized.path())?;
-        self.require_source_unchanged()?;
-        #[cfg(unix)]
-        observer
-            .replace_primary(serialized.path(), &self.path)
-            .map_err(SessionError::AtomicReplaceFailed)?;
-        #[cfg(windows)]
-        platform::replace_windows_with_backup(
-            serialized.path(),
-            &self.path,
-            &backup_path,
-            &self.source_fingerprint,
-        )?;
-        serialized.disarm();
-        #[cfg(unix)]
-        let post_replace_observer = observer.checkpoint(SavePhase::AfterTargetReplace, &self.path);
-        let durability = observer.sync_parent(parent, true);
-        let final_open = open_stable_document_with_hook(&self.path, credential, || {
-            observer.checkpoint(SavePhase::AfterFinalDocumentRead, &self.path)
-        })
-        .map_err(map_final_open_error)?;
-        let (final_document, final_fingerprint) = final_open;
-        self.document
-            .verify_semantic_equivalence(&final_document)
-            .map_err(SessionError::FinalVerificationFailed)?;
-        self.source_fingerprint = final_fingerprint;
-        self.saved_revision = self.document.revision();
-        #[cfg(unix)]
-        self.commit_backup(prepared_backup, &backup_path, parent, observer)?;
-        #[cfg(unix)]
-        post_replace_observer?;
-        match durability {
-            Ok(()) => Ok(SaveOutcome::Saved),
-            Err(source) => Err(SessionError::DurabilityUncertain(source)),
-        }
-    }
     fn require_source_unchanged(&self) -> Result<(), SessionError> {
         validate_current_target(&self.path)?;
         if fingerprint_path(&self.path)? == self.source_fingerprint {
@@ -168,8 +74,8 @@ impl VaultSession {
             Err(SessionError::ExternalModificationDetected)
         }
     }
-    fn verify_save_credential(&self, credential: &SecretString) -> Result<(), SessionError> {
-        match open_document(&self.path, credential) {
+    fn verify_save_credential(&self, credential: KdbxCredential<'_>) -> Result<(), SessionError> {
+        match open_document_with_credential(&self.path, credential) {
             Ok(_) => Ok(()),
             Err(KdbxError::InvalidCredentials) => Err(SessionError::CredentialMismatch),
             Err(error) => Err(SessionError::CredentialVerificationFailed(error)),
@@ -264,6 +170,14 @@ pub enum SessionError {
     /// A new vault target could not be created, written, or durably synced.
     #[error("could not create the vault file")]
     CreateTarget(#[source] io::Error),
+
+    /// An encrypted export copy could not be safely created at the requested target.
+    #[error("could not export the vault copy")]
+    ExportTarget(#[source] io::Error),
+
+    /// An exported copy did not reopen with the same database semantics.
+    #[error("exported vault copy could not be verified")]
+    ExportVerificationFailed(#[source] KdbxError),
 
     /// Safe local replacement is unavailable on this operating system.
     #[error("safe vault persistence is not supported on this platform")]
@@ -422,12 +336,19 @@ fn open_stable_document(
     path: &Path,
     credential: &SecretString,
 ) -> Result<(KdbxDocument, FileFingerprint), SessionError> {
-    open_stable_document_with_hook(path, credential, || Ok(()))
+    open_stable_document_with_credential(path, KdbxCredential::password(credential.expose_secret()))
 }
 
-fn open_stable_document_with_hook(
+fn open_stable_document_with_credential(
     path: &Path,
-    credential: &SecretString,
+    credential: KdbxCredential<'_>,
+) -> Result<(KdbxDocument, FileFingerprint), SessionError> {
+    open_stable_document_with_credential_hook(path, credential, || Ok(()))
+}
+
+fn open_stable_document_with_credential_hook(
+    path: &Path,
+    credential: KdbxCredential<'_>,
     after_document_read: impl FnOnce() -> Result<(), SessionError>,
 ) -> Result<(KdbxDocument, FileFingerprint), SessionError> {
     validate_current_target(path)?;
@@ -439,7 +360,7 @@ fn open_stable_document_with_hook(
     source
         .seek(SeekFrom::Start(0))
         .map_err(SessionError::ReadSource)?;
-    let document = KdbxDocument::open_reader(&mut source, credential.expose_secret())
+    let document = KdbxDocument::open_reader_with_credential(&mut source, credential)
         .map_err(SessionError::Kdbx)?;
     source
         .seek(SeekFrom::Start(0))
@@ -482,8 +403,11 @@ fn fingerprint_path_for_backup(path: &Path) -> Result<FileFingerprint, SessionEr
     FileFingerprint::from_reader(&mut file).map_err(SessionError::BackupFailed)
 }
 
-fn open_document(path: &Path, credential: &SecretString) -> Result<KdbxDocument, KdbxError> {
-    KdbxDocument::open(path, credential.expose_secret())
+fn open_document_with_credential(
+    path: &Path,
+    credential: KdbxCredential<'_>,
+) -> Result<KdbxDocument, KdbxError> {
+    KdbxDocument::open_with_credential(path, credential)
 }
 
 fn backup_path(source: &Path) -> PathBuf {
@@ -713,10 +637,10 @@ trait SaveObserver {
         &mut self,
         document: &KdbxDocument,
         destination: &mut impl Write,
-        credential: &SecretString,
+        credential: KdbxCredential<'_>,
     ) -> Result<(), SessionError> {
         document
-            .save_to_writer(destination, credential.expose_secret())
+            .save_to_writer_with_credential(destination, credential)
             .map_err(SessionError::Kdbx)
     }
 
@@ -747,10 +671,10 @@ mod tests {
     #[cfg(unix)]
     use std::io::Write;
 
-    #[cfg(any(unix, windows))]
-    use kdbx::KdbxDocument;
     #[cfg(unix)]
     use kdbx::KdbxError;
+    #[cfg(any(unix, windows))]
+    use kdbx::{KdbxCredential, KdbxDocument};
     use vault_core::{EntryId, GroupId, NewEntry, SecretString};
 
     use super::{
@@ -823,7 +747,7 @@ mod tests {
             &mut self,
             _document: &KdbxDocument,
             _destination: &mut impl Write,
-            _credential: &SecretString,
+            _credential: KdbxCredential<'_>,
         ) -> Result<(), SessionError> {
             Err(SessionError::Kdbx(KdbxError::WriteIo(io::Error::other(
                 "injected serialization failure",
@@ -907,7 +831,7 @@ mod tests {
         session
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn save_document_to_path(document: &KdbxDocument, path: &Path) {
         let mut output = Vec::new();
         document
@@ -916,7 +840,7 @@ mod tests {
         fs::write(path, output).expect("test output should be written");
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn external_valid_version(path: &Path, title: &str) {
         let mut document =
             KdbxDocument::open(path, FIXTURE_PASSWORD).expect("source should open for test edit");
@@ -1044,6 +968,142 @@ mod tests {
             .permanently_delete_entry(&created)
             .expect("entry deletion should succeed");
         assert!(session.is_dirty());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[cfg(unix)]
+    #[test]
+    fn keyfile_only_session_save_reopens_with_the_same_composite_authority() {
+        use std::os::unix::fs::PermissionsExt;
+
+        const KEYFILE: &[u8] = b"public-session-keyfile-material";
+        let directory = TestDir::create();
+        let path = directory.path.join("keyfile-only.kdbx");
+        let document = KdbxDocument::new("Keyfile session");
+        let mut ciphertext = Vec::new();
+        document
+            .save_to_writer_with_credential(
+                &mut ciphertext,
+                KdbxCredential::new(None, Some(KEYFILE)),
+            )
+            .expect("keyfile vault should serialize");
+        fs::write(&path, ciphertext).expect("fixture write should succeed");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("fixture permissions should be private");
+
+        assert!(matches!(
+            VaultSession::open_with_credential(&path, KdbxCredential::new(Some(""), Some(KEYFILE)),),
+            Err(SessionError::Kdbx(KdbxError::InvalidCredentials))
+        ));
+        let mut session =
+            VaultSession::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .expect("keyfile-only session should open");
+        let root = session
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        let created = session
+            .create_group(&root, "Saved with keyfile")
+            .expect("mutation should succeed");
+        assert!(session.is_dirty());
+        assert!(matches!(
+            session.save_with_credential(KdbxCredential::new(None, Some(KEYFILE))),
+            Ok(SaveOutcome::Saved)
+        ));
+
+        let reopened =
+            VaultSession::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .expect("saved keyfile-only session should reopen");
+        assert!(
+            reopened
+                .projection()
+                .expect("projection")
+                .find_group(&created)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn recycle_bin_move_save_reopen_restore_and_save_remain_semantically_verified() {
+        let directory = TestDir::create();
+        let path = directory.path.join("recycle-persistence.kdbx");
+        let credential = credential();
+        let mut session = VaultSession::create(&path, "Recycle persistence", &credential)
+            .expect("fresh vault should be created");
+        let root = root_group(&session);
+        let entry = session
+            .create_entry(
+                &root,
+                NewEntry {
+                    title: "Recoverable entry",
+                    username: "",
+                    url: "",
+                    password: None,
+                },
+                None,
+            )
+            .expect("entry should be created");
+        assert!(matches!(session.save(&credential), Ok(SaveOutcome::Saved)));
+        assert!(!session.is_dirty());
+
+        session
+            .trash_entry(&entry)
+            .expect("entry should move to recycle bin");
+        let recycle_bin = session
+            .recycle_bin_group_id()
+            .expect("soft delete should materialize recycle bin");
+        assert!(
+            session
+                .document()
+                .entry_is_recycled(&entry)
+                .expect("recycle membership should be readable")
+        );
+        assert!(matches!(session.save(&credential), Ok(SaveOutcome::Saved)));
+        assert!(!session.is_dirty());
+
+        drop(session);
+        let mut reopened =
+            VaultSession::open(&path, &credential).expect("saved Trash state should reopen");
+        assert!(reopened.recycle_bin_group_id() == Some(recycle_bin));
+        assert!(
+            reopened
+                .document()
+                .entry_is_recycled(&entry)
+                .expect("reopened entry should remain recycled")
+        );
+
+        let restored_to = reopened
+            .restore_entry(&entry)
+            .expect("reopened entry should restore");
+        assert!(restored_to == root);
+        assert!(
+            !reopened
+                .document()
+                .entry_is_recycled(&entry)
+                .expect("restored entry should leave recycle bin")
+        );
+        assert!(matches!(reopened.save(&credential), Ok(SaveOutcome::Saved)));
+
+        drop(reopened);
+        let restored =
+            VaultSession::open(&path, &credential).expect("restored state should reopen");
+        assert!(
+            !restored
+                .document()
+                .entry_is_recycled(&entry)
+                .expect("restored entry should stay active after reopen")
+        );
+        assert!(
+            restored
+                .projection()
+                .expect("restored vault should project")
+                .root()
+                .entries()
+                .iter()
+                .any(|candidate| candidate.id() == &entry)
+        );
     }
 
     #[cfg(any(unix, windows))]
@@ -1279,6 +1339,63 @@ mod tests {
         );
         assert!(session.is_dirty());
         assert_eq!(session.saved_revision, saved_revision);
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_rotation_reencrypts_clean_source_and_keeps_exact_old_backup() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let current = credential();
+        let replacement = SecretString::new("new-public-rotation-password".to_owned());
+        let mut session = VaultSession::open(&path, &current).expect("fixture should open");
+        assert!(!session.is_dirty());
+
+        assert!(matches!(
+            session.rotate_credential(
+                KdbxCredential::password(current.expose_secret()),
+                KdbxCredential::password(replacement.expose_secret()),
+            ),
+            Ok(SaveOutcome::Saved)
+        ));
+        assert!(!session.is_dirty());
+        assert!(VaultSession::open(&path, &replacement).is_ok());
+        assert!(VaultSession::open(&path, &current).is_err());
+
+        let backup = backup_path(&path);
+        assert!(backup.exists());
+        assert!(VaultSession::open(&backup, &current).is_ok());
+        assert!(VaultSession::open(&backup, &replacement).is_err());
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_rotation_wrong_current_authority_never_touches_source_or_backup() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let before = fs::read(&path).expect("source should be readable");
+        let backup = backup_path(&path);
+        let prior_backup = b"preexisting rotation backup";
+        fs::write(&backup, prior_backup).expect("backup fixture should write");
+        let wrong = SecretString::new("wrong-public-test-password".to_owned());
+        let replacement = SecretString::new("new-public-rotation-password".to_owned());
+        let mut session = VaultSession::open(&path, &credential()).expect("fixture should open");
+
+        assert!(matches!(
+            session.rotate_credential(
+                KdbxCredential::password(wrong.expose_secret()),
+                KdbxCredential::password(replacement.expose_secret()),
+            ),
+            Err(SessionError::CredentialMismatch)
+        ));
+        assert_eq!(fs::read(&path).expect("source should remain"), before);
+        assert_eq!(
+            fs::read(&backup).expect("backup should remain"),
+            prior_backup
+        );
+        assert!(!session.is_dirty());
         assert_no_transaction_temps(&directory.path);
     }
 
@@ -1650,6 +1767,229 @@ mod tests {
             "the replaced vault file could not be read for verification"
         );
         assert!(!final_error.to_string().contains(sensitive_path));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_candidate_dirty_save_pipeline_preserves_previous_generation() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let before = fs::read(&path).expect("source should be readable");
+        let expected_title = "Windows candidate save";
+        let mut session = dirty_session(&path, expected_title);
+
+        assert!(matches!(
+            session
+                .save_with_windows_candidate_pipeline_for_test(&credential())
+                .expect("candidate Windows save pipeline should succeed"),
+            SaveOutcome::Saved
+        ));
+        assert!(!session.is_dirty());
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("backup should contain previous generation"),
+            before
+        );
+        assert_ne!(
+            fs::read(&path).expect("saved primary should be readable"),
+            before
+        );
+
+        let reopened = VaultSession::open(&path, &credential()).expect("saved vault should reopen");
+        assert_eq!(
+            reopened
+                .projection()
+                .expect("saved vault should project")
+                .root()
+                .entries()[0]
+                .title()
+                .visible(),
+            Some(expected_title)
+        );
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_candidate_second_save_rotates_backup_to_exact_previous_primary() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let original = fs::read(&path).expect("source should be readable");
+        let mut session = dirty_session(&path, "Windows candidate generation B");
+
+        assert!(matches!(
+            session
+                .save_with_windows_candidate_pipeline_for_test(&credential())
+                .expect("first candidate Windows save should succeed"),
+            SaveOutcome::Saved
+        ));
+        let first_saved = fs::read(&path).expect("first saved primary should be readable");
+        assert_ne!(first_saved, original);
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("first backup should be readable"),
+            original
+        );
+
+        let entry = first_entry(&session);
+        session
+            .document_mut()
+            .set_entry_title(&entry, "Windows candidate generation C")
+            .expect("second title mutation should succeed");
+        assert!(session.is_dirty());
+
+        assert!(matches!(
+            session
+                .save_with_windows_candidate_pipeline_for_test(&credential())
+                .expect("second candidate Windows save should succeed"),
+            SaveOutcome::Saved
+        ));
+        assert!(!session.is_dirty());
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("rotated backup should be readable"),
+            first_saved,
+            "the backup must be the exact encrypted primary generation replaced by the second save"
+        );
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_candidate_wrong_credential_preserves_primary_and_backup() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let mut session = dirty_session(&path, "Windows candidate generation B");
+        session
+            .save_with_windows_candidate_pipeline_for_test(&credential())
+            .expect("initial candidate Windows save should succeed");
+        let primary_before = fs::read(&path).expect("primary should be readable");
+        let backup_before = fs::read(backup_path(&path)).expect("backup should be readable");
+
+        let entry = first_entry(&session);
+        session
+            .document_mut()
+            .set_entry_title(&entry, "Windows candidate rejected generation")
+            .expect("title mutation should succeed");
+        let wrong = SecretString::new("definitely-wrong-password".to_owned());
+
+        assert!(matches!(
+            session.save_with_windows_candidate_pipeline_for_test(&wrong),
+            Err(SessionError::CredentialMismatch)
+        ));
+        assert!(session.is_dirty());
+        assert_eq!(
+            fs::read(&path).expect("primary should remain readable"),
+            primary_before
+        );
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("backup should remain readable"),
+            backup_before
+        );
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_candidate_external_change_preserves_external_primary_and_backup() {
+        let directory = TestDir::create();
+        let path = directory.fixture_copy(KDBX41_FIXTURE, "vault.kdbx");
+        let mut session = dirty_session(&path, "Windows candidate generation B");
+        session
+            .save_with_windows_candidate_pipeline_for_test(&credential())
+            .expect("initial candidate Windows save should succeed");
+        let backup_before = fs::read(backup_path(&path)).expect("backup should be readable");
+
+        let entry = first_entry(&session);
+        session
+            .document_mut()
+            .set_entry_title(&entry, "Windows local unsaved generation")
+            .expect("local mutation should succeed");
+        external_valid_version(&path, "Windows external generation");
+        let external_primary = fs::read(&path).expect("external primary should be readable");
+
+        assert!(matches!(
+            session.save_with_windows_candidate_pipeline_for_test(&credential()),
+            Err(SessionError::ExternalModificationDetected)
+        ));
+        assert!(session.is_dirty());
+        assert_eq!(
+            fs::read(&path).expect("external primary should remain installed"),
+            external_primary
+        );
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("backup should remain readable"),
+            backup_before
+        );
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_candidate_keyfile_and_composite_credentials_save_and_reopen() {
+        const KEYFILE: &[u8] = b"windows-native-candidate-keyfile-material";
+        let directory = TestDir::create();
+
+        for (filename, password, group_name) in [
+            (
+                "keyfile-only.kdbx",
+                None,
+                "Saved with Windows keyfile-only authority",
+            ),
+            (
+                "composite.kdbx",
+                Some("windows-composite-password"),
+                "Saved with Windows composite authority",
+            ),
+        ] {
+            let path = directory.path.join(filename);
+            let document = KdbxDocument::new("Windows candidate credential session");
+            let mut ciphertext = Vec::new();
+            document
+                .save_to_writer_with_credential(
+                    &mut ciphertext,
+                    KdbxCredential::new(password, Some(KEYFILE)),
+                )
+                .expect("credential fixture should serialize");
+            fs::write(&path, &ciphertext).expect("credential fixture should be written");
+
+            let mut session = VaultSession::open_with_credential(
+                &path,
+                KdbxCredential::new(password, Some(KEYFILE)),
+            )
+            .expect("credential fixture should open");
+            let root = root_group(&session);
+            let created = session
+                .create_group(&root, group_name)
+                .expect("credential-backed mutation should succeed");
+            assert!(session.is_dirty());
+
+            assert!(matches!(
+                session
+                    .save_with_windows_candidate_credential_for_test(KdbxCredential::new(
+                        password,
+                        Some(KEYFILE),
+                    ))
+                    .expect("candidate Windows credential save should succeed"),
+                SaveOutcome::Saved
+            ));
+            assert_eq!(
+                fs::read(backup_path(&path)).expect("credential backup should be readable"),
+                ciphertext
+            );
+
+            let reopened = VaultSession::open_with_credential(
+                &path,
+                KdbxCredential::new(password, Some(KEYFILE)),
+            )
+            .expect("candidate Windows credential save should reopen");
+            assert!(
+                reopened
+                    .projection()
+                    .expect("credential projection should succeed")
+                    .find_group(&created)
+                    .is_some()
+            );
+        }
+
+        assert_no_transaction_temps(&directory.path);
     }
 
     #[cfg(windows)]

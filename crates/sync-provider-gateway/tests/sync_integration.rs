@@ -126,7 +126,7 @@ impl LocalVault for TestLocal {
         &self,
         expected: &LocalSnapshot,
         ciphertext: &[u8],
-        _master_password: &SecretString,
+        _credential: &sync_engine::SyncCredential,
     ) -> Result<(), LocalCommitError> {
         let mut state = self.state.lock().map_err(|_| LocalCommitError::Failed)?;
         if expected.source() != &self.source

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { DesktopApi } from "../../lib/desktop";
 import type {
+  CreatedEntryDto,
   EntryDetailDto,
   EntryId,
   GroupDto,
@@ -18,9 +19,12 @@ interface EntryDetailProps {
   groups: GroupDto[];
   disabled: boolean;
   mutationDisabled?: boolean;
+  recycled?: boolean;
+  recycleBinEnabled?: boolean;
   onEditingChange?: (editing: boolean) => void;
   onSnapshot: (snapshot: VaultSnapshotDto) => void;
   onDeleted: (snapshot: VaultSnapshotDto) => void;
+  onDuplicated?: ((result: CreatedEntryDto) => void) | undefined;
   onMoved: (snapshot: VaultSnapshotDto, destination: GroupId) => void;
   onDraftChange?: (active: boolean) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -42,9 +46,12 @@ function EntryDetailContent({
   groups,
   disabled,
   mutationDisabled = false,
+  recycled = false,
+  recycleBinEnabled = true,
   onEditingChange,
   onSnapshot,
   onDeleted,
+  onDuplicated,
   onMoved,
   onDraftChange,
   onBusyChange,
@@ -134,12 +141,15 @@ function EntryDetailContent({
           groups={groups}
           disabled={disabled}
           mutationDisabled={mutationDisabled}
+          recycled={recycled}
+          recycleBinEnabled={recycleBinEnabled}
           onEdit={() => {
             setEditing(true);
             onEditingChange?.(true);
           }}
           onSnapshot={changed}
           onDeleted={onDeleted}
+          onDuplicated={onDuplicated}
           onMoved={(snapshot, destination) => {
             onMoved(snapshot, destination);
             setDetail(null);

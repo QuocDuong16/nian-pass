@@ -35,6 +35,32 @@ afterEach(() => {
   cleanup();
 });
 
+test("embedded Settings sync keeps saved-profile navigation usable", async () => {
+  const api = mutationApi({
+    syncProfiles: vi.fn().mockResolvedValue([profile, gatewayProfile]),
+  });
+  render(
+    <SyncSection
+      embedded
+      api={api}
+      disabled={false}
+      onBusyChange={vi.fn()}
+      onSnapshot={vi.fn()}
+    />,
+  );
+
+  const picker = await screen.findByLabelText("Saved sync profile");
+  await waitFor(() => {
+    expect(picker).toHaveValue(profile.profileId);
+  });
+
+  fireEvent.change(picker, { target: { value: gatewayProfile.profileId } });
+  expect(picker).toHaveValue(gatewayProfile.profileId);
+
+  fireEvent.change(picker, { target: { value: "" } });
+  expect(picker).toHaveValue("");
+});
+
 test("passes credentials once and clears every secret after sync", async () => {
   const syncNow = vi.fn().mockResolvedValue({
     status: "done",
@@ -502,4 +528,77 @@ test("shows profile-load failure and dirty-vault warning", async () => {
   expect(
     screen.getByText("Save or finish the current draft before syncing."),
   ).toBeInTheDocument();
+});
+
+test("keyfile-only sync sends null password without exposing keyfile material", async () => {
+  const syncNow = vi.fn().mockResolvedValue({
+    status: "done",
+    conflict: null,
+    snapshot: mutationSnapshot,
+  });
+  const api = mutationApi({
+    credentialHasKeyfile: vi.fn().mockResolvedValue(true),
+    syncProfiles: vi.fn().mockResolvedValue([profile]),
+    syncNow,
+  });
+  render(
+    <SyncSection
+      api={api}
+      disabled={false}
+      onBusyChange={vi.fn()}
+      onSnapshot={vi.fn()}
+    />,
+  );
+  await screen.findByText(
+    /Leave the master password blank for keyfile-only vaults/,
+  );
+  fireEvent.change(screen.getByLabelText("WebDAV username"), {
+    target: { value: "sync-user" },
+  });
+  fireEvent.change(screen.getByLabelText("WebDAV password"), {
+    target: { value: "provider-secret" },
+  });
+  expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+  await waitFor(() => {
+    expect(syncNow).toHaveBeenCalledWith(
+      profile.profileId,
+      { webdav: { username: "sync-user", password: "provider-secret" } },
+      null,
+    );
+  });
+  expect(screen.getByLabelText("WebDAV password")).toHaveValue("");
+});
+
+test("unknown keyfile status blocks synchronization even with a typed password", async () => {
+  const syncNow = vi.fn();
+  const api = mutationApi({
+    credentialHasKeyfile: vi
+      .fn()
+      .mockRejectedValue(new Error("internal details")),
+    syncProfiles: vi.fn().mockResolvedValue([profile]),
+    syncNow,
+  });
+  render(
+    <SyncSection
+      api={api}
+      disabled={false}
+      onBusyChange={vi.fn()}
+      onSnapshot={vi.fn()}
+    />,
+  );
+  await screen.findByText(
+    "Could not check the active keyfile for synchronization.",
+  );
+  fireEvent.change(screen.getByLabelText("WebDAV username"), {
+    target: { value: "user" },
+  });
+  fireEvent.change(screen.getByLabelText("WebDAV password"), {
+    target: { value: "secret" },
+  });
+  fireEvent.change(screen.getByLabelText("Vault master password"), {
+    target: { value: "master" },
+  });
+  expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
+  expect(syncNow).not.toHaveBeenCalled();
 });

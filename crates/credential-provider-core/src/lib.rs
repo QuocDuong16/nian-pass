@@ -153,6 +153,12 @@ pub fn candidates(
     collect_entries(projection.root(), &mut entries);
     let mut result = Vec::new();
     for entry in entries {
+        if document
+            .entry_is_recycled(entry.id())
+            .map_err(|_| ProviderError::Internal)?
+        {
+            continue;
+        }
         if entry_matches_target(document, entry.id(), target)? {
             result.push(CredentialCandidate {
                 entry_id: entry.id().as_str().to_owned(),
@@ -176,6 +182,12 @@ pub fn password_identities(
     collect_entries(projection.root(), &mut entries);
     let mut result = Vec::new();
     for entry in entries {
+        if document
+            .entry_is_recycled(entry.id())
+            .map_err(|_| ProviderError::Internal)?
+        {
+            continue;
+        }
         if let Some(identity) = password_identity(entry) {
             result.push(identity);
         }
@@ -210,6 +222,9 @@ pub fn credential(
         return Err(ProviderError::CredentialUnavailable);
     }
     let id = EntryId::new(entry_id);
+    if document.entry_is_recycled(&id).unwrap_or(true) {
+        return Err(ProviderError::CredentialUnavailable);
+    }
     let projection = document
         .projection()
         .map_err(|_| ProviderError::CredentialUnavailable)?;

@@ -14,7 +14,6 @@ use sync_engine::{
     SyncEngine, SyncError, SyncOutcome, SyncStore,
 };
 use sync_provider_core::{ProviderError, RemoteObjectProvider, RemoteRead};
-use vault_core::SecretString;
 
 use crate::{
     dto::VaultSnapshotDto,
@@ -130,22 +129,24 @@ impl SyncRuntime {
         state: &AppState,
         profile_id: &str,
         credentials: ProviderCredentialsDto,
-        master_password: String,
+        master_password: Option<String>,
     ) -> Result<SyncResultDto, DesktopError> {
         let profile = self.profiles.load(profile_id)?;
         let local = local::DesktopLocal::new(state.service.clone());
-        let captured = state
-            .service
-            .lock()
-            .map_err(|_| DesktopError::Internal)?
-            .sync_capture()?;
+        let (captured, credential) = {
+            let service = state.service.lock().map_err(|_| DesktopError::Internal)?;
+            let captured = service.sync_capture()?;
+            let credential =
+                service.sync_credential(master_password.map(vault_core::SecretString::new))?;
+            (captured, credential)
+        };
         if captured.source_binding != profile.source_binding {
             return Err(DesktopError::InvalidRequest);
         }
         let provider = DesktopProvider::new(&profile.target, credentials)?;
         let engine = self.engine(&profile)?;
         let outcome = engine
-            .sync(&provider, &local, SecretString::new(master_password))
+            .sync(&provider, &local, credential)
             .await
             .map_err(map_sync_error)?;
         self.result(state, outcome)
@@ -160,13 +161,18 @@ impl SyncRuntime {
         let provider = DesktopProvider::new(&profile.target, request.credentials)?;
         let engine = self.engine(&profile)?;
         let local = local::DesktopLocal::new(state.service.clone());
+        let credential = state
+            .service
+            .lock()
+            .map_err(|_| DesktopError::Internal)?
+            .sync_credential(request.master_password.map(vault_core::SecretString::new))?;
         let outcome = engine
             .resolve(
                 &request.conflict_operation_id,
                 request.choice.into(),
                 &provider,
                 &local,
-                SecretString::new(request.master_password),
+                credential,
             )
             .await
             .map_err(map_sync_error)?;
@@ -247,7 +253,7 @@ pub struct ResolveSyncConflictRequestDto {
     conflict_operation_id: String,
     choice: ConflictChoiceDto,
     credentials: ProviderCredentialsDto,
-    master_password: String,
+    master_password: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -338,7 +344,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use kdbx::KdbxDocument;
+    use kdbx::{KdbxCredential, KdbxDocument};
     use serde::de::DeserializeOwned;
     use serde_json::{Value, json};
     use sync_engine::{LocalCommitError, StoreError, SyncError};
@@ -348,7 +354,7 @@ mod tests {
         net::TcpListener,
         task::JoinHandle,
     };
-    use vault_core::{EntryId, SecretString};
+    use vault_core::{EntryId, SecretBytes, SecretString};
 
     use super::profile::SyncProfileTargetDto;
     use super::{
@@ -444,6 +450,33 @@ mod tests {
             service.select_path(path).expect("select");
             service
                 .unlock(SecretString::new(PASSWORD.to_owned()))
+                .expect("unlock");
+        }
+        state
+    }
+
+    #[cfg(unix)]
+    fn keyfile_state(dir: &TestDirectory, keyfile: &[u8], password: Option<&str>) -> AppState {
+        let path = dir.0.join("keyfile-vault.kdbx");
+        let document =
+            KdbxDocument::open_reader(&mut Cursor::new(fixture()), PASSWORD).expect("fixture");
+        let mut bytes = Vec::new();
+        document
+            .save_to_writer_with_credential(
+                &mut bytes,
+                KdbxCredential::new(password, Some(keyfile)),
+            )
+            .expect("save keyfile vault");
+        fs::write(&path, bytes).expect("persist");
+        let state = AppState::new(Arc::new(NoClipboard));
+        {
+            let mut service = state.service.lock().expect("service");
+            service.select_path(path).expect("select");
+            service
+                .set_pending_keyfile(SecretBytes::new(keyfile.to_vec()))
+                .expect("keyfile");
+            service
+                .unlock_with_components(password.map(|value| SecretString::new(value.to_owned())))
                 .expect("unlock");
         }
         state
@@ -635,7 +668,7 @@ mod tests {
                 &state,
                 &saved.profile_id,
                 credentials(),
-                PASSWORD.to_owned(),
+                Some(PASSWORD.to_owned()),
             )
             .await
             .expect("create remote");
@@ -665,7 +698,7 @@ mod tests {
                 &state,
                 &saved.profile_id,
                 credentials(),
-                PASSWORD.to_owned(),
+                Some(PASSWORD.to_owned()),
             )
             .await
             .expect("conditional replace");
@@ -687,7 +720,7 @@ mod tests {
                 &state,
                 &saved.profile_id,
                 credentials(),
-                PASSWORD.to_owned(),
+                Some(PASSWORD.to_owned()),
             )
             .await
             .expect("apply remote");
@@ -714,7 +747,7 @@ mod tests {
                 &state,
                 &saved.profile_id,
                 credentials(),
-                PASSWORD.to_owned(),
+                Some(PASSWORD.to_owned()),
             )
             .await
             .expect("structured conflict")
@@ -728,7 +761,7 @@ mod tests {
                     conflict_operation_id: conflict.id().to_owned(),
                     choice: ConflictChoiceDto::KeepRemote,
                     credentials: credentials(),
-                    master_password: PASSWORD.to_owned(),
+                    master_password: Some(PASSWORD.to_owned()),
                 },
             )
             .await
@@ -774,6 +807,184 @@ mod tests {
             .expect("desktop sync integration test");
     }
 
+    #[cfg(unix)]
+    fn keyfile_change(bytes: &[u8], credential: KdbxCredential<'_>, title: &str) -> Vec<u8> {
+        let mut document =
+            KdbxDocument::open_reader_with_credential(&mut Cursor::new(bytes), credential)
+                .expect("open keyfile generation");
+        let entry = document.projection().expect("projection").root().entries()[0]
+            .id()
+            .clone();
+        document.set_entry_title(&entry, title).expect("edit title");
+        let mut candidate = Vec::new();
+        document
+            .save_to_writer_with_credential(&mut candidate, credential)
+            .expect("serialize keyfile generation");
+        candidate
+    }
+
+    #[cfg(unix)]
+    async fn runtime_keyfile_sync_case(password: Option<&str>) {
+        const KEYFILE: &[u8] = b"synthetic-desktop-sync-keyfile-material";
+        let directory = TestDirectory::new();
+        let state = keyfile_state(&directory, KEYFILE, password);
+        let runtime = SyncRuntime::new(directory.0.clone()).expect("runtime");
+        let (url, remote, server) = webdav_server().await;
+        let profile = runtime
+            .save_profile(
+                &state,
+                decode(json!({ "target": { "provider": "webdav", "resourceUrl": url } })),
+            )
+            .expect("profile");
+        let vault_path = directory.0.join("keyfile-vault.kdbx");
+        let credential = KdbxCredential::new(password, Some(KEYFILE));
+        let entered = password.map(str::to_owned);
+
+        // An incorrect or missing password must not publish an inaccessible
+        // remote object, even though Rust already retains the correct keyfile.
+        assert!(
+            runtime
+                .sync_now(
+                    &state,
+                    &profile.profile_id,
+                    credentials(),
+                    if password.is_some() {
+                        None
+                    } else {
+                        Some("incorrect-extra-factor".to_owned())
+                    },
+                )
+                .await
+                .is_err()
+        );
+        assert!(remote.lock().expect("remote").bytes.is_none());
+
+        let created = runtime
+            .sync_now(&state, &profile.profile_id, credentials(), entered.clone())
+            .await
+            .expect("create remote with keyfile credential");
+        assert_eq!(created.status, "done");
+        assert!(created.conflict.is_none());
+        let initial = fs::read(&vault_path).expect("local initial");
+        assert_eq!(remote.lock().expect("remote").bytes, Some(initial.clone()));
+        assert!(
+            KdbxDocument::open_reader_with_credential(&mut Cursor::new(initial), credential,)
+                .is_ok()
+        );
+
+        // Local Save uses retained credential; Sync uses the matching per-call
+        // authority without transferring keyfile bytes through WebView IPC.
+        {
+            let mut service = state.service.lock().expect("service");
+            let entry = service.snapshot().expect("snapshot").entries[0].id.clone();
+            service
+                .session_mut()
+                .expect("session")
+                .document_mut()
+                .set_entry_title(&EntryId::new(entry), "local keyfile upload")
+                .expect("edit local");
+            service.save().expect("local save");
+        }
+        runtime
+            .sync_now(&state, &profile.profile_id, credentials(), entered.clone())
+            .await
+            .expect("upload local keyfile vault");
+        let uploaded = fs::read(&vault_path).expect("local uploaded");
+        assert_eq!(remote.lock().expect("remote").bytes, Some(uploaded.clone()));
+
+        let downloaded = keyfile_change(&uploaded, credential, "remote keyfile download");
+        {
+            let mut value = remote.lock().expect("remote");
+            value.bytes = Some(downloaded.clone());
+            value.revision += 1;
+        }
+        runtime
+            .sync_now(&state, &profile.profile_id, credentials(), entered.clone())
+            .await
+            .expect("apply remote keyfile vault");
+        assert_eq!(fs::read(&vault_path).expect("downloaded local"), downloaded);
+
+        // Reconcile a real desktop conflict using the same credential, not a
+        // password-only codec that would reject the remote generation.
+        {
+            let mut service = state.service.lock().expect("service");
+            let entry = service.snapshot().expect("snapshot").entries[0].id.clone();
+            service
+                .session_mut()
+                .expect("session")
+                .document_mut()
+                .set_entry_title(&EntryId::new(entry), "local keyfile conflict")
+                .expect("edit local conflict");
+            service.save().expect("save local conflict");
+        }
+        let authoritative = keyfile_change(&downloaded, credential, "remote keyfile conflict");
+        {
+            let mut value = remote.lock().expect("remote");
+            value.bytes = Some(authoritative.clone());
+            value.revision += 1;
+        }
+        let conflict = runtime
+            .sync_now(&state, &profile.profile_id, credentials(), entered.clone())
+            .await
+            .expect("keyfile conflict")
+            .conflict
+            .expect("conflict token");
+        let resolved = runtime
+            .resolve_conflict(
+                &state,
+                ResolveSyncConflictRequestDto {
+                    profile_id: profile.profile_id.clone(),
+                    conflict_operation_id: conflict.id().to_owned(),
+                    choice: ConflictChoiceDto::KeepRemote,
+                    credentials: credentials(),
+                    master_password: entered,
+                },
+            )
+            .await
+            .expect("resolve keyfile conflict");
+        assert_eq!(resolved.status, "done");
+        assert_eq!(
+            fs::read(&vault_path).expect("resolved local"),
+            authoritative
+        );
+        assert!(KdbxDocument::open_with_credential(&vault_path, credential).is_ok());
+        // Profile and recovery metadata must not contain the raw keyfile.
+        let profile_bytes = fs::read(
+            directory
+                .0
+                .join("sync-profiles")
+                .join(format!("{}.json", profile.profile_id)),
+        )
+        .expect("profile metadata");
+        assert!(
+            !profile_bytes
+                .windows(KEYFILE.len())
+                .any(|part| part == KEYFILE)
+        );
+        server.abort();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_keyfile_only_and_composite_sync_through_real_webdav() {
+        std::thread::Builder::new()
+            .name("desktop-sync-keyfile-integration".to_owned())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("test runtime");
+                runtime.block_on(async {
+                    runtime_keyfile_sync_case(None).await;
+                    runtime_keyfile_sync_case(Some(PASSWORD)).await;
+                });
+            })
+            .expect("test thread")
+            .join()
+            .expect("desktop keyfile sync integration test");
+    }
+
     #[test]
     fn gateway_token_never_enters_profile_base_or_journal_files() {
         std::thread::Builder::new()
@@ -809,7 +1020,7 @@ mod tests {
                             &state,
                             &saved.profile_id,
                             decode(json!({ "gateway": { "accessToken": token } })),
-                            PASSWORD.to_owned(),
+                            Some(PASSWORD.to_owned()),
                         )
                         .await
                         .expect("gateway sync");

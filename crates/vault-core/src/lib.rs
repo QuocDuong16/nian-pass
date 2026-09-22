@@ -7,62 +7,14 @@
 //! `SummaryText`, `GroupId`, `EntryId`, and `SecretString` do not implement
 //! `Debug`, which prevents accidental dumps.
 
-use zeroize::Zeroizing;
-
 mod entry_mutation;
+mod secret;
 
-pub use entry_mutation::{EntryUpdate, NewEntry};
-
-/// An owned secret whose backing string is zeroized when dropped.
-///
-/// Plaintext access is deliberately explicit. This type does not implement
-/// `Debug`, `Display`, `Clone`, serialization, or implicit string-borrowing
-/// traits. Zeroization reduces accidental residual memory, but cannot guarantee
-/// removal of copies made by the operating system, runtime, compiler, or
-/// dependencies.
-///
-/// ```compile_fail
-/// use vault_core::SecretString;
-/// let secret = SecretString::new("public-test-password".to_owned());
-/// let duplicate = secret.clone();
-/// ```
-///
-/// ```compile_fail
-/// use vault_core::SecretString;
-/// let secret = SecretString::new("public-test-password".to_owned());
-/// let rendered = format!("{secret}");
-/// ```
-///
-/// ```compile_fail
-/// use vault_core::SecretString;
-/// let secret = SecretString::new("public-test-password".to_owned());
-/// let rendered = format!("{secret:?}");
-/// ```
-///
-/// ```compile_fail
-/// use vault_core::SecretString;
-/// let secret = SecretString::new("public-test-password".to_owned());
-/// let implicit: &str = &secret;
-/// ```
-pub struct SecretString {
-    inner: Zeroizing<String>,
-}
-
-impl SecretString {
-    /// Takes ownership of a plaintext secret.
-    #[must_use]
-    pub fn new(value: String) -> Self {
-        Self {
-            inner: Zeroizing::new(value),
-        }
-    }
-
-    /// Explicitly exposes the secret plaintext for the shortest practical use.
-    #[must_use]
-    pub fn expose_secret(&self) -> &str {
-        self.inner.as_str()
-    }
-}
+pub use entry_mutation::{
+    EntryExpiry, EntryIconSummary, EntryIconUpdate, EntryTotpUpdate, EntryUpdate,
+    MAX_STANDARD_ICON_ID, NewEntry,
+};
+pub use secret::{SecretBytes, SecretString};
 
 /// Protection state for a custom entry field.
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -332,6 +284,9 @@ pub struct EntrySummary {
     tags: Vec<String>,
     has_password: bool,
     has_notes: bool,
+    has_totp: bool,
+    expires_at_unix_seconds: Option<i64>,
+    icon: EntryIconSummary,
 }
 
 impl EntrySummary {
@@ -354,6 +309,9 @@ impl EntrySummary {
             tags,
             has_password,
             has_notes,
+            has_totp: false,
+            expires_at_unix_seconds: None,
+            icon: EntryIconSummary::None,
         }
     }
 
@@ -397,6 +355,13 @@ impl EntrySummary {
     #[must_use]
     pub const fn has_notes(&self) -> bool {
         self.has_notes
+    }
+
+    /// Returns whether recognized TOTP configuration metadata exists, without
+    /// exposing the seed or provisioning URI.
+    #[must_use]
+    pub const fn has_totp(&self) -> bool {
+        self.has_totp
     }
 }
 

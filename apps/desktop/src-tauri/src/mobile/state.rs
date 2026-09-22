@@ -7,7 +7,7 @@ use std::{
 
 use vault_core::SecretString;
 
-use crate::dto::{EntryDetailDto, MobileSelectedVaultDto, MobileVaultSnapshotDto};
+use crate::dto::{MobileSelectedVaultDto, MobileVaultSnapshotDto};
 
 use super::{
     MobileError,
@@ -178,50 +178,6 @@ impl MobileVaultService {
         Ok(snapshot)
     }
 
-    pub(crate) fn snapshot(&self) -> Result<MobileVaultSnapshotDto, MobileError> {
-        self.session.as_ref().ok_or(MobileError::Locked)?.snapshot()
-    }
-
-    pub(crate) fn entry_detail(&self, entry_id: &str) -> Result<EntryDetailDto, MobileError> {
-        self.session
-            .as_ref()
-            .ok_or(MobileError::Locked)?
-            .entry_detail(entry_id)
-    }
-
-    pub(crate) fn entry_secret(
-        &self,
-        entry_id: &str,
-        kind: MobileSecretKind,
-    ) -> Result<SecretString, MobileError> {
-        let session = self.session.as_ref().ok_or(MobileError::Locked)?;
-        match kind {
-            MobileSecretKind::Title => {
-                session.entry_secret(entry_id, |document, id| document.entry_title(id))
-            }
-            MobileSecretKind::Username => {
-                session.entry_secret(entry_id, |document, id| document.entry_username(id))
-            }
-            MobileSecretKind::Url => {
-                session.entry_secret(entry_id, |document, id| document.entry_url(id))
-            }
-            MobileSecretKind::Notes => {
-                session.entry_secret(entry_id, |document, id| document.entry_notes(id))
-            }
-        }
-    }
-
-    pub(crate) fn entry_custom_field(
-        &self,
-        entry_id: &str,
-        name: &str,
-    ) -> Result<SecretString, MobileError> {
-        self.session
-            .as_ref()
-            .ok_or(MobileError::Locked)?
-            .entry_custom_field(entry_id, name)
-    }
-
     pub(super) fn session_mut_for_mutation(
         &mut self,
     ) -> Result<&mut MobileVaultSession, MobileError> {
@@ -259,7 +215,7 @@ impl MobileVaultService {
         self.begin_operation()
     }
 
-    fn begin_operation(&mut self) -> Result<MobileOperation, MobileError> {
+    pub(super) fn begin_operation(&mut self) -> Result<MobileOperation, MobileError> {
         let session = self.session.as_ref().ok_or(MobileError::Locked)?;
         let id = self.next_operation;
         self.next_operation = self.next_operation.checked_add(1).unwrap_or(1);
@@ -397,7 +353,7 @@ mod tests {
         mutations::{
             MobileCreateEntryRequest, MobileCreateGroupRequest, MobileMoveEntryRequest,
             MobileMoveGroupRequest, MobileRenameGroupRequest, MobileSetCustomFieldRequest,
-            MobileUpdateEntryRequest,
+            MobileSetEntryTagsRequest, MobileUpdateEntryRequest,
         },
         state::MobileSecretKind,
     };
@@ -408,7 +364,7 @@ mod tests {
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
     };
-    use vault_core::SecretString;
+    use vault_core::{EntryId, SecretBytes, SecretString};
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
     fn fixture() -> (PathBuf, PathBuf) {
@@ -515,6 +471,11 @@ mod tests {
                 url: None,
                 password: None,
                 notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             })
             .expect("mutate");
         assert!(matches!(
@@ -547,6 +508,11 @@ mod tests {
                 url: None,
                 password: None,
                 notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             })
             .expect("mutate");
         let before = serde_json::to_value(service.snapshot().expect("dirty snapshot"))
@@ -587,6 +553,11 @@ mod tests {
                 url: None,
                 password: None,
                 notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             })
             .expect("mutate");
 
@@ -623,7 +594,12 @@ mod tests {
                 username: None,
                 url: None,
                 password: None,
-                notes: None
+                notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             }),
             Err(MobileError::Busy)
         ));
@@ -678,16 +654,107 @@ mod tests {
         let existing_entry = initial.entries.first().expect("entry").id.clone();
         assert!(service.entry_detail(&existing_entry).is_ok());
 
-        service
+        let updated = service
             .update_entry(request::<MobileUpdateEntryRequest>(json!({
                 "entryId": existing_entry,
                 "title": "Mobile title",
                 "username": "mobile-user",
                 "url": "m5.2://entry",
                 "password": "M5.2-PASSWORD",
-                "notes": "M5.2-NOTES"
+                "notes": "M5.2-NOTES",
+                "expires": true,
+                "expiryUnixSeconds": 2_000_000_000_i64
             })))
             .expect("atomic entry update");
+        assert_eq!(
+            updated
+                .entries
+                .iter()
+                .find(|entry| entry.id == existing_entry)
+                .and_then(|entry| entry.expires_at_unix_seconds),
+            Some(2_000_000_000)
+        );
+        let tagged = service
+            .set_entry_tags(request::<MobileSetEntryTagsRequest>(json!({
+                "entryId": existing_entry,
+                "tags": ["mobile", "finance"]
+            })))
+            .expect("mobile tag update");
+        assert_eq!(
+            tagged
+                .entries
+                .iter()
+                .find(|entry| entry.id == existing_entry)
+                .expect("tagged entry")
+                .tags,
+            ["mobile", "finance"]
+        );
+        assert!(matches!(
+            service.set_entry_tags(request::<MobileSetEntryTagsRequest>(json!({
+                "entryId": existing_entry,
+                "tags": [""]
+            }))),
+            Err(MobileError::InvalidRequest)
+        ));
+
+        let disabled_expiry = service
+            .update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": existing_entry,
+                "expires": false
+            })))
+            .expect("expiry disable");
+        assert_eq!(
+            disabled_expiry
+                .entries
+                .iter()
+                .find(|entry| entry.id == existing_entry)
+                .and_then(|entry| entry.expires_at_unix_seconds),
+            None
+        );
+        assert!(matches!(
+            service.update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": existing_entry,
+                "expires": true
+            }))),
+            Err(MobileError::InvalidRequest)
+        ));
+        let icon_updated = service
+            .update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": existing_entry,
+                "icon": { "kind": "built_in", "id": 68 }
+            })))
+            .expect("built-in icon update");
+        assert!(matches!(
+            icon_updated
+                .entries
+                .iter()
+                .find(|entry| entry.id == existing_entry)
+                .expect("updated entry")
+                .icon,
+            crate::dto::EntryIconDto::BuiltIn { id: 68 }
+        ));
+        assert!(matches!(
+            service.update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": existing_entry,
+                "icon": { "kind": "built_in", "id": 69 }
+            }))),
+            Err(MobileError::InvalidRequest)
+        ));
+        let icon_cleared = service
+            .update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": existing_entry,
+                "icon": { "kind": "none" }
+            })))
+            .expect("icon clear");
+        assert!(matches!(
+            icon_cleared
+                .entries
+                .iter()
+                .find(|entry| entry.id == existing_entry)
+                .expect("cleared entry")
+                .icon,
+            crate::dto::EntryIconDto::None
+        ));
         for kind in [
             MobileSecretKind::Title,
             MobileSecretKind::Username,
@@ -1040,6 +1107,72 @@ mod tests {
     }
 
     #[test]
+    fn mobile_totp_mutation_and_reveal_keep_provisioning_secret_rust_owned() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let entry_id = service.snapshot().expect("snapshot").entries[0].id.clone();
+        let uri = "otpauth://totp/Mobile?secret=JBSWY3DPEHPK3PXP&period=30&digits=6";
+
+        let configured = service
+            .update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": entry_id,
+                "totpEnabled": true,
+                "totpUri": uri
+            })))
+            .expect("configure totp");
+        assert!(
+            configured
+                .entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .expect("entry")
+                .totp_present
+        );
+        let code = service.entry_totp_code(&entry_id).expect("totp code");
+        assert_eq!(code.period_seconds(), 30);
+        assert!((6..=10).contains(&code.code().expose_secret().len()));
+        assert!(code.valid_for_seconds() <= code.period_seconds());
+
+        assert!(matches!(
+            service.update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": entry_id,
+                "totpEnabled": true
+            }))),
+            Err(MobileError::InvalidRequest)
+        ));
+        assert!(matches!(
+            service.update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": entry_id,
+                "totpEnabled": true,
+                "totpUri": "https://example.test/not-totp"
+            }))),
+            Err(MobileError::InvalidRequest)
+        ));
+        assert!(service.entry_totp_code(&entry_id).is_ok());
+
+        let cleared = service
+            .update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": entry_id,
+                "totpEnabled": false
+            })))
+            .expect("clear totp");
+        assert!(
+            !cleared
+                .entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .expect("entry")
+                .totp_present
+        );
+        assert!(matches!(
+            service.entry_totp_code(&entry_id),
+            Err(MobileError::InvalidRequest)
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn stale_deleted_candidate_releases_no_secret() {
         let (root, path) = fixture();
         let mut service = MobileVaultService::new();
@@ -1075,6 +1208,112 @@ mod tests {
     }
 
     #[test]
+    fn mobile_history_is_on_demand_secret_free_revision_metadata() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let entry_id = service.snapshot().expect("snapshot").entries[0].id.clone();
+        let before = service.entry_history(&entry_id).expect("initial history");
+
+        service
+            .update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": entry_id,
+                "title": "Mobile history newer title"
+            })))
+            .expect("history-producing update");
+
+        let after = service.entry_history(&entry_id).expect("updated history");
+        assert_eq!(after.items.len(), before.items.len() + 1);
+        assert_ne!(after.document_revision, before.document_revision);
+        assert!(
+            after
+                .items
+                .iter()
+                .all(|item| item.index < after.items.len())
+        );
+        assert!(matches!(
+            service.entry_history("missing-entry"),
+            Err(MobileError::EntryNotFound)
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn mobile_attachment_review_returns_metadata_only() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let entry_id = service.snapshot().expect("snapshot").entries[0].id.clone();
+        let session = service.session.as_mut().expect("session");
+        session
+            .document
+            .add_entry_attachment(
+                &EntryId::new(&entry_id),
+                "mobile-review.bin",
+                &SecretBytes::new(vec![1, 2, 3, 4]),
+            )
+            .expect("add attachment");
+
+        let items = service
+            .entry_attachments(&entry_id)
+            .expect("attachment metadata");
+        let item = items
+            .iter()
+            .find(|item| item.name == "mobile-review.bin")
+            .expect("added metadata");
+        assert_eq!(item.size_bytes, 4);
+        assert!(item.protected);
+        assert!(matches!(
+            service.entry_attachments("missing-entry"),
+            Err(MobileError::EntryNotFound)
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn attachment_operations_serialize_native_picker_io_and_keep_bytes_rust_owned() {
+        let (root, path) = fixture();
+        let mut service = MobileVaultService::new();
+        unlocked(&mut service, path);
+        let entry_id = service.snapshot().expect("snapshot").entries[0].id.clone();
+        let staged = root.join("native-attachment-import.bin");
+        fs::write(&staged, [7_u8, 8, 9, 10]).expect("stage attachment");
+
+        let import = service
+            .begin_attachment_import()
+            .expect("reserve attachment import");
+        assert!(matches!(service.begin_lock(), Err(MobileError::Busy)));
+        assert!(matches!(service.begin_reload(), Err(MobileError::Busy)));
+        let snapshot = service
+            .complete_attachment_import(import.id, &entry_id, "native-review.bin", &staged)
+            .expect("complete attachment import");
+        assert!(snapshot.dirty);
+        assert!(
+            service
+                .entry_attachments(&entry_id)
+                .expect("attachment metadata")
+                .iter()
+                .any(|item| item.name == "native-review.bin" && item.size_bytes == 4)
+        );
+        service.finish_operation(import.id);
+
+        let export = service
+            .begin_attachment_export()
+            .expect("reserve attachment export");
+        assert!(matches!(service.begin_lock(), Err(MobileError::Busy)));
+        let candidate = root.join("native-attachment-export.bin");
+        service
+            .prepare_attachment_export(export.id, &entry_id, "native-review.bin", &candidate)
+            .expect("prepare attachment export");
+        assert_eq!(
+            fs::read(&candidate).expect("read candidate"),
+            [7_u8, 8, 9, 10]
+        );
+        service.finish_operation(export.id);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn active_autofill_fulfillment_serializes_lock_without_sleeps() {
         let (root, path) = fixture();
         let mut service = MobileVaultService::new();
@@ -1088,6 +1327,13 @@ mod tests {
                 "protection": "protected"
             })))
             .expect("association");
+        service
+            .update_entry(request::<MobileUpdateEntryRequest>(json!({
+                "entryId": entry_id,
+                "totpEnabled": true,
+                "totpUri": "otpauth://totp/Autofill?secret=JBSWY3DPEHPK3PXP&period=30&digits=6"
+            })))
+            .expect("totp");
         let prepared = service
             .begin_autofill_fulfillment(
                 "opaque-request".to_owned(),
@@ -1095,6 +1341,7 @@ mod tests {
                 &app_target("dev.example.login"),
             )
             .expect("reserve fulfillment");
+        assert!(prepared.totp.is_some());
         assert!(matches!(service.begin_lock(), Err(MobileError::Busy)));
         assert!(matches!(
             service.begin_discard_and_lock(),

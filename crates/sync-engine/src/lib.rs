@@ -8,6 +8,7 @@ mod codec;
 mod commit;
 mod conflict;
 mod conflict_authority;
+mod credential;
 mod engine;
 mod error;
 mod local;
@@ -16,6 +17,7 @@ mod store;
 mod store_io;
 
 pub use conflict::{ConflictChoice, ConflictDescriptor, ConflictOperation};
+pub use credential::SyncCredential;
 pub use engine::{SyncCompletion, SyncEngine, SyncOutcome};
 pub use error::SyncError;
 pub use local::{LocalCommitError, LocalSnapshot, LocalVault};

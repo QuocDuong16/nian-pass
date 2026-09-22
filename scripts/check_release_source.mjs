@@ -102,7 +102,11 @@ export function githubReleaseWorkflowViolations(root) {
       `${githubWorkflow}: Windows release job must use the shared private Node tool bootstrap`,
     );
   }
-  if (/npm install\s+--global\s+"corepack@\$env:COREPACK_VERSION"/i.test(windowsJob)) {
+  if (
+    /npm install\s+--global\s+"corepack@\$env:COREPACK_VERSION"/i.test(
+      windowsJob,
+    )
+  ) {
     violations.push(
       `${githubWorkflow}: Windows release job must not mutate runner-global Corepack`,
     );
@@ -487,10 +491,16 @@ export function windowsNodeBootstrapViolations(root) {
     );
   }
   if (/npm install\s+--global\s+"corepack@/i.test(helper)) {
-    violations.push(`${helperPath}: runner-global Corepack installation is forbidden`);
+    violations.push(
+      `${helperPath}: runner-global Corepack installation is forbidden`,
+    );
   }
-  if (/\(Get-Command \$Name -CommandType Application[^)]*\)\.Source/.test(helper)) {
-    violations.push(`${helperPath}: unbounded Get-Command .Source resolution is forbidden`);
+  if (
+    /\(Get-Command \$Name -CommandType Application[^)]*\)\.Source/.test(helper)
+  ) {
+    violations.push(
+      `${helperPath}: unbounded Get-Command .Source resolution is forbidden`,
+    );
   }
   return violations;
 }
@@ -519,9 +529,14 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020[\s\S]*?node-version:\s*\$\{\{ env\.NODE_VERSION \}\}/, "must install NODE_VERSION with the production-pinned setup-node action");
   const checkoutIndex = workflow.indexOf("uses: actions/checkout@");
   const setupNodeIndex = workflow.indexOf("uses: actions/setup-node@");
-  const bootstrapIndex = workflow.indexOf("./scripts/bootstrap_windows_node_tools.ps1\n");
+  const bootstrapIndex = workflow.indexOf(
+    "./scripts/bootstrap_windows_node_tools.ps1\n",
+  );
   const verifyOnlyIndex = workflow.indexOf(
     "./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly",
+  );
+  const persistenceEvidenceIndex = workflow.indexOf(
+    "cargo test --locked --target x86_64-pc-windows-msvc -p windows-safe-replace",
   );
   const desktopBuildIndex = workflow.indexOf(
     "pnpm --filter @nian-pass/desktop tauri build",
@@ -563,12 +578,32 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
     );
   }
   if (/npm install\s+--global\s+"corepack@/i.test(workflow)) {
-    violations.push(`${workflowPath}: runner-global Corepack installation is forbidden`);
+    violations.push(
+      `${workflowPath}: runner-global Corepack installation is forbidden`,
+    );
   }
   require(/git rev-parse HEAD/, "must record the checked-out commit SHA");
   require(/Get-Content -LiteralPath "VERSION"[\s\S]*?\$version -ne "0\.1\.1"/, "must record and require VERSION 0.1.1");
   require(/pnpm install --frozen-lockfile/, "must install the frozen lockfile");
   require(/rustup target add x86_64-pc-windows-msvc/, "must install the production Windows target");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p windows-safe-replace/, "must run the native ReplaceFileW adapter tests");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p vault-session platform::tests::/, "must run the Windows replacement transaction tests");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_dirty_save_pipeline_preserves_previous_generation/, "must prove the candidate ordinary Windows Save pipeline end to end");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_second_save_rotates_backup_to_exact_previous_primary/, "must prove candidate ordinary Windows Save rotates the exact previous primary into backup");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_wrong_credential_preserves_primary_and_backup/, "must prove candidate ordinary Windows Save rejects wrong credentials without moving primary or backup");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_external_change_preserves_external_primary_and_backup/, "must prove candidate ordinary Windows Save refuses an external generation without moving primary or backup");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_keyfile_and_composite_credentials_save_and_reopen/, "must prove candidate ordinary Windows Save handles keyfile-only and composite credentials");
+  require(/cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_dirty_save_fails_closed_without_touching_primary_or_backup/, "must prove ordinary Windows Save remains fail-closed");
+  require(/WINDOWS_REPLACEFILE_NATIVE_TESTS=PASS[\s\S]*?WINDOWS_REPLACEFILE_DACL_PRESERVATION=PASS[\s\S]*?WINDOWS_REPLACEMENT_TRANSACTION_TESTS=PASS[\s\S]*?WINDOWS_ORDINARY_SAVE_CANDIDATE_PIPELINE=PASS[\s\S]*?WINDOWS_ORDINARY_SAVE_BACKUP_ROTATION=PASS[\s\S]*?WINDOWS_ORDINARY_SAVE_WRONG_CREDENTIAL=PASS[\s\S]*?WINDOWS_ORDINARY_SAVE_EXTERNAL_CONFLICT=PASS[\s\S]*?WINDOWS_ORDINARY_SAVE_COMPOSITE_CREDENTIALS=PASS[\s\S]*?WINDOWS_ORDINARY_SAVE_FAIL_CLOSED=PASS/, "must record separate Windows persistence evidence markers");
+  if (
+    persistenceEvidenceIndex < 0 ||
+    desktopBuildIndex < 0 ||
+    persistenceEvidenceIndex > desktopBuildIndex
+  ) {
+    violations.push(
+      `${workflowPath}: native Windows persistence evidence must run before the desktop build`,
+    );
+  }
   require(/pnpm --filter @nian-pass\/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc/, "must build the desktop release binary");
   require(/target\/x86_64-pc-windows-msvc\/release\/nian-pass-desktop\.exe/, "must resolve the raw desktop executable");
   require(/Get-PeStackReserve[\s\S]*?SizeOfStackReserve[\s\S]*?8388608/, "must inspect the PE reserve and require 8388608 bytes");
@@ -581,13 +616,18 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
   require(/Test-DesktopGracefulShutdown \$desktopProcess\s*\n\s*Write-CloseTrace\s*\n\s*Write-Host "WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS"/, "must print the close trace after successful natural shutdown");
   require(/WINDOWS_DESKTOP_STARTUP_SMOKE=PASS[\s\S]*?WINDOWS_DESKTOP_SHUTDOWN_SMOKE=PASS/, "must record separate startup and shutdown evidence before upload");
   require(/actions\/upload-artifact@[0-9a-f]{40}[\s\S]*?name: nian-pass-0\.1\.1-windows-runtime-diagnostic[\s\S]*?retention-days: 3/, "must upload the short-retention diagnostic artifact");
+  require(/name: nian-pass-0\.1\.1-windows-runtime-diagnostic[\s\S]*?windows-persistence-evidence\.txt[\s\S]*?if-no-files-found: error/, "must upload the Windows persistence evidence artifact");
   require(/if: always\(\)[\s\S]*?name: nian-pass-0\.1\.1-windows-close-trace[\s\S]*?nian-pass-windows-close-trace\.log[\s\S]*?retention-days: 3/, "must always upload the short-retention close trace artifact");
   const releaseWorkflowPath = ".github/workflows/release.yml";
   if (
     existsSync(resolve(root, releaseWorkflowPath)) &&
-    /NIAN_PASS_WINDOWS_CLOSE_TRACE/.test(readPolicyText(root, releaseWorkflowPath))
+    /NIAN_PASS_WINDOWS_CLOSE_TRACE/.test(
+      readPolicyText(root, releaseWorkflowPath),
+    )
   ) {
-    violations.push(`${releaseWorkflowPath}: production release must not enable diagnostic close tracing`);
+    violations.push(
+      `${releaseWorkflowPath}: production release must not enable diagnostic close tracing`,
+    );
   }
   if (/\bgit\s+(tag|push)\b|\bgh\s+release\b/i.test(workflow)) {
     violations.push(

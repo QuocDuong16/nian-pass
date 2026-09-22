@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -72,7 +78,14 @@ releasePersistableUriPermission
 openFileDescriptor(uri, "rwt")
 WRITE_STARTED
 fingerprint(save.candidate)
-fingerprint(save.readBack)
+fingerprint(save.readBack)selectAttachmentImport
+Intent.ACTION_OPEN_DOCUMENT
+prepareAttachmentExport
+Intent.ACTION_CREATE_DOCUMENT
+attachmentImports
+attachmentExports
+MAX_ATTACHMENT_BYTES
+copyStreamBounded
 `,
   );
   write(
@@ -113,7 +126,12 @@ fingerprint(save.readBack)
   write(
     root,
     "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillRequestRegistry.kt",
-    "opaque request registry\n",
+    "opaque request registry val totpIds\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillFieldParser.kt",
+    "enum class AutofillFieldRole { USERNAME, PASSWORD, TOTP, IGNORE } AutofillFieldRole.TOTP\n",
   );
   write(
     root,
@@ -183,6 +201,15 @@ WRITE_STARTED
 fingerprint(save.candidate)
 fingerprint(save.readBack)
 retainAutofillReadGrant
+args.optString("totp", "")
+record.fields.totpIdsselectAttachmentImport
+Intent.ACTION_OPEN_DOCUMENT
+prepareAttachmentExport
+Intent.ACTION_CREATE_DOCUMENT
+attachmentImports
+attachmentExports
+MAX_ATTACHMENT_BYTES
+copyStreamBounded
 `,
   );
   write(
@@ -198,7 +225,7 @@ retainAutofillReadGrant
   write(
     root,
     "apps/desktop/src-tauri/src/mobile/autofill.rs",
-    "AndroidApp entry_password credential_provider_core::candidates credential_provider_core::credential CredentialTarget::android_app CredentialTarget::web_domain\n",
+    "AndroidApp entry_password credential_provider_core::candidates credential_provider_core::credential CredentialTarget::android_app CredentialTarget::web_domain entry_totp_code totp: Option<SecretString>\n",
   );
   write(root, "apps/desktop/src-tauri/src/mobile/autofill_commands.rs");
   write(
@@ -207,19 +234,28 @@ retainAutofillReadGrant
     "struct EncryptedGeneration;\n",
   );
   write(root, "apps/desktop/src-tauri/src/mobile/mutations.rs");
-  write(root, "apps/desktop/src-tauri/src/mobile/persistence.rs", "verify_semantic_equivalence\n");
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/persistence.rs",
+    "verify_semantic_equivalence\n",
+  );
   write(
     root,
     "apps/desktop/src-tauri/src/mobile/session.rs",
     "KdbxDocument::open(staged_path, password)\n",
   );
+  write(root, "apps/desktop/src-tauri/src/mobile/read_commands.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/state.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/state_reads.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/state_attachments.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/attachment_commands.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/state_autofill.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/security_commands.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/source_security.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/state_security.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/source.rs");
   write(root, "apps/desktop/src-tauri/src/mobile/source_autofill.rs");
+  write(root, "apps/desktop/src-tauri/src/mobile/source_attachments.rs");
   write(
     root,
     "apps/desktop/src-tauri/src/lib.rs",
@@ -230,12 +266,18 @@ mobile_select_vault,
 mobile_unlock_vault,
 mobile_vault_snapshot,
 mobile_entry_detail,
+mobile_entry_history,
+mobile_entry_attachments,
+mobile_entry_totp_code,
+mobile_import_entry_attachment,
+mobile_export_entry_attachment,
 mobile_load_entry_title,
 mobile_load_entry_username,
 mobile_load_entry_url,
 mobile_load_entry_notes,
 mobile_load_entry_custom_field,
 mobile_update_entry,
+mobile_set_entry_tags,
 mobile_create_entry,
 mobile_delete_entry,
 mobile_move_entry,
@@ -265,7 +307,7 @@ expect("Nian Pass Android runtime failed");
 }
 #[cfg(target_os = "ios")]
 fn run_mobile() {
-generate_handler![runtime_info, mobile_select_vault, mobile_unlock_vault, mobile_vault_snapshot, mobile_entry_detail, mobile_lock_vault, mobile_autofill_status, mobile_enable_autofill_for_vault, mobile_disable_autofill_for_vault, mobile_refresh_ios_autofill_mirror, mobile_open_autofill_settings]
+generate_handler![runtime_info, mobile_select_vault, mobile_unlock_vault, mobile_vault_snapshot, mobile_entry_detail, mobile_entry_history, mobile_entry_attachments, mobile_entry_totp_code, mobile_lock_vault, mobile_autofill_status, mobile_enable_autofill_for_vault, mobile_disable_autofill_for_vault, mobile_refresh_ios_autofill_mirror, mobile_open_autofill_settings]
 .run(tauri::generate_context!());
 }
 `,
@@ -372,7 +414,11 @@ test("Android-compatible Rust library outputs are required", (t) => {
 test("Android signing secrets cannot move into Gradle source", (t) => {
   const root = fixture(t);
   const path = "apps/desktop/src-tauri/gen/android/app/build.gradle.kts";
-  write(root, path, readFileSync(join(root, path), "utf8") + 'storePassword = "secret"\n');
+  write(
+    root,
+    path,
+    readFileSync(join(root, path), "utf8") + 'storePassword = "secret"\n',
+  );
   assert.match(runChecks(root).join("\n"), /passwords may not be declared/);
 });
 
@@ -467,6 +513,46 @@ test("M5.3 frontend and Autofill SaveRequest cannot bypass semantic Rust", (t) =
   const violations = runChecks(root).join("\n");
   assert.match(violations, /frontend must not receive or invoke native/);
   assert.match(violations, /SaveRequest must not mutate/);
+});
+
+test("M5.3 Android TOTP autofill stays ephemeral and Rust-owned", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/AutofillFieldParser.kt",
+    "AutofillFieldRole { USERNAME, PASSWORD, IGNORE }\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+    "otpauth://totp/should-never-enter-native\n",
+  );
+  write(
+    root,
+    "apps/desktop/src-tauri/src/mobile/autofill.rs",
+    "AndroidApp entry_password credential_provider_core::candidates credential_provider_core::credential CredentialTarget::android_app CredentialTarget::web_domain\n",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /explicit OTP fields and ephemeral fulfillment/);
+  assert.match(
+    violations,
+    /must never receive TOTP provisioning URI or seed material/,
+  );
+  assert.match(
+    violations,
+    /TOTP generation and optional ephemeral code authority must remain Rust-owned/,
+  );
+});
+
+test("M5.3 Android attachment transport cannot lose native bounded staging", (t) => {
+  const root = fixture(t);
+  write(
+    root,
+    "apps/desktop/src-tauri/gen/android/app/src/main/java/dev/nian/pass/VaultSourcePlugin.kt",
+    "selectAttachmentImport Intent.ACTION_OPEN_DOCUMENT prepareAttachmentExport Intent.ACTION_CREATE_DOCUMENT attachmentImports attachmentExports\n",
+  );
+  const violations = runChecks(root).join("\n");
+  assert.match(violations, /attachment transport must stay native, bounded, and private/);
 });
 
 test("M5.3 origin, reconstruction, PendingIntent, and READ-only grant ratchets cannot drift", (t) => {

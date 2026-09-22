@@ -5,7 +5,10 @@ import { fieldActionLabel, fieldLabel } from "./custom-field-labels";
 interface CustomFieldListProps {
   fields: CustomFieldSummaryDto[];
   disabled: boolean;
+  copyAvailable: boolean;
+  copyingFieldName: string | null;
   onAdd: () => void;
+  onCopy: (field: CustomFieldSummaryDto) => void;
   onEdit: (field: CustomFieldSummaryDto) => void;
   onDelete: (field: CustomFieldSummaryDto) => void;
 }
@@ -35,6 +38,20 @@ export function CustomFieldList(props: CustomFieldListProps) {
             >
               {field.protection === "protected" ? "Protected" : "Unprotected"}
             </span>
+            {props.copyAvailable ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                type="button"
+                aria-label={fieldActionLabel("Copy", field.name)}
+                disabled={props.disabled || props.copyingFieldName !== null}
+                onClick={() => {
+                  props.onCopy(field);
+                }}
+              >
+                {props.copyingFieldName === field.name ? "Copying…" : "Copy"}
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="ghost"

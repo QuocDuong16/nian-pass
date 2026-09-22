@@ -6,9 +6,9 @@ import type {
   VaultCoreSnapshotDto,
 } from "../../types/desktop";
 import type { GroupActionsApi } from "../../types/mutation-api";
+import { GroupActionDialog, type GroupAction } from "./GroupActionDialog";
+import { isGroupInRecycleBin, isRecycleBinRoot } from "./recycle-bin";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
-
-type GroupAction = "create" | "rename" | "move" | "delete";
 
 interface GroupActionsProps<TSnapshot extends VaultCoreSnapshotDto> {
   api: GroupActionsApi<TSnapshot>;
@@ -39,13 +39,16 @@ export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
     () => new Map(snapshot.groups.map((item) => [item.id, item])),
     [snapshot.groups],
   );
+  const recycled = isGroupInRecycleBin(snapshot, group.id);
+  const recycleRoot = isRecycleBinRoot(snapshot, group.id);
+  const root = group.id === snapshot.rootGroupId;
   const parentId = useMemo(() => {
     for (const candidate of snapshot.groups) {
       if (candidate.childGroupIds.includes(group.id)) return candidate.id;
     }
     return snapshot.rootGroupId;
   }, [group.id, snapshot.groups, snapshot.rootGroupId]);
-  const invalidDestinations = useMemo(() => {
+  const destinations = useMemo(() => {
     const invalid = new Set([group.id]);
     const visit = (id: string) => {
       const item = groupsById.get(id);
@@ -55,11 +58,12 @@ export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
       });
     };
     visit(group.id);
-    return invalid;
-  }, [group.id, groupsById]);
-  const destinations = snapshot.groups.filter(
-    (candidate) => !invalidDestinations.has(candidate.id),
-  );
+    return snapshot.groups.filter(
+      (candidate) =>
+        !invalid.has(candidate.id) &&
+        !isGroupInRecycleBin(snapshot, candidate.id),
+    );
+  }, [group.id, groupsById, snapshot]);
 
   useSecurityFormTelemetry(action !== null, busy, onDraftChange, onBusyChange);
 
@@ -71,22 +75,14 @@ export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
     setDestination(destinations[0]?.id ?? snapshot.rootGroupId);
   };
 
-  const apply = async () => {
-    if (action === null || busy) return;
+  const run = async (operation: () => Promise<void>) => {
+    if (busy) return;
     setBusy(true);
     setFailed(false);
     try {
-      if (action === "create") {
-        const result = await api.createGroup(group.id, name);
-        onChanged(result.snapshot, result.createdGroupId);
-      } else if (action === "rename") {
-        onChanged(await api.renameGroup(group.id, name), group.id);
-      } else if (action === "move") {
-        onChanged(await api.moveGroup(group.id, destination), group.id);
-      } else {
-        onChanged(await api.deleteGroup(group.id), parentId);
-      }
+      await operation();
       setAction(null);
+      setMenuOpen(false);
     } catch {
       setFailed(true);
     } finally {
@@ -94,14 +90,48 @@ export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
     }
   };
 
-  const root = group.id === snapshot.rootGroupId;
+  const restore = () => {
+    if (api.restoreGroup === undefined) return;
+    void run(async () => {
+      const next = await api.restoreGroup?.(group.id);
+      if (next !== undefined) onChanged(next, group.id);
+    });
+  };
+
+  const apply = () => {
+    if (action === null) return;
+    void run(async () => {
+      if (action === "create") {
+        const result = await api.createGroup(group.id, name);
+        onChanged(result.snapshot, result.createdGroupId);
+      } else if (action === "rename") {
+        onChanged(await api.renameGroup(group.id, name), group.id);
+      } else if (action === "move") {
+        onChanged(await api.moveGroup(group.id, destination), group.id);
+      } else if (action === "trash") {
+        onChanged(await api.deleteGroup(group.id), parentId);
+      } else if (api.permanentlyDeleteGroup !== undefined) {
+        const next = await api.permanentlyDeleteGroup(group.id);
+        onChanged(next, next.recycleBinGroupId ?? next.rootGroupId);
+      }
+    });
+  };
+
+  if (recycleRoot) {
+    return (
+      <div className="group-actions recycle-bin-actions">
+        <span>Items here stay recoverable until permanently deleted.</span>
+      </div>
+    );
+  }
+
   return (
     <div className="group-actions" aria-label="Group operations">
       <button
         className="group-menu-trigger"
         type="button"
         aria-label="Group actions"
-        disabled={disabled}
+        disabled={disabled || busy}
         aria-expanded={menuOpen}
         onClick={() => {
           setMenuOpen((value) => !value);
@@ -111,47 +141,73 @@ export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
       </button>
       {menuOpen ? (
         <div className="group-action-menu" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              open("create");
-            }}
-          >
-            New group
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              open("rename");
-            }}
-          >
-            Rename group
-          </button>
-          {!root ? (
+          {recycled ? (
+            <>
+              {api.restoreGroup === undefined ? null : (
+                <button type="button" role="menuitem" onClick={restore}>
+                  Restore group
+                </button>
+              )}
+              {api.permanentlyDeleteGroup === undefined ? null : (
+                <button
+                  className="danger-button"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    open("permanent-delete");
+                  }}
+                >
+                  Delete permanently
+                </button>
+              )}
+            </>
+          ) : (
             <>
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => {
-                  open("move");
+                  open("create");
                 }}
               >
-                Move group
+                New group
               </button>
               <button
-                className="danger-button"
                 type="button"
                 role="menuitem"
                 onClick={() => {
-                  open("delete");
+                  open("rename");
                 }}
               >
-                Permanently delete group
+                Rename group
               </button>
+              {!root ? (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      open("move");
+                    }}
+                  >
+                    Move group
+                  </button>
+                  {snapshot.recycleBinEnabled ? (
+                    <button
+                      className="danger-button"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        open("trash");
+                      }}
+                    >
+                      Move group to Trash
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
             </>
-          ) : null}
+          )}
         </div>
       ) : null}
       {failed ? (
@@ -159,87 +215,19 @@ export function GroupActions<TSnapshot extends VaultCoreSnapshotDto>({
       ) : null}
 
       {action !== null ? (
-        <div className="modal-backdrop">
-          <section
-            className="modal-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="group-action-title"
-          >
-            <h2 id="group-action-title">
-              {action === "create"
-                ? "New group"
-                : action === "rename"
-                  ? "Rename group"
-                  : action === "move"
-                    ? "Move group"
-                    : "Permanently delete group?"}
-            </h2>
-            {action === "delete" ? (
-              <p>
-                The group, every descendant group, and every contained entry
-                will be permanently removed. Deletion tombstones will be
-                recorded. M4.3 has no recycle-bin UI.
-              </p>
-            ) : action === "move" ? (
-              <>
-                <label htmlFor="group-destination">Destination parent</label>
-                <select
-                  id="group-destination"
-                  value={destination}
-                  onChange={(event) => {
-                    setDestination(event.currentTarget.value);
-                  }}
-                >
-                  {destinations.map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.name || "Unnamed group"}
-                    </option>
-                  ))}
-                </select>
-              </>
-            ) : (
-              <>
-                <label htmlFor="group-name">Group name</label>
-                <input
-                  id="group-name"
-                  value={name}
-                  onChange={(event) => {
-                    setName(event.currentTarget.value);
-                  }}
-                />
-              </>
-            )}
-            <div className="dialog-actions">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setAction(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className={action === "delete" ? "danger-button" : ""}
-                type="button"
-                disabled={
-                  busy ||
-                  ((action === "create" || action === "rename") &&
-                    name.trim() === "") ||
-                  (action === "move" && destination === "")
-                }
-                onClick={() => void apply()}
-              >
-                {busy
-                  ? "Applying…"
-                  : action === "delete"
-                    ? "Permanently delete group"
-                    : "Apply"}
-              </button>
-            </div>
-          </section>
-        </div>
+        <GroupActionDialog
+          action={action}
+          busy={busy}
+          name={name}
+          destination={destination}
+          destinations={destinations}
+          onName={setName}
+          onDestination={setDestination}
+          onCancel={() => {
+            setAction(null);
+          }}
+          onApply={apply}
+        />
       ) : null}
     </div>
   );

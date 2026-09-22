@@ -7,10 +7,21 @@
 // External compatibility tests surface child-process diagnostics on failure only.
 #![cfg_attr(test, allow(clippy::print_stderr))]
 
+mod attachments;
+mod bulk;
 mod create;
+mod credential;
+mod custom_icons;
+mod database_settings;
 mod entry_mutations;
 mod entry_reads;
+mod error;
+mod history;
+mod history_policy;
+mod password_health;
+mod recycle_bin;
 mod sync;
+mod totp;
 
 use std::{
     fmt,
@@ -20,27 +31,43 @@ use std::{
 };
 
 use keepass::{
-    Database, DatabaseKey,
+    Database,
     config::DatabaseVersion,
     db::{DatabaseOpenError, DatabaseSaveError, MoveGroupError, Times, fields},
 };
-use thiserror::Error;
 use vault_core::{
-    CustomFieldSummary, EntryId, EntrySummary, FieldProtection, Group, GroupId, NewEntry,
-    SecretString, SummaryText, Vault,
+    CustomFieldSummary, EntryIconSummary, EntryId, EntrySummary, FieldProtection, Group, GroupId,
+    MAX_STANDARD_ICON_ID, NewEntry, SecretString, SummaryText, Vault,
 };
 
+pub use attachments::EntryAttachmentSummary;
+pub use credential::KdbxCredential;
+use credential::database_key;
+pub use database_settings::{
+    DatabaseMetadata, MAX_DATABASE_DESCRIPTION_BYTES, MAX_DATABASE_NAME_BYTES,
+    MAX_DEFAULT_USERNAME_BYTES,
+};
+pub use error::KdbxError;
+pub use history::{EntryHistory, EntryHistoryItem};
+pub use password_health::{
+    PASSWORD_POLICY_MIN_LENGTH, PASSWORD_STRENGTH_WEAK_BELOW, PasswordHealthIssue,
+    PasswordHealthReport,
+};
 pub use sync::{
     KdbxDivergentMergeOutcome, SyncConflict, SyncConflictField, SyncConflictFieldKind,
     SyncConflictKind, SyncConflictObject, SyncConflictSet,
 };
+pub use totp::EntryTotpCode;
 
 const PASSKEY_FIELD_PREFIX: &str = "KPEX_PASSKEY";
-const TOTP_FIELD_NAMES: [&str; 7] = [
+const TOTP_FIELD_NAMES: [&str; 10] = [
     fields::OTP,
     "TOTP Seed",
     "TOTP Settings",
+    "TimeOtp-Secret",
+    "TimeOtp-Secret-Hex",
     "TimeOtp-Secret-Base32",
+    "TimeOtp-Secret-Base64",
     "TimeOtp-Algorithm",
     "TimeOtp-Length",
     "TimeOtp-Period",
@@ -115,13 +142,17 @@ pub struct KdbxDocument {
 
 impl KdbxDocument {
     /// Opens a KDBX document from a file using a master password.
-    ///
-    /// M2.5 supports password credentials only. The document does not retain the
-    /// password, and the credential API is expected to grow to support keyfiles
-    /// in a later milestone.
     pub fn open(path: impl AsRef<Path>, master_password: &str) -> Result<Self, KdbxError> {
+        Self::open_with_credential(path, KdbxCredential::password(master_password))
+    }
+
+    /// Opens a KDBX document using password and/or keyfile credential components.
+    pub fn open_with_credential(
+        path: impl AsRef<Path>,
+        credential: KdbxCredential<'_>,
+    ) -> Result<Self, KdbxError> {
         let mut file = File::open(path.as_ref()).map_err(KdbxError::Io)?;
-        Self::open_reader(&mut file, master_password)
+        Self::open_reader_with_credential(&mut file, credential)
     }
 
     /// Opens a KDBX document from a seekable reader using a master password.
@@ -129,7 +160,15 @@ impl KdbxDocument {
         source: &mut (impl Read + Seek),
         master_password: &str,
     ) -> Result<Self, KdbxError> {
-        let (version, database) = parse_database(source, master_password)?;
+        Self::open_reader_with_credential(source, KdbxCredential::password(master_password))
+    }
+
+    /// Opens from a seekable reader using password and/or keyfile components.
+    pub fn open_reader_with_credential(
+        source: &mut (impl Read + Seek),
+        credential: KdbxCredential<'_>,
+    ) -> Result<Self, KdbxError> {
+        let (version, database) = parse_database(source, credential)?;
         Ok(Self {
             version,
             database,
@@ -560,6 +599,7 @@ impl KdbxDocument {
                 }
             }
         }
+        self.enforce_history_policy_for_entry(upstream_id)?;
         self.mark_changed();
         Ok(())
     }
@@ -586,13 +626,16 @@ impl KdbxDocument {
             return Ok(());
         }
 
-        let mut entry = self
-            .database
-            .entry_mut(upstream_id)
-            .ok_or(KdbxError::EntryNotFound)?;
-        entry.track_changes().edit(|tracked| {
-            tracked.as_mut().fields.remove(name);
-        });
+        {
+            let mut entry = self
+                .database
+                .entry_mut(upstream_id)
+                .ok_or(KdbxError::EntryNotFound)?;
+            entry.track_changes().edit(|tracked| {
+                tracked.as_mut().fields.remove(name);
+            });
+        }
+        self.enforce_history_policy_for_entry(upstream_id)?;
         self.mark_changed();
         Ok(())
     }
@@ -608,9 +651,17 @@ impl KdbxDocument {
         destination: &mut impl Write,
         master_password: &str,
     ) -> Result<(), KdbxError> {
-        self.ensure_writable_format()?;
+        self.save_to_writer_with_credential(destination, KdbxCredential::password(master_password))
+    }
 
-        let key = DatabaseKey::new().with_password(master_password);
+    /// Serializes using password and/or keyfile credential components.
+    pub fn save_to_writer_with_credential(
+        &self,
+        destination: &mut impl Write,
+        credential: KdbxCredential<'_>,
+    ) -> Result<(), KdbxError> {
+        self.ensure_writable_format()?;
+        let key = database_key(credential)?;
         self.database.save(destination, key).map_err(map_save_error)
     }
 
@@ -682,6 +733,7 @@ impl KdbxDocument {
             }
         }
 
+        self.enforce_history_policy_for_entry(upstream_id)?;
         self.mark_changed();
         Ok(())
     }
@@ -812,71 +864,6 @@ fn reject_reserved_field(name: &str) -> Result<(), KdbxError> {
     }
 }
 
-/// Errors returned while opening, projecting, mutating, or serializing KDBX.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum KdbxError {
-    /// The database file could not be read.
-    #[error("could not read the database file")]
-    Io(#[source] std::io::Error),
-
-    /// The input is truncated, malformed, or not a KDBX database.
-    #[error("the file is not a valid KDBX database")]
-    InvalidKdbx,
-
-    /// The supplied database credentials were rejected.
-    #[error("the master password is incorrect")]
-    InvalidCredentials,
-
-    /// The database uses a format or feature unsupported by this adapter.
-    #[error("the KDBX format or feature is not supported")]
-    UnsupportedFormat,
-
-    /// A valid parsed database could not be represented by the domain model.
-    #[error("the KDBX database could not be converted into the vault model: {0}")]
-    Conversion(&'static str),
-
-    /// Writing this exact KDBX version is not supported safely.
-    #[error("writing this KDBX format is not supported")]
-    UnsupportedWriteFormat,
-
-    /// No entry matched the supplied stable identifier.
-    #[error("entry was not found")]
-    EntryNotFound,
-
-    /// No group matched the supplied stable identifier.
-    #[error("group was not found")]
-    GroupNotFound,
-
-    /// The root group cannot be permanently deleted.
-    #[error("the root group cannot be permanently deleted")]
-    CannotDeleteRootGroup,
-
-    /// A group move targeted the root, itself, or one of its descendants.
-    #[error("the group move is invalid")]
-    InvalidGroupMove,
-
-    /// A generic custom-field API targeted a reserved field name.
-    #[error("the field name is reserved")]
-    ReservedField,
-
-    /// The caller-owned output writer rejected a write operation.
-    #[error("could not write the KDBX output")]
-    WriteIo(#[source] std::io::Error),
-
-    /// The complete KDBX document could not be serialized.
-    #[error("the KDBX database could not be serialized")]
-    Serialization,
-
-    /// Parsed KDBX state differs after a preservation-sensitive round trip.
-    #[error("serialized vault did not preserve database semantics")]
-    VerificationFailed,
-
-    /// An internally synthesized sync candidate violated a required invariant.
-    #[error("the parsed KDBX state could not be merged safely")]
-    SyncInvariant,
-}
-
 /// Opens a KDBX database with a master password and returns a secret-free
 /// domain projection containing privacy-sensitive vault metadata.
 ///
@@ -902,7 +889,7 @@ fn open_reader(
 
 fn parse_database(
     source: &mut (impl Read + Seek),
-    master_password: &str,
+    credential: KdbxCredential<'_>,
 ) -> Result<(KdbxVersion, Database), KdbxError> {
     let version = Database::get_version(source).map_err(map_open_error)?;
     let kdbx_version = match &version {
@@ -912,7 +899,7 @@ fn parse_database(
     };
     source.seek(SeekFrom::Start(0)).map_err(KdbxError::Io)?;
 
-    let key = DatabaseKey::new().with_password(master_password);
+    let key = database_key(credential)?;
     let database =
         Database::open(source, key).map_err(|error| map_database_open_error(&version, error))?;
 
@@ -967,22 +954,40 @@ fn project_summary_text(value: Option<&keepass::db::Value<String>>) -> SummaryTe
     }
 }
 
+fn project_entry_summary(entry: keepass::db::EntryRef<'_>) -> EntrySummary {
+    EntrySummary::new(
+        EntryId::new(entry.id().to_string()),
+        project_summary_text(entry.fields.get(fields::TITLE)),
+        project_summary_text(entry.fields.get(fields::USERNAME)),
+        project_summary_text(entry.fields.get(fields::URL)),
+        entry.tags.clone(),
+        entry.fields.contains_key(fields::PASSWORD),
+        entry.fields.contains_key(fields::NOTES),
+    )
+    .with_icon(match entry.icon() {
+        None => EntryIconSummary::None,
+        Some(keepass::db::Icon::BuiltIn(icon_id)) => u8::try_from(*icon_id)
+            .ok()
+            .filter(|icon_id| *icon_id <= MAX_STANDARD_ICON_ID)
+            .map_or(EntryIconSummary::NonStandard, EntryIconSummary::BuiltIn),
+        Some(keepass::db::Icon::Custom(_)) => EntryIconSummary::Custom,
+    })
+    .with_totp(
+        TOTP_FIELD_NAMES
+            .iter()
+            .any(|name| entry.fields.contains_key(*name)),
+    )
+    .with_expiry(
+        (entry.times.expires == Some(true))
+            .then_some(entry.times.expiry)
+            .flatten()
+            .map(|value| value.and_utc().timestamp()),
+    )
+}
+
 fn convert_group(group: keepass::db::GroupRef<'_>) -> Group {
     let groups = group.groups().map(convert_group).collect();
-    let entries = group
-        .entries()
-        .map(|entry| {
-            EntrySummary::new(
-                EntryId::new(entry.id().to_string()),
-                project_summary_text(entry.fields.get(fields::TITLE)),
-                project_summary_text(entry.fields.get(fields::USERNAME)),
-                project_summary_text(entry.fields.get(fields::URL)),
-                entry.tags.clone(),
-                entry.fields.contains_key(fields::PASSWORD),
-                entry.fields.contains_key(fields::NOTES),
-            )
-        })
-        .collect();
+    let entries = group.entries().map(project_entry_summary).collect();
 
     Group::new(
         GroupId::new(group.id().to_string()),
@@ -1008,10 +1013,11 @@ mod tests {
         db::{MemoryProtection, Times, Value, fields},
     };
     use vault_core::{
-        EntryId, EntryUpdate, FieldProtection, Group, GroupId, NewEntry, SecretString, SummaryText,
+        EntryExpiry, EntryIconUpdate, EntryId, EntryUpdate, FieldProtection, Group, GroupId,
+        NewEntry, SecretString, SummaryText,
     };
 
-    use super::{KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
+    use super::{KdbxCredential, KdbxDocument, KdbxError, KdbxVersion, open, open_reader};
 
     // Synthetic public test credential from the upstream fixture suite.
     const FIXTURE_PASSWORD: &str = "demopass";
@@ -1960,6 +1966,66 @@ mod tests {
     }
 
     #[test]
+    fn keyfile_credentials_roundtrip_without_collapsing_missing_password() {
+        const KEYFILE: &[u8] = b"public-nian-pass-keyfile-material";
+        const WRONG_KEYFILE: &[u8] = b"wrong-public-keyfile-material";
+
+        let document = KdbxDocument::new("Keyfile only");
+        let mut keyfile_only = Vec::new();
+        document
+            .save_to_writer_with_credential(
+                &mut keyfile_only,
+                KdbxCredential::new(None, Some(KEYFILE)),
+            )
+            .expect("keyfile-only vault should serialize");
+        let reopened = KdbxDocument::open_reader_with_credential(
+            &mut Cursor::new(&keyfile_only),
+            KdbxCredential::new(None, Some(KEYFILE)),
+        )
+        .expect("keyfile-only vault should reopen");
+        document
+            .verify_semantic_equivalence(&reopened)
+            .expect("keyfile-only roundtrip should preserve semantics");
+        assert!(matches!(
+            KdbxDocument::open_reader_with_credential(
+                &mut Cursor::new(&keyfile_only),
+                KdbxCredential::new(Some(""), Some(KEYFILE)),
+            ),
+            Err(KdbxError::InvalidCredentials)
+        ));
+        assert!(matches!(
+            KdbxDocument::open_reader_with_credential(
+                &mut Cursor::new(&keyfile_only),
+                KdbxCredential::new(None, Some(WRONG_KEYFILE)),
+            ),
+            Err(KdbxError::InvalidCredentials)
+        ));
+
+        let document = KdbxDocument::new("Composite key");
+        let mut composite = Vec::new();
+        document
+            .save_to_writer_with_credential(
+                &mut composite,
+                KdbxCredential::new(Some("public-password"), Some(KEYFILE)),
+            )
+            .expect("composite vault should serialize");
+        assert!(
+            KdbxDocument::open_reader_with_credential(
+                &mut Cursor::new(&composite),
+                KdbxCredential::new(Some("public-password"), Some(KEYFILE)),
+            )
+            .is_ok()
+        );
+        assert!(matches!(
+            KdbxDocument::open_reader_with_credential(
+                &mut Cursor::new(&composite),
+                KdbxCredential::password("public-password"),
+            ),
+            Err(KdbxError::InvalidCredentials)
+        ));
+    }
+
+    #[test]
     fn opens_trusted_compatibility_fixtures() {
         for fixture in FIXTURES {
             let opened = open(fixture_path(fixture.file), fixture.password)
@@ -2817,6 +2883,111 @@ mod tests {
     }
 
     #[test]
+    fn entry_duplicate_preserves_current_state_without_exposing_or_copying_history() {
+        let mut document = kdbx41_document();
+        let (entry_id, upstream_entry_id) = first_entry_ids(&document);
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: Some("Duplicate source"),
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    totp: None,
+                    expiry: None,
+                    icon: None,
+                },
+            )
+            .expect("source update should succeed");
+        {
+            let mut source = document
+                .database
+                .entry_mut(upstream_entry_id)
+                .expect("source entry should exist");
+            source.tags = vec!["duplicate-tag".to_owned()];
+            source.override_url = Some("cmd://duplicate".to_owned());
+            source.quality_check = false;
+            source.times.creation = Some(Times::epoch());
+            source.times.expiry = Some(Times::epoch());
+            source.times.expires = Some(true);
+            source.set_protected("Private duplicate field", "SECRET-DUPLICATE-VALUE");
+            source.set_icon_builtin(17);
+            source.add_attachment(
+                "duplicate.bin",
+                Value::protected(vec![0xde, 0xad, 0xbe, 0xef]),
+            );
+        }
+
+        let source = document
+            .database
+            .entry(upstream_entry_id)
+            .expect("source entry should exist");
+        let source_parent = source.parent().id();
+        let source_fields = source.fields.clone();
+        let source_tags = source.tags.clone();
+        let source_override = source.override_url.clone();
+        let source_icon = source.icon().cloned();
+        let source_expiry = source.times.expiry;
+        let source_expires = source.times.expires;
+        let source_attachments = source
+            .attachments_named()
+            .map(|(name, attachment)| (name.to_owned(), attachment.data.clone()))
+            .collect::<Vec<_>>();
+        assert!(
+            history_len(&source) > 0,
+            "source should have history to omit"
+        );
+
+        let duplicate_id = document
+            .duplicate_entry(&entry_id)
+            .expect("entry duplication should succeed");
+        assert!(duplicate_id != entry_id, "duplicate reused the source UUID");
+        let duplicate_upstream = document
+            .find_entry_id(&duplicate_id)
+            .expect("duplicate should be discoverable");
+        let duplicate = document
+            .database
+            .entry(duplicate_upstream)
+            .expect("duplicate should exist");
+
+        assert!(duplicate.parent().id() == source_parent);
+        assert!(duplicate.fields == source_fields);
+        assert!(duplicate.tags == source_tags);
+        assert!(duplicate.override_url == source_override);
+        assert!(duplicate.icon() == source_icon.as_ref());
+        assert!(!duplicate.quality_check);
+        assert_eq!(duplicate.times.expiry, source_expiry);
+        assert_eq!(duplicate.times.expires, source_expires);
+        assert_ne!(duplicate.times.creation, Some(Times::epoch()));
+        assert_eq!(history_len(&duplicate), 0, "duplicate copied entry history");
+        assert!(duplicate.previous_parent().is_none());
+        let duplicate_attachments = duplicate
+            .attachments_named()
+            .map(|(name, attachment)| (name.to_owned(), attachment.data.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(duplicate_attachments, source_attachments);
+        assert!(
+            duplicate
+                .fields
+                .get("Private duplicate field")
+                .is_some_and(|value| value.is_protected()),
+            "protected field lost protection while duplicating"
+        );
+
+        let reopened = reopen(&document);
+        assert!(
+            reopened
+                .projection()
+                .expect("duplicate round-trip should project")
+                .find_entry(&duplicate_id)
+                .is_some(),
+            "duplicate did not survive KDBX round-trip"
+        );
+    }
+
+    #[test]
     fn entry_move_preserves_identity_fields_history_and_roundtrips() {
         let mut document = kdbx41_document();
         let old_projection = document.projection().expect("fixture should project");
@@ -2961,6 +3132,129 @@ mod tests {
             Err(KdbxError::EntryNotFound)
         ));
         assert!(document.database == before);
+    }
+
+    #[test]
+    fn recycle_bin_entry_trash_restore_and_permanent_delete_are_distinct() {
+        let mut document = kdbx41_document();
+        document.database.meta.recyclebin_enabled = Some(true);
+        document.database.meta.recyclebin_uuid = None;
+        let (root, _) = root_group_ids(&document);
+        let group = document
+            .create_group(&root, "Recycle source")
+            .expect("source group should create");
+        let entry = document
+            .create_entry(
+                &group,
+                NewEntry {
+                    title: "Recycle me",
+                    username: "",
+                    url: "",
+                    password: None,
+                },
+            )
+            .expect("entry should create");
+        let upstream_entry = document.find_entry_id(&entry).expect("entry id");
+        let deleted_before = document.database.deleted_objects.len();
+
+        document.trash_entry(&entry).expect("trash should succeed");
+        let recycle = document
+            .recycle_bin_group_id()
+            .expect("recycle bin should be created");
+        let upstream_recycle = document.find_group_id(&recycle).expect("recycle id");
+        assert_eq!(
+            document
+                .database
+                .entry(upstream_entry)
+                .expect("trashed entry")
+                .parent()
+                .id(),
+            upstream_recycle
+        );
+        assert_eq!(document.database.deleted_objects.len(), deleted_before);
+
+        let restored = document
+            .restore_entry(&entry)
+            .expect("restore should succeed");
+        assert!(restored == group);
+        assert_eq!(
+            document
+                .database
+                .entry(upstream_entry)
+                .expect("restored entry")
+                .parent()
+                .id(),
+            document.find_group_id(&group).expect("source id")
+        );
+        assert!(matches!(
+            document.permanently_delete_recycled_entry(&entry),
+            Err(KdbxError::InvalidRecycleBinOperation)
+        ));
+
+        document
+            .trash_entry(&entry)
+            .expect("second trash should succeed");
+        document
+            .permanently_delete_recycled_entry(&entry)
+            .expect("permanent delete in trash should succeed");
+        assert!(document.database.entry(upstream_entry).is_none());
+        assert!(
+            document
+                .database
+                .deleted_objects
+                .contains_key(&upstream_entry.uuid())
+        );
+    }
+
+    #[test]
+    fn recycle_bin_group_restore_falls_back_safely_and_disabled_policy_is_respected() {
+        let mut document = kdbx41_document();
+        document.database.meta.recyclebin_enabled = Some(true);
+        document.database.meta.recyclebin_uuid = None;
+        let (root, _) = root_group_ids(&document);
+        let parent = document
+            .create_group(&root, "Trash parent")
+            .expect("parent should create");
+        let child = document
+            .create_group(&parent, "Trash child")
+            .expect("child should create");
+        let upstream_child = document.find_group_id(&child).expect("child id");
+        let deleted_before = document.database.deleted_objects.len();
+
+        document
+            .trash_group(&child)
+            .expect("group trash should succeed");
+        assert_eq!(document.database.deleted_objects.len(), deleted_before);
+        let restored = document
+            .restore_group(&child)
+            .expect("group restore should succeed");
+        assert!(restored == parent);
+
+        document
+            .trash_group(&child)
+            .expect("group trash should succeed");
+        document
+            .permanently_delete_recycled_group(&child)
+            .expect("trashed group should delete permanently");
+        assert!(document.database.group(upstream_child).is_none());
+        assert!(
+            document
+                .database
+                .deleted_objects
+                .contains_key(&upstream_child.uuid())
+        );
+
+        let entry = first_entry_ids(&document).0;
+        let before = document.database.clone();
+        document.database.meta.recyclebin_enabled = Some(false);
+        document.database.meta.recyclebin_uuid = None;
+        let disabled_state = document.database.clone();
+        assert!(matches!(
+            document.trash_entry(&entry),
+            Err(KdbxError::RecycleBinDisabled)
+        ));
+        assert!(document.database == disabled_state);
+        assert!(before != disabled_state);
     }
 
     #[test]
@@ -4750,6 +5044,319 @@ mod tests {
     }
 
     #[test]
+    fn entry_icon_projection_distinguishes_custom_and_non_standard_metadata() {
+        let mut document = kdbx41_document();
+        let (entry_id, upstream_id) = first_entry_ids(&document);
+
+        document
+            .database
+            .entry_mut(upstream_id)
+            .expect("fixture entry")
+            .set_icon_builtin(999);
+        assert!(matches!(
+            document
+                .projection()
+                .expect("projection")
+                .find_entry(&entry_id)
+                .expect("entry")
+                .icon(),
+            vault_core::EntryIconSummary::NonStandard
+        ));
+
+        {
+            let mut entry = document
+                .database
+                .entry_mut(upstream_id)
+                .expect("fixture entry");
+            let _icon = entry.set_icon_custom_new(vec![1, 2, 3, 4]);
+        }
+        assert!(matches!(
+            document
+                .projection()
+                .expect("projection")
+                .find_entry(&entry_id)
+                .expect("entry")
+                .icon(),
+            vault_core::EntryIconSummary::Custom
+        ));
+    }
+
+    #[test]
+    fn entry_builtin_icon_update_tracks_history_noops_validates_and_roundtrips() {
+        let mut document = kdbx41_document();
+        let (entry_id, upstream_id) = first_entry_ids(&document);
+        let history_before = history_len(
+            &document
+                .database
+                .entry(upstream_id)
+                .expect("fixture entry should exist"),
+        );
+        let revision_before = document.revision();
+
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    expiry: None,
+                    totp: None,
+                    icon: Some(EntryIconUpdate::BuiltIn(17)),
+                },
+            )
+            .expect("standard icon should update");
+        let updated = document
+            .database
+            .entry(upstream_id)
+            .expect("updated entry should exist");
+        assert!(matches!(
+            updated.icon(),
+            Some(keepass::db::Icon::BuiltIn(17))
+        ));
+        assert_eq!(history_len(&updated), history_before + 1);
+        assert_eq!(document.revision(), revision_before + 1);
+        assert!(matches!(
+            document
+                .projection()
+                .expect("projection should succeed")
+                .find_entry(&entry_id)
+                .expect("entry should project")
+                .icon(),
+            vault_core::EntryIconSummary::BuiltIn(17)
+        ));
+
+        let unchanged_database = document.database.clone();
+        let unchanged_revision = document.revision();
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    expiry: None,
+                    totp: None,
+                    icon: Some(EntryIconUpdate::BuiltIn(17)),
+                },
+            )
+            .expect("same icon should be a no-op");
+        assert!(document.database == unchanged_database);
+        assert_eq!(document.revision(), unchanged_revision);
+
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    expiry: None,
+                    totp: None,
+                    icon: Some(EntryIconUpdate::None),
+                },
+            )
+            .expect("icon should clear");
+        let cleared = document
+            .database
+            .entry(upstream_id)
+            .expect("entry should remain");
+        assert!(cleared.icon().is_none());
+        assert_eq!(history_len(&cleared), history_before + 2);
+
+        let before_invalid = document.database.clone();
+        let revision_before_invalid = document.revision();
+        assert!(matches!(
+            document.update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    expiry: None,
+                    totp: None,
+                    icon: Some(EntryIconUpdate::BuiltIn(69)),
+                }
+            ),
+            Err(KdbxError::InvalidIcon)
+        ));
+        assert!(document.database == before_invalid);
+        assert_eq!(document.revision(), revision_before_invalid);
+
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    expiry: None,
+                    totp: None,
+                    icon: Some(EntryIconUpdate::BuiltIn(68)),
+                },
+            )
+            .expect("highest standard icon should update");
+        let reopened = reopen(&document);
+        assert!(matches!(
+            reopened
+                .projection()
+                .expect("reopened projection should succeed")
+                .find_entry(&entry_id)
+                .expect("reopened entry should exist")
+                .icon(),
+            vault_core::EntryIconSummary::BuiltIn(68)
+        ));
+    }
+
+    #[test]
+    fn entry_expiry_update_tracks_history_noops_projection_and_roundtrips() {
+        let mut document = kdbx41_document();
+        let (entry_id, upstream_id) = first_entry_ids(&document);
+        let history_before = history_len(
+            &document
+                .database
+                .entry(upstream_id)
+                .expect("fixture entry should exist"),
+        );
+        let revision_before = document.revision();
+        let expiry = 2_000_000_000_i64;
+
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    totp: None,
+                    expiry: Some(EntryExpiry::AtUnixSeconds(expiry)),
+                    icon: None,
+                },
+            )
+            .expect("expiry should update");
+        let updated = document
+            .database
+            .entry(upstream_id)
+            .expect("updated entry should exist");
+        assert_eq!(updated.times.expires, Some(true));
+        assert_eq!(
+            updated
+                .times
+                .expiry
+                .map(|value| value.and_utc().timestamp()),
+            Some(expiry)
+        );
+        assert_eq!(history_len(&updated), history_before + 1);
+        assert_eq!(document.revision(), revision_before + 1);
+        assert_eq!(
+            document
+                .projection()
+                .expect("projection should succeed")
+                .find_entry(&entry_id)
+                .expect("entry should project")
+                .expires_at_unix_seconds(),
+            Some(expiry)
+        );
+
+        let unchanged_database = document.database.clone();
+        let unchanged_revision = document.revision();
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    totp: None,
+                    expiry: Some(EntryExpiry::AtUnixSeconds(expiry)),
+                    icon: None,
+                },
+            )
+            .expect("same expiry should be a no-op");
+        assert!(document.database == unchanged_database);
+        assert_eq!(document.revision(), unchanged_revision);
+
+        document
+            .update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    totp: None,
+                    expiry: Some(EntryExpiry::Disabled),
+                    icon: None,
+                },
+            )
+            .expect("expiry should disable");
+        let disabled = document
+            .database
+            .entry(upstream_id)
+            .expect("entry should remain");
+        assert_eq!(disabled.times.expires, Some(false));
+        assert!(disabled.times.expiry.is_none());
+        assert_eq!(history_len(&disabled), history_before + 2);
+        assert_eq!(document.revision(), revision_before + 2);
+        assert_eq!(
+            document
+                .projection()
+                .expect("projection should succeed")
+                .find_entry(&entry_id)
+                .expect("entry should project")
+                .expires_at_unix_seconds(),
+            None
+        );
+
+        let before_invalid = document.database.clone();
+        let revision_before_invalid = document.revision();
+        assert!(matches!(
+            document.update_entry(
+                &entry_id,
+                EntryUpdate {
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    totp: None,
+                    expiry: Some(EntryExpiry::AtUnixSeconds(i64::MAX)),
+                    icon: None,
+                }
+            ),
+            Err(KdbxError::InvalidExpiry)
+        ));
+        assert!(document.database == before_invalid);
+        assert_eq!(document.revision(), revision_before_invalid);
+
+        let reopened = reopen(&document);
+        assert_eq!(
+            reopened
+                .projection()
+                .expect("reopened projection should succeed")
+                .find_entry(&entry_id)
+                .expect("reopened entry should exist")
+                .expires_at_unix_seconds(),
+            None
+        );
+    }
+
+    #[test]
     fn atomic_entry_update_records_one_history_revision_and_preserves_failure_state() {
         let mut document = kdbx41_document();
         let (entry_id, upstream_id) = first_entry_ids(&document);
@@ -4772,6 +5379,9 @@ mod tests {
                     url: Some("m4.3://local"),
                     password: Some(&password),
                     notes: Some(&notes),
+                    expiry: None,
+                    totp: None,
+                    icon: None,
                 },
             )
             .expect("atomic update should succeed");
@@ -4807,6 +5417,9 @@ mod tests {
                     url: Some("m4.3://local"),
                     password: Some(&password),
                     notes: Some(&notes),
+                    expiry: None,
+                    totp: None,
+                    icon: None,
                 },
             )
             .expect("same-value update should be a no-op");
@@ -4822,6 +5435,9 @@ mod tests {
                     url: None,
                     password: None,
                     notes: None,
+                    totp: None,
+                    expiry: None,
+                    icon: None,
                 },
             )
             .expect("empty update should be a no-op");
@@ -4837,6 +5453,9 @@ mod tests {
                     url: None,
                     password: None,
                     notes: None,
+                    totp: None,
+                    expiry: None,
+                    icon: None,
                 }
             ),
             Err(KdbxError::EntryNotFound)

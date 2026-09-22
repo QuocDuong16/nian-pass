@@ -24,14 +24,14 @@ export interface SyncApi {
   syncNow: (
     profileId: string,
     credentials: ProviderCredentials,
-    masterPassword: string,
+    masterPassword: string | null,
   ) => Promise<SyncResultDto>;
   resolveSyncConflict: (
     profileId: string,
     conflictOperationId: string,
     choice: "keepLocal" | "keepRemote",
     credentials: ProviderCredentials,
-    masterPassword: string,
+    masterPassword: string | null,
   ) => Promise<SyncResultDto>;
 }
 

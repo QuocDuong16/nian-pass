@@ -18,10 +18,6 @@
         "maxLines": 1706,
         "reason": "The verified three-way merge engine predates M4.Q and is kept intact to avoid risky semantic churn; the exception is locked to its current production size."
       },
-      "crates/vault-core/src/lib.rs": {
-        "maxLines": 416,
-        "reason": "The compact domain model is only slightly over the default and remains one cohesive secret-boundary module; no additional growth is permitted."
-      },
       "crates/vault-session/src/lib.rs": {
         "maxLines": 721,
         "reason": "The verified persistence transaction remains cohesive; M8 adds descriptor-based O_NOFOLLOW source, backup, fingerprint, and directory opens, and this exact raised ceiling is limited to that reviewed filesystem hardening."

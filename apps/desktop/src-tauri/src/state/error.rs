@@ -17,6 +17,12 @@ pub enum DesktopError {
     GroupNotFound,
     InvalidRequest,
     InvalidMove,
+    HistoryChanged,
+    HistoryRestoreUnsupported,
+    AttachmentNotFound,
+    AttachmentAlreadyExists,
+    AttachmentTooLarge,
+    AttachmentIoFailed,
     ReservedField,
     SecretUnavailable,
     UnsavedChanges,
@@ -52,6 +58,20 @@ pub(crate) fn map_mutation_error(error: SessionError) -> DesktopError {
         DesktopError::InvalidMove
     } else if error.is_reserved_field() {
         DesktopError::ReservedField
+    } else if error.is_attachment_not_found() {
+        DesktopError::AttachmentNotFound
+    } else if error.is_attachment_already_exists() {
+        DesktopError::AttachmentAlreadyExists
+    } else if error.is_invalid_attachment_name()
+        || error.is_invalid_entry_tags()
+        || error.is_invalid_expiry()
+        || error.is_invalid_icon()
+        || error.is_invalid_database_metadata()
+        || error.is_invalid_history_policy()
+        || error.is_recycle_bin_operation()
+        || error.is_totp_operation()
+    {
+        DesktopError::InvalidRequest
     } else {
         DesktopError::Internal
     }
@@ -71,6 +91,20 @@ pub(super) fn map_create_error(error: SessionError) -> DesktopError {
             DesktopError::UnsupportedWriteFormat
         }
         _ => DesktopError::VaultCreateFailed,
+    }
+}
+
+pub(super) fn map_export_error(error: SessionError) -> DesktopError {
+    match error {
+        SessionError::ExportTarget(source)
+            if source.kind() == std::io::ErrorKind::AlreadyExists =>
+        {
+            DesktopError::VaultAlreadyExists
+        }
+        SessionError::Kdbx(kdbx::KdbxError::UnsupportedWriteFormat) => {
+            DesktopError::UnsupportedWriteFormat
+        }
+        _ => DesktopError::SaveFailed,
     }
 }
 
@@ -125,8 +159,8 @@ mod tests {
     use vault_session::SessionError;
 
     use super::{
-        DesktopError, map_clipboard_error, map_create_error, map_mutation_error, map_open_error,
-        map_provider_error, map_save_error,
+        DesktopError, map_clipboard_error, map_create_error, map_export_error, map_mutation_error,
+        map_open_error, map_provider_error, map_save_error,
     };
     use crate::clipboard::ClipboardFailure;
 
@@ -148,6 +182,34 @@ mod tests {
             (
                 SessionError::Kdbx(KdbxError::ReservedField),
                 DesktopError::ReservedField,
+            ),
+            (
+                SessionError::Kdbx(KdbxError::AttachmentNotFound),
+                DesktopError::AttachmentNotFound,
+            ),
+            (
+                SessionError::Kdbx(KdbxError::AttachmentAlreadyExists),
+                DesktopError::AttachmentAlreadyExists,
+            ),
+            (
+                SessionError::Kdbx(KdbxError::InvalidAttachmentName),
+                DesktopError::InvalidRequest,
+            ),
+            (
+                SessionError::Kdbx(KdbxError::InvalidExpiry),
+                DesktopError::InvalidRequest,
+            ),
+            (
+                SessionError::Kdbx(KdbxError::InvalidIcon),
+                DesktopError::InvalidRequest,
+            ),
+            (
+                SessionError::Kdbx(KdbxError::RecycleBinDisabled),
+                DesktopError::InvalidRequest,
+            ),
+            (
+                SessionError::Kdbx(KdbxError::InvalidRecycleBinOperation),
+                DesktopError::InvalidRequest,
             ),
             (
                 SessionError::Kdbx(KdbxError::InvalidKdbx),
@@ -176,6 +238,23 @@ mod tests {
                 "synthetic"
             ))),
             DesktopError::VaultCreateFailed
+        );
+        assert_eq!(
+            map_export_error(SessionError::ExportTarget(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "synthetic",
+            ))),
+            DesktopError::VaultAlreadyExists
+        );
+        assert_eq!(
+            map_export_error(SessionError::Kdbx(KdbxError::UnsupportedWriteFormat)),
+            DesktopError::UnsupportedWriteFormat
+        );
+        assert_eq!(
+            map_export_error(SessionError::ExportTarget(std::io::Error::other(
+                "synthetic"
+            ))),
+            DesktopError::SaveFailed
         );
         assert_eq!(
             map_save_error(SessionError::UnsupportedPersistencePlatform),

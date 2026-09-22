@@ -119,8 +119,18 @@ export function runChecks(root, budget) {
     const name = projectPath(root, path);
     if (
       name !== "apps/desktop/src-tauri/src/commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/attachments.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/clipboard.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/custom_icons.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/database_settings.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/export_copy.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/keyfile.rs" &&
       name !== "apps/desktop/src-tauri/src/commands/sync.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/url_open.rs" &&
+      name !== "apps/desktop/src-tauri/src/commands/vault_mutations.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/mobile/attachment_commands.rs" &&
+      name !== "apps/desktop/src-tauri/src/mobile/read_commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/autofill_commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/security_commands.rs" &&
       name !== "apps/desktop/src-tauri/src/mobile/ios_commands.rs"
@@ -296,6 +306,33 @@ export function runChecks(root, budget) {
     ) {
       violations.push(
         "windows-safe-replace must use ReplaceFileW without ignore-ACL/merge flags",
+      );
+    }
+    if (
+      !/fn replace_file_w_preserves_primary_dacl_on_result_and_first_backup\(/.test(
+        windowsReplaceSource,
+      ) ||
+      !/icacls\.exe/.test(windowsReplaceSource) ||
+      !/GetSecurityDescriptorSddlForm/.test(windowsReplaceSource)
+    ) {
+      violations.push(
+        "windows-safe-replace must keep native destination/backup DACL preservation evidence",
+      );
+    }
+  }
+  const vaultSessionPlatformPath = resolve(
+    root,
+    "crates/vault-session/src/platform.rs",
+  );
+  if (existsSync(vaultSessionPlatformPath)) {
+    const platformSource = readFileSync(vaultSessionPlatformPath, "utf8");
+    if (
+      !/#\[cfg\(windows\)\]\s*pub\(crate\) const SAVE_SUPPORTED: bool = false;/.test(
+        platformSource,
+      )
+    ) {
+      violations.push(
+        "ordinary Windows Save must remain fail-closed until native transaction evidence is reviewed",
       );
     }
   }

@@ -46,6 +46,7 @@ function fixture(t) {
     "apps/desktop/src/App.tsx": "export function App() { return null; }\n",
     "apps/cli/src/main.rs": "fn main() {}\n",
     "apps/desktop/src-tauri/src/commands.rs": "#[tauri::command]\nfn command() {}\n",
+    "apps/desktop/src-tauri/src/commands/clipboard.rs": "#[tauri::command]\nfn clipboard_command() {}\n",
     "apps/desktop/src-tauri/src/lib.rs": "pub fn run() {}\n",
     "crates/kdbx/src/lib.rs": "pub struct KdbxDocument;\n",
     "crates/credential-provider-core/src/lib.rs": "pub fn candidates() {}\n",

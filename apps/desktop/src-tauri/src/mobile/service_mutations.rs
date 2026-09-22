@@ -7,7 +7,7 @@ use super::{
     mutations::{
         MobileCreateEntryRequest, MobileCreateGroupRequest, MobileMoveEntryRequest,
         MobileMoveGroupRequest, MobileRenameGroupRequest, MobileSetCustomFieldRequest,
-        MobileUpdateEntryRequest,
+        MobileSetEntryTagsRequest, MobileUpdateEntryRequest,
     },
     state::MobileVaultService,
 };
@@ -18,6 +18,13 @@ impl MobileVaultService {
         request: MobileUpdateEntryRequest,
     ) -> Result<MobileVaultSnapshotDto, MobileError> {
         self.session_mut_for_mutation()?.update_entry(request)
+    }
+
+    pub(crate) fn set_entry_tags(
+        &mut self,
+        request: MobileSetEntryTagsRequest,
+    ) -> Result<MobileVaultSnapshotDto, MobileError> {
+        self.session_mut_for_mutation()?.set_entry_tags(request)
     }
 
     pub(crate) fn create_entry(

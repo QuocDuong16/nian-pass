@@ -20,7 +20,7 @@ function fixture(t) {
     "README.md",
     "## Current milestone\nM8 — Security Hardening / Release Engineering — IN PROGRESS\nM5.4 — iOS Password AutoFill + Keychain — DEFERRED\nM5.5 Android Mobile Security / Lifecycle DONE\nM6 Browser Extension Foundation DONE\nM6.5 Browser Native Messaging / Desktop Integration DONE\nM7 BYO-cloud Sync Providers DONE\nM7.5 Self-hosted Sync Gateway NEXT\nDesktop explicit sync supports WebDAV and AWS S3. Sync is manual only and provider credentials are not persisted.\nBrowser integration uses Chromium/Firefox MV3 with explicit per-site access, Nian Pass Native Messaging host, exact-document fill, and never automatically submit. Read-only providers have editing and Save disabled. " +
       "AtomicFile recovery journal leads to save_uncertain or recovery_required.\nM4.5 — Desktop Security UX\nExplicit Save. " +
-      "External divergence is not automatically merged. No Save As, force overwrite, or autosave.\n" +
+      "External divergence is not automatically merged. No canonical-path retargeting Save As, force overwrite, or autosave.\n" +
       "make quality-check\nHeadless Linux\nWindows persistence remains deferred. " +
       "The active clipboard clears only if it still contains the value written by Nian Pass. " +
       "The timeout is application-memory only. The privacy shield is not universal screenshot prevention. " +

@@ -21,6 +21,8 @@ fn committed_mobile_contract_matches_rust_serialization() {
     };
     let snapshot = MobileVaultSnapshotDto {
         dirty: false,
+        recycle_bin_enabled: true,
+        recycle_bin_group_id: None,
         root_group_id: "group-root".to_owned(),
         groups: vec![GroupDto {
             id: "group-root".to_owned(),
@@ -38,7 +40,10 @@ fn committed_mobile_contract_matches_rust_serialization() {
             url: SummaryTextDto::Protected,
             password_present: true,
             notes_present: true,
+            totp_present: false,
             tags: vec!["synthetic".to_owned()],
+            expires_at_unix_seconds: None,
+            icon: crate::dto::EntryIconDto::None,
         }],
     };
     let detail = EntryDetailDto {
@@ -50,14 +55,19 @@ fn committed_mobile_contract_matches_rust_serialization() {
         url: SummaryTextDto::Protected,
         password_present: true,
         notes_present: true,
+        totp_present: false,
         tags: Vec::new(),
+        expires_at_unix_seconds: None,
         custom_fields: vec![CustomFieldSummaryDto {
             name: "Account type".to_owned(),
             protection: FieldProtectionDto::Unprotected,
         }],
+        icon: crate::dto::EntryIconDto::None,
     };
     let dirty_snapshot = MobileVaultSnapshotDto {
         dirty: true,
+        recycle_bin_enabled: true,
+        recycle_bin_group_id: None,
         ..snapshot.clone()
     };
     let errors = [

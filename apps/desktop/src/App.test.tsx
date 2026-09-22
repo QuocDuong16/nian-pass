@@ -16,6 +16,8 @@ afterEach(cleanup);
 
 const snapshot: VaultSnapshotDto = {
   dirty: false,
+  recycleBinEnabled: true,
+  recycleBinGroupId: null,
   fileName: "test-vault.kdbx",
   capabilities: {
     formatVersion: "4.1",
@@ -46,7 +48,10 @@ const snapshot: VaultSnapshotDto = {
       url: { kind: "visible", value: "https://example.com" },
       passwordPresent: true,
       notesPresent: true,
+      totpPresent: false,
       tags: [],
+      expiresAtUnixSeconds: null,
+      icon: { kind: "none" },
     },
     {
       id: "entry-protected",
@@ -56,7 +61,10 @@ const snapshot: VaultSnapshotDto = {
       url: { kind: "visible", value: "" },
       passwordPresent: false,
       notesPresent: true,
+      totpPresent: false,
       tags: [],
+      expiresAtUnixSeconds: null,
+      icon: { kind: "none" },
     },
   ],
 };
@@ -68,17 +76,46 @@ const detail: EntryDetailDto = {
   url: { kind: "visible", value: "https://example.com" },
   passwordPresent: true,
   notesPresent: true,
+  totpPresent: false,
   tags: [],
+  expiresAtUnixSeconds: null,
+  icon: { kind: "none" },
   customFields: [],
 };
 
 function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
   return {
     selectVault: vi.fn().mockResolvedValue({ fileName: "test-vault.kdbx" }),
+    selectKeyfile: vi.fn().mockResolvedValue({ fileName: "test.keyx" }),
+    clearKeyfile: vi.fn().mockResolvedValue(undefined),
+    credentialHasKeyfile: vi.fn().mockResolvedValue(false),
+    credentialHasPassword: vi.fn().mockResolvedValue(true),
+    replaceKeyfile: vi.fn().mockResolvedValue({ fileName: "replacement.keyx" }),
+    removeKeyfile: vi.fn().mockResolvedValue(undefined),
+    removeMasterPassword: vi.fn().mockResolvedValue(snapshot),
     createVault: vi.fn().mockResolvedValue(snapshot),
     unlockVault: vi.fn().mockResolvedValue(snapshot),
+    unlockVaultWithKeyfile: vi.fn().mockResolvedValue(snapshot),
     getVaultSnapshot: vi.fn().mockResolvedValue(snapshot),
     saveVault: vi.fn().mockResolvedValue(snapshot),
+    exportVaultCopy: vi.fn().mockResolvedValue(true),
+    getDatabaseMetadata: vi
+      .fn()
+      .mockResolvedValue({ name: "", description: "", defaultUsername: "" }),
+    updateDatabaseMetadata: vi.fn().mockResolvedValue({
+      metadata: { name: "", description: "", defaultUsername: "" },
+      snapshot,
+    }),
+    getHistoryPolicy: vi.fn().mockResolvedValue({
+      maxItems: 10,
+      maximumEditableItems: 10_000,
+    }),
+    setHistoryMaxItems: vi.fn().mockResolvedValue({
+      policy: { maxItems: 10, maximumEditableItems: 10_000 },
+      snapshot,
+    }),
+    setRecycleBinEnabled: vi.fn().mockResolvedValue(snapshot),
+    changeMasterPassword: vi.fn().mockResolvedValue(snapshot),
     reloadVault: vi.fn().mockResolvedValue(snapshot),
     getEntryDetail: vi.fn().mockImplementation((entryId: string) =>
       Promise.resolve({
@@ -90,25 +127,74 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
             : detail.title,
       }),
     ),
+    getPasswordHealthReport: vi.fn().mockResolvedValue({
+      totalEntries: 1,
+      passwordEntries: 1,
+      minimumLength: 12,
+      issues: [],
+    }),
+    getEntryHistory: vi
+      .fn()
+      .mockResolvedValue({ documentRevision: "0", items: [] }),
+    restoreEntryHistory: vi.fn().mockResolvedValue(snapshot),
+    getEntryAttachments: vi.fn().mockResolvedValue([]),
+    importEntryCustomIcon: vi.fn().mockResolvedValue(snapshot),
+    importEntryAttachment: vi.fn().mockResolvedValue(snapshot),
+    exportEntryAttachment: vi.fn().mockResolvedValue({ exported: true }),
     revealEntryPassword: vi.fn().mockResolvedValue("synthetic-password-M4.2"),
+    revealEntryTotp: vi.fn().mockResolvedValue({
+      code: "654321",
+      validForSeconds: 20,
+      periodSeconds: 30,
+    }),
     revealEntryNotes: vi.fn().mockResolvedValue("synthetic-notes-M4.2"),
     revealEntryTitle: vi.fn().mockResolvedValue("Example Account"),
     revealEntryUsername: vi.fn().mockResolvedValue("user@example.com"),
     revealEntryUrl: vi.fn().mockResolvedValue("https://example.com"),
+    openEntryUrl: vi.fn().mockResolvedValue(undefined),
     revealEntryCustomField: vi.fn().mockResolvedValue("synthetic-custom"),
+    copyEntryCustomField: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    copyEntryTitle: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
     copyEntryUsername: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    copyEntryUrl: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    copyEntryNotes: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    copyGeneratedPassword: vi
       .fn()
       .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
     copyEntryPassword: vi
       .fn()
       .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    copyEntryTotp: vi
+      .fn()
+      .mockResolvedValue({ copied: true, expiresInMs: 30_000 }),
+    setEntryTags: vi.fn().mockRejectedValue(new Error("unused")),
     updateEntry: vi.fn().mockResolvedValue(snapshot),
     createEntry: vi.fn().mockResolvedValue({
       createdEntryId: "entry-created",
       snapshot,
     }),
+    duplicateEntry: vi.fn().mockResolvedValue({
+      createdEntryId: "entry-duplicate",
+      snapshot,
+    }),
     deleteEntry: vi.fn().mockResolvedValue(snapshot),
+    restoreEntry: vi.fn().mockResolvedValue(snapshot),
+    permanentlyDeleteEntry: vi.fn().mockResolvedValue(snapshot),
     moveEntry: vi.fn().mockResolvedValue(snapshot),
+    moveEntries: vi.fn().mockResolvedValue(snapshot),
+    trashEntries: vi.fn().mockResolvedValue(snapshot),
+    restoreEntries: vi.fn().mockResolvedValue(snapshot),
+    permanentlyDeleteEntries: vi.fn().mockResolvedValue(snapshot),
     createGroup: vi.fn().mockResolvedValue({
       createdGroupId: "group-created",
       snapshot,
@@ -116,6 +202,8 @@ function api(overrides: Partial<DesktopApi> = {}): DesktopApi {
     renameGroup: vi.fn().mockResolvedValue(snapshot),
     moveGroup: vi.fn().mockResolvedValue(snapshot),
     deleteGroup: vi.fn().mockResolvedValue(snapshot),
+    restoreGroup: vi.fn().mockResolvedValue(snapshot),
+    permanentlyDeleteGroup: vi.fn().mockResolvedValue(snapshot),
     setEntryCustomField: vi.fn().mockResolvedValue(snapshot),
     deleteEntryCustomField: vi.fn().mockResolvedValue(snapshot),
     closePolicy: vi.fn().mockResolvedValue({ policy: "allow" }),
@@ -171,7 +259,7 @@ test("successful unlock renders groups and direct entries", async () => {
   expect(
     await screen.findByRole("navigation", { name: "Vault groups" }),
   ).toBeVisible();
-  expect(screen.getByRole("button", { name: /Root/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Root" })).toBeVisible();
   expect(screen.getByText("Example Account")).toBeVisible();
   expect(screen.queryByLabelText("Master password")).not.toBeInTheDocument();
 });
@@ -184,7 +272,7 @@ test("group and entry selection exercise the browse-only navigation state", asyn
   fireEvent.click(await screen.findByRole("button", { name: /Work/ }));
   expect(screen.getByText("No entries in this group.")).toBeVisible();
 
-  fireEvent.click(screen.getByRole("button", { name: /Root/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Root" }));
   const entry = screen.getByRole("button", { name: /Example Account/ });
   fireEvent.click(entry);
   expect(entry).toHaveClass("selected");

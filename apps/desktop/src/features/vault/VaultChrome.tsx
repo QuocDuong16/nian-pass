@@ -3,12 +3,9 @@ import { useEffect, useRef } from "react";
 import { Button } from "../../components/Button";
 import { SearchInput } from "../../components/Input";
 import { StatusBadge } from "../../components/StatusBadge";
-import type { DesktopApi } from "../../lib/desktop";
 import type { VaultSnapshotDto } from "../../types/desktop";
-import { SyncSection } from "../sync/SyncSection";
-import { AutoLockControl } from "./AutoLockControl";
 
-interface VaultTopBarProps {
+export interface VaultTopBarProps {
   snapshot: VaultSnapshotDto;
   searchQuery: string;
   saveStatus: "idle" | "saving" | "saved";
@@ -21,6 +18,8 @@ interface VaultTopBarProps {
   onSave: () => void;
   onLock: () => void;
   onSettings: () => void;
+  onGenerator: () => void;
+  generatorUnavailable: boolean;
 }
 
 export function VaultTopBar(props: VaultTopBarProps) {
@@ -56,7 +55,7 @@ export function VaultTopBar(props: VaultTopBarProps) {
       <SearchInput
         ref={searchRef}
         aria-label="Search vault"
-        title="Search vault (Ctrl/Cmd+K)"
+        title="Search vault (Ctrl/Cmd+K). Filters: tag:work, group:Work, has:totp, is:expired"
         placeholder="Search vault…"
         value={props.searchQuery}
         onChange={(event) => {
@@ -81,6 +80,15 @@ export function VaultTopBar(props: VaultTopBarProps) {
               ? "Saved"
               : ""}
         </span>
+        <Button
+          size="sm"
+          variant="secondary"
+          type="button"
+          disabled={props.generatorUnavailable}
+          onClick={props.onGenerator}
+        >
+          Generator
+        </Button>
         <Button
           size="sm"
           variant="ghost"
@@ -153,82 +161,5 @@ export function VaultStatusBar({ snapshot }: { snapshot: VaultSnapshotDto }) {
       <span>·</span>
       <span>{snapshot.capabilities.writable ? "Writable" : "Read-only"}</span>
     </footer>
-  );
-}
-
-interface VaultSettingsDialogProps {
-  api: DesktopApi;
-  snapshot: VaultSnapshotDto;
-  disabled: boolean;
-  hasDraft: boolean;
-  mutationPending: boolean;
-  autoLockMs: number | null;
-  onAutoLockChange?: ((timeoutMs: number | null) => void) | undefined;
-  onBusyChange: (busy: boolean) => void;
-  onSnapshot: (snapshot: VaultSnapshotDto) => void;
-  onClose: () => void;
-}
-
-export function VaultSettingsDialog(props: VaultSettingsDialogProps) {
-  const { onClose } = props;
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [onClose]);
-
-  return (
-    <div className="modal-backdrop">
-      <section
-        className="modal-panel settings-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-      >
-        <div className="section-heading-row">
-          <div>
-            <p className="eyebrow">Nian Pass</p>
-            <h2 id="settings-title">Settings</h2>
-          </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            type="button"
-            onClick={props.onClose}
-          >
-            Close
-          </Button>
-        </div>
-        <section className="settings-section">
-          <h3>Security</h3>
-          <AutoLockControl
-            timeoutMs={props.autoLockMs}
-            disabled={props.disabled}
-            onChange={props.onAutoLockChange}
-          />
-        </section>
-        <section className="settings-section">
-          <h3>Sync</h3>
-          <SyncSection
-            api={props.api}
-            disabled={
-              props.disabled ||
-              !props.snapshot.capabilities.writable ||
-              props.hasDraft ||
-              props.mutationPending ||
-              props.snapshot.dirty
-            }
-            onBusyChange={props.onBusyChange}
-            onSnapshot={props.onSnapshot}
-          />
-        </section>
-      </section>
-    </div>
   );
 }

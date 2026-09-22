@@ -101,6 +101,10 @@ class AutofillRequestPolicyTest {
       ),
     )
     assertEquals(
+      AutofillFieldRole.TOTP,
+      AutofillFieldClassifier.classify(AutofillFieldModel(listOf("one-time-code"), 0, "text")),
+    )
+    assertEquals(
       AutofillFieldRole.IGNORE,
       AutofillFieldClassifier.classify(AutofillFieldModel(listOf("name"), 0, "text")),
     )
@@ -118,7 +122,7 @@ class AutofillRequestPolicyTest {
     var now = 1_000L
     val registry = AutofillRequestRegistry(clock = { now }, random = SecureRandom())
     val target = CredentialTarget(TargetKind.APP, "dev.example", "cert")
-    val request = registry.registerAutofill(target, ParsedAutofillFields(emptyList(), emptyList()))
+    val request = registry.registerAutofill(target, ParsedAutofillFields(emptyList(), emptyList(), emptyList()))
     val candidate = registry.registerCandidate(request, "entry")
     assertEquals(48, request.length)
     assertEquals("entry", registry.candidate(candidate, request)?.entryId)
@@ -137,7 +141,7 @@ class AutofillRequestPolicyTest {
     )
     assertNull(registry.complete(reconstructed, reconstructedCandidate))
 
-    val expired = registry.registerAutofill(target, ParsedAutofillFields(emptyList(), emptyList()))
+    val expired = registry.registerAutofill(target, ParsedAutofillFields(emptyList(), emptyList(), emptyList()))
     now += AutofillRequestRegistry.TTL_MILLIS + 1
     assertNull(registry.request(expired))
   }

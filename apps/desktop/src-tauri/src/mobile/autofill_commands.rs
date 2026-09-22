@@ -227,6 +227,7 @@ pub(crate) async fn mobile_autofill_approve(
             &prepared.entry_id,
             prepared.username.expose_secret(),
             prepared.password.expose_secret(),
+            prepared.totp.as_ref().map(|value| value.expose_secret()),
             approved,
         )
         .await;

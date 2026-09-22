@@ -5,7 +5,12 @@ import type { MobileApi, MobileVaultSnapshotDto } from "../../types/mobile";
 import { CustomFieldsEditor } from "../vault/CustomFieldsEditor";
 import { EntryActions } from "../vault/EntryActions";
 import { EntryEditForm } from "../vault/EntryEditForm";
+import { EntryIconStatus } from "../vault/EntryIconStatus";
+import { EntryTagsSection } from "../vault/EntryTagsSection";
 import { Summary } from "../vault/summary";
+import { MobileEntryAttachmentsSection } from "./MobileEntryAttachmentsSection";
+import { MobileEntryHistorySection } from "./MobileEntryHistorySection";
+import { MobileTotpSection } from "./MobileTotpSection";
 
 interface MobileEntryDetailProps {
   api: MobileApi;
@@ -13,6 +18,7 @@ interface MobileEntryDetailProps {
   groups: GroupDto[];
   disabled: boolean;
   readOnly?: boolean;
+  nativeAttachmentActions: boolean;
   onSnapshot: (snapshot: MobileVaultSnapshotDto) => void;
   onDeleted: (snapshot: MobileVaultSnapshotDto) => void;
   onMoved: (snapshot: MobileVaultSnapshotDto, destination: string) => void;
@@ -25,22 +31,47 @@ export function MobileEntryDetail(props: MobileEntryDetailProps) {
   const [editing, setEditing] = useState(false);
   const [fieldDraft, setFieldDraft] = useState(false);
   const [actionDraft, setActionDraft] = useState(false);
+  const [totpDraft, setTotpDraft] = useState(false);
+  const [tagsDraft, setTagsDraft] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [fieldBusy, setFieldBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [totpBusy, setTotpBusy] = useState(false);
+  const [tagsBusy, setTagsBusy] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [attachmentsBusy, setAttachmentsBusy] = useState(false);
 
   useEffect(() => {
-    onDraftChange(editing || fieldDraft || actionDraft);
+    onDraftChange(
+      editing || fieldDraft || actionDraft || totpDraft || tagsDraft,
+    );
     return () => {
       onDraftChange(false);
     };
-  }, [actionDraft, editing, fieldDraft, onDraftChange]);
+  }, [actionDraft, editing, fieldDraft, onDraftChange, tagsDraft, totpDraft]);
   useEffect(() => {
-    onBusyChange(editBusy || fieldBusy || actionBusy);
+    onBusyChange(
+      editBusy ||
+        fieldBusy ||
+        actionBusy ||
+        totpBusy ||
+        historyBusy ||
+        attachmentsBusy ||
+        tagsBusy,
+    );
     return () => {
       onBusyChange(false);
     };
-  }, [actionBusy, editBusy, fieldBusy, onBusyChange]);
+  }, [
+    actionBusy,
+    attachmentsBusy,
+    editBusy,
+    fieldBusy,
+    historyBusy,
+    onBusyChange,
+    tagsBusy,
+    totpBusy,
+  ]);
 
   if (editing) {
     return (
@@ -72,6 +103,7 @@ export function MobileEntryDetail(props: MobileEntryDetailProps) {
           emptyLabel="Empty title"
         />
       </h2>
+      <EntryIconStatus icon={props.detail.icon} />
       <div className="detail-field">
         <h3>Username</h3>
         <Summary
@@ -88,6 +120,17 @@ export function MobileEntryDetail(props: MobileEntryDetailProps) {
           emptyLabel="Empty URL"
         />
       </div>
+      <EntryTagsSection
+        key={`tags-${props.detail.id}`}
+        api={props.api}
+        entryId={props.detail.id}
+        tags={props.detail.tags}
+        disabled={props.disabled}
+        readOnly={props.readOnly === true}
+        onSnapshot={props.onSnapshot}
+        onDraftChange={setTagsDraft}
+        onBusyChange={setTagsBusy}
+      />
       <div className="detail-field">
         <h3>Stored fields</h3>
         <p>
@@ -95,6 +138,33 @@ export function MobileEntryDetail(props: MobileEntryDetailProps) {
         </p>
         <p>{props.detail.notesPresent ? "Notes stored" : "No notes"}</p>
       </div>
+      <MobileTotpSection
+        key={props.detail.id}
+        api={props.api}
+        detail={props.detail}
+        disabled={props.disabled}
+        readOnly={props.readOnly === true}
+        onSnapshot={props.onSnapshot}
+        onDraftChange={setTotpDraft}
+        onBusyChange={setTotpBusy}
+      />
+      <MobileEntryHistorySection
+        key={`history-${props.detail.id}`}
+        api={props.api}
+        entryId={props.detail.id}
+        disabled={props.disabled}
+        onBusyChange={setHistoryBusy}
+      />
+      <MobileEntryAttachmentsSection
+        key={`attachments-${props.detail.id}`}
+        api={props.api}
+        entryId={props.detail.id}
+        disabled={props.disabled}
+        readOnly={props.readOnly === true}
+        nativeActions={props.nativeAttachmentActions}
+        onSnapshot={props.onSnapshot}
+        onBusyChange={setAttachmentsBusy}
+      />
       {props.readOnly === true ? null : (
         <button
           type="button"

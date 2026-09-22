@@ -4,6 +4,7 @@ import type { VaultSnapshotDto } from "../../types/desktop";
 export type ProviderKind = "webdav" | "s3" | "gateway";
 
 export interface SyncSectionOptions {
+  embedded?: boolean;
   api: DesktopApi;
   disabled: boolean;
   onBusyChange: (busy: boolean) => void;

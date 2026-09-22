@@ -10,6 +10,7 @@ impl KdbxDocument {
     pub fn new(vault_name: &str) -> Self {
         let mut database = Database::new();
         database.root_mut().name = vault_name.to_owned();
+        database.meta.recyclebin_enabled = Some(true);
         let version = match &database.config.version {
             DatabaseVersion::KDB4(minor) => KdbxVersion::Kdbx4 { minor: *minor },
             DatabaseVersion::KDB3(minor) => KdbxVersion::Kdbx3 { minor: *minor },

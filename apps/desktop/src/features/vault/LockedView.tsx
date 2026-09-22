@@ -1,8 +1,13 @@
 import { useState, type SyntheticEvent } from "react";
 
 import type { DesktopApi } from "../../lib/desktop";
-import type { SelectedVaultDto, VaultSnapshotDto } from "../../types/desktop";
+import type {
+  SelectedKeyfileDto,
+  SelectedVaultDto,
+  VaultSnapshotDto,
+} from "../../types/desktop";
 import { LockedCreateForm } from "./LockedCreateForm";
+import { LockedUnlockForm } from "./LockedUnlockForm";
 import { lockedErrorCode, lockedOperationMessage } from "./locked-errors";
 
 interface LockedViewProps {
@@ -19,6 +24,7 @@ type LockedState =
 export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
   const [state, setState] = useState<LockedState>({ kind: "home" });
   const [password, setPassword] = useState("");
+  const [keyfile, setKeyfile] = useState<SelectedKeyfileDto | null>(null);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [vaultName, setVaultName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,6 +38,8 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
   const goHome = () => {
     if (busy) return;
     resetSensitiveFields();
+    if (keyfile !== null) void api.clearKeyfile().catch(() => undefined);
+    setKeyfile(null);
     setVaultName("");
     setError(null);
     setState({ kind: "home" });
@@ -44,6 +52,7 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
       const selected = await api.selectVault();
       if (selected !== null) {
         resetSensitiveFields();
+        setKeyfile(null);
         setState({ kind: "credential_required", selection: selected });
       }
     } catch (cause: unknown) {
@@ -51,14 +60,45 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
     }
   };
 
+  const chooseKeyfile = async () => {
+    if (busy || state.kind !== "credential_required") return;
+    setError(null);
+    try {
+      const selected = await api.selectKeyfile();
+      if (selected !== null) setKeyfile(selected);
+    } catch (cause: unknown) {
+      setError(lockedOperationMessage(lockedErrorCode(cause)));
+    }
+  };
+
+  const removeKeyfile = async () => {
+    if (busy || keyfile === null) return;
+    setError(null);
+    try {
+      await api.clearKeyfile();
+      setKeyfile(null);
+    } catch (cause: unknown) {
+      setError(lockedOperationMessage(lockedErrorCode(cause)));
+    }
+  };
+
   const submitUnlock = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (state.kind !== "credential_required" || password === "" || busy) return;
+    if (
+      state.kind !== "credential_required" ||
+      (password === "" && keyfile === null) ||
+      busy
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
-      const snapshot = await api.unlockVault(password);
+      const snapshot =
+        keyfile === null
+          ? await api.unlockVault(password)
+          : await api.unlockVaultWithKeyfile(password === "" ? null : password);
       resetSensitiveFields();
+      setKeyfile(null);
       onUnlocked(snapshot);
     } catch (cause: unknown) {
       setPassword("");
@@ -121,7 +161,7 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
             ? "Open an existing KeePass database or create a new local vault."
             : state.kind === "creating"
               ? "Choose a name and master password. You will pick the .kdbx save location next."
-              : "Enter the master password for the selected vault."}
+              : "Enter the master password and, when required, choose the vault key file."}
         </p>
 
         {notice === undefined || notice === null ? null : (
@@ -153,44 +193,18 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
         ) : null}
 
         {state.kind === "credential_required" ? (
-          <form
+          <LockedUnlockForm
+            selection={state.selection}
+            password={password}
+            keyfile={keyfile}
+            busy={busy}
+            onPassword={setPassword}
+            onChooseKeyfile={() => void chooseKeyfile()}
+            onRemoveKeyfile={() => void removeKeyfile()}
+            onChooseVault={() => void chooseVault()}
+            onCancel={goHome}
             onSubmit={(event) => void submitUnlock(event)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") goHome();
-            }}
-          >
-            <p className="selected-file">{state.selection.fileName}</p>
-            <label htmlFor="master-password">Master password</label>
-            <input
-              id="master-password"
-              name="master-password"
-              type="password"
-              autoComplete="current-password"
-              spellCheck={false}
-              value={password}
-              autoFocus
-              onChange={(event) => {
-                setPassword(event.target.value);
-              }}
-              disabled={busy}
-            />
-            <div className="dialog-actions">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void chooseVault()}
-              >
-                Choose another vault
-              </button>
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={password === "" || busy}
-              >
-                {busy ? "Unlocking…" : "Unlock"}
-              </button>
-            </div>
-          </form>
+          />
         ) : null}
 
         {state.kind === "creating" ? (

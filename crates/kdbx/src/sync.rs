@@ -331,12 +331,9 @@ impl MergeBuilder<'_> {
         if !database_valid_for_sync(&self.candidate) {
             return Err(KdbxError::SyncInvariant);
         }
-        Ok(KdbxDivergentMergeOutcome::Merged(Box::new(KdbxDocument {
-            version,
-            database: self.candidate,
-            revision: 0,
-            revision_permanently_dirty: false,
-        })))
+        Ok(KdbxDivergentMergeOutcome::Merged(Box::new(
+            KdbxDocument::from_merged_database_with_history_policy(version, self.candidate),
+        )))
     }
 
     fn merge(&mut self) -> Result<(), KdbxError> {

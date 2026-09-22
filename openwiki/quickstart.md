@@ -75,12 +75,12 @@ See [architecture/overview](/openwiki/architecture/overview.md) for how the crat
 
 ## Navigation
 
-| Topic | Page |
-|---|---|
-| Architecture, domain model, crate dependency, invariants | [architecture/overview](/openwiki/architecture/overview.md) |
-| Three-way sync engine, merge model, conflict types | [architecture/sync-engine](/openwiki/architecture/sync-engine.md) |
-| Verified persistence, save protocol, platform limits | [architecture/persistence](/openwiki/architecture/persistence.md) |
-| Test suite, fixtures, CI pipeline, quality scripts | [testing](/openwiki/testing.md) |
+| Topic                                                    | Page                                                              |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| Architecture, domain model, crate dependency, invariants | [architecture/overview](/openwiki/architecture/overview.md)       |
+| Three-way sync engine, merge model, conflict types       | [architecture/sync-engine](/openwiki/architecture/sync-engine.md) |
+| Verified persistence, save protocol, platform limits     | [architecture/persistence](/openwiki/architecture/persistence.md) |
+| Test suite, fixtures, CI pipeline, quality scripts       | [testing](/openwiki/testing.md)                                   |
 
 ## Development Commands
 
@@ -114,19 +114,21 @@ scripts/test-keepassxc-compat.sh
 
 See `docs/quality.md` for the full quality policy, coverage ratchets, and dependency policy.
 
-## Known Gaps (M4.1)
+## Current product gaps
 
-- Browse-only — no password reveal/copy, entry editing, save UI, or search
-- No clipboard protection, locked-memory allocation, or process hardening
-- No keyfile or hardware key support
-- No cloud transport or provider integration
-- Windows save persistence disabled pending safe-Rust DACL-preserving replacement
-- No product-level recycle-bin, notes editing, TOTP, attachment/icon UI, or history restore
-- KDBX 3.1 and 4.0 writing deliberately rejected (not upgraded or rewritten)
+- Desktop supports password-only, keyfile-only, and password+keyfile unlock; hardware-key / challenge-response unlock remains unsupported
+- Desktop entry-history review/restore exists for revisions without attachments or custom icons; mobile exposes on-demand secret-free history review, while attachment/icon history restore remains unsupported; mobile also exposes on-demand attachment metadata review; Android supports native SAF attachment import/export while iOS remains metadata-only
+- Desktop supports native-picked PNG custom-icon replacement with 4 MiB and 4096 × 4096 bounds; favicon download and custom-icon cleanup/maintenance remain deferred
+- Desktop General Settings can edit KDBX database name, description, default username, and enable/disable Trash; these are in-memory mutations until explicit Save succeeds
+- Desktop bulk entry move/Trash/restore/permanent-delete exists with atomic all-or-nothing batches capped at 1024 entries; Settings can enable/disable an empty KDBX Trash policy and edit the finite per-entry history revision count, with both remaining ordinary dirty mutations that require explicit Save; serialized-history-size enforcement, Auto-Type, and passkey management remain unsupported
+- Desktop and writable Android can edit bounded ordered entry tags through tracked KDBX mutations; iOS/read-only mobile exposes tags as metadata only
+- Desktop TOTP configure/reveal/copy exists; writable Android mobile can configure/remove/reveal TOTP and Android Autofill can fill explicit OTP fields with an ephemeral Rust-generated code. iOS mobile remains read-only but can explicitly reveal the current code
+- KDBX 3.1 and 4.0 writing remains deliberately rejected (not upgraded or rewritten)
+- Some platform integrations remain deferred; see the root README and architecture docs for the reviewed support matrix
 
 ## Backlog
 
 - **Clipboard and memory hardening** — critical for production use
-- **Extended KDBX feature coverage** — key files, key-provider plugins, custom data
+- **Extended KDBX feature coverage** — hardware/key-provider plugins, custom data
 - **Windows persistence** — safe DACL-preserving write implementation
 - **Desktop feature expansion** — password reveal, entry editing, save UI, search, background monitoring

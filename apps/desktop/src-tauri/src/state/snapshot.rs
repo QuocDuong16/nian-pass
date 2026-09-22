@@ -20,6 +20,10 @@ pub(super) fn from_session(
         session.is_dirty(),
         file_name,
         capabilities,
+        session.recycle_bin_enabled(),
+        session
+            .recycle_bin_group_id()
+            .map(|id| id.as_str().to_owned()),
     ))
 }
 

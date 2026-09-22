@@ -1,15 +1,19 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
 use std::{
-    fs::OpenOptions,
-    io::{BufWriter, Write},
+    fs::{self, File, OpenOptions},
+    io::{BufWriter, Read, Write},
     path::Path,
 };
 
-use kdbx::{KdbxDocument, KdbxError};
-use vault_core::{EntryId, SecretString};
+use kdbx::{EntryTotpCode, KdbxDocument, KdbxError};
+use vault_core::{EntryId, SecretBytes, SecretString};
 
-use crate::dto::{EntryDetailDto, MobileVaultSnapshotDto};
+use crate::dto::{
+    EntryAttachmentSummaryDto, EntryDetailDto, EntryHistoryDto, MobileVaultSnapshotDto,
+};
+
+const MAX_MOBILE_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
 
 use super::{
     MobileError,
@@ -100,6 +104,85 @@ impl MobileVaultSession {
             .custom_fields(&id)
             .map_err(map_mutation_error)?;
         Ok(EntryDetailDto::from_entry(entry, &fields))
+    }
+
+    pub(super) fn entry_history(&self, entry_id: &str) -> Result<EntryHistoryDto, MobileError> {
+        require_id(entry_id)?;
+        let history = self
+            .document
+            .entry_history(&EntryId::new(entry_id))
+            .map_err(map_mutation_error)?;
+        Ok(EntryHistoryDto::from_history(&history))
+    }
+
+    pub(super) fn entry_attachments(
+        &self,
+        entry_id: &str,
+    ) -> Result<Vec<EntryAttachmentSummaryDto>, MobileError> {
+        require_id(entry_id)?;
+        self.document
+            .entry_attachments(&EntryId::new(entry_id))
+            .map(|items| items.iter().map(Into::into).collect())
+            .map_err(map_mutation_error)
+    }
+
+    pub(super) fn import_entry_attachment(
+        &mut self,
+        entry_id: &str,
+        name: &str,
+        staged_path: &Path,
+    ) -> Result<(), MobileError> {
+        require_id(entry_id)?;
+        if name.is_empty() {
+            return Err(MobileError::InvalidRequest);
+        }
+        let metadata = fs::metadata(staged_path).map_err(|_| MobileError::Internal)?;
+        if !metadata.is_file() || metadata.len() > MAX_MOBILE_ATTACHMENT_BYTES {
+            return Err(MobileError::InvalidRequest);
+        }
+        let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
+        File::open(staged_path)
+            .map_err(|_| MobileError::Internal)?
+            .take(MAX_MOBILE_ATTACHMENT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| MobileError::Internal)?;
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_MOBILE_ATTACHMENT_BYTES {
+            return Err(MobileError::InvalidRequest);
+        }
+        self.document
+            .add_entry_attachment(&EntryId::new(entry_id), name, &SecretBytes::new(bytes))
+            .map_err(map_mutation_error)
+    }
+
+    pub(super) fn export_entry_attachment(
+        &self,
+        entry_id: &str,
+        name: &str,
+        candidate_path: &Path,
+    ) -> Result<(), MobileError> {
+        require_id(entry_id)?;
+        if name.is_empty() {
+            return Err(MobileError::InvalidRequest);
+        }
+        let bytes = self
+            .document
+            .entry_attachment_bytes(&EntryId::new(entry_id), name)
+            .map_err(map_mutation_error)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(candidate_path)
+            .map_err(|_| MobileError::Internal)?;
+        file.write_all(bytes.expose_secret())
+            .and_then(|()| file.sync_all())
+            .map_err(|_| MobileError::Internal)
+    }
+
+    pub(super) fn entry_totp_code(&self, entry_id: &str) -> Result<EntryTotpCode, MobileError> {
+        require_id(entry_id)?;
+        self.document
+            .entry_totp_code(&EntryId::new(entry_id))
+            .map_err(map_mutation_error)
     }
 
     pub(super) fn entry_secret(
@@ -236,7 +319,14 @@ fn snapshot_for(
     document
         .projection()
         .map(|vault| {
-            MobileVaultSnapshotDto::from_vault(&vault, document.has_changes_since(saved_revision))
+            MobileVaultSnapshotDto::from_vault(
+                &vault,
+                document.has_changes_since(saved_revision),
+                document.recycle_bin_enabled(),
+                document
+                    .recycle_bin_group_id()
+                    .map(|id| id.as_str().to_owned()),
+            )
         })
         .map_err(|_| MobileError::Internal)
 }
@@ -300,6 +390,11 @@ mod tests {
                 url: None,
                 password: None,
                 notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             })
             .expect("mutation");
         (session, credential)
@@ -370,6 +465,11 @@ mod tests {
                 url: None,
                 password: None,
                 notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             })
             .expect("newer mutation");
         fs::copy(&candidate, &source).expect("fake stale provider completion");

@@ -1,11 +1,15 @@
 import type {
+  AttachmentExportReceiptDto,
+  EntryAttachmentSummaryDto,
   CreatedEntryBaseDto,
   CreatedGroupBaseDto,
   CreateEntryRequest,
   EntryDetailDto,
+  EntryHistoryDto,
   EntryId,
   GroupId,
   SetCustomFieldRequest,
+  TotpCodeDto,
   UpdateEntryRequest,
   VaultCoreSnapshotDto,
   SummaryTextDto,
@@ -92,12 +96,28 @@ export interface MobileApi {
   unlockVault: (password: string) => Promise<MobileVaultSnapshotDto>;
   getVaultSnapshot: () => Promise<MobileVaultSnapshotDto>;
   getEntryDetail: (entryId: EntryId) => Promise<EntryDetailDto>;
+  getEntryHistory: (entryId: EntryId) => Promise<EntryHistoryDto>;
+  getEntryAttachments: (
+    entryId: EntryId,
+  ) => Promise<EntryAttachmentSummaryDto[]>;
+  importEntryAttachment: (
+    entryId: EntryId,
+  ) => Promise<MobileVaultSnapshotDto | null>;
+  exportEntryAttachment: (
+    entryId: EntryId,
+    name: string,
+  ) => Promise<AttachmentExportReceiptDto | null>;
   revealEntryTitle: (entryId: EntryId) => Promise<string>;
   revealEntryUsername: (entryId: EntryId) => Promise<string>;
   revealEntryUrl: (entryId: EntryId) => Promise<string>;
   revealEntryNotes: (entryId: EntryId) => Promise<string>;
+  revealEntryTotp: (entryId: EntryId) => Promise<TotpCodeDto>;
   revealEntryCustomField: (entryId: EntryId, name: string) => Promise<string>;
   updateEntry: (request: UpdateEntryRequest) => Promise<MobileVaultSnapshotDto>;
+  setEntryTags: (
+    entryId: EntryId,
+    tags: string[],
+  ) => Promise<MobileVaultSnapshotDto>;
   createEntry: (request: CreateEntryRequest) => Promise<MobileCreatedEntryDto>;
   deleteEntry: (entryId: EntryId) => Promise<MobileVaultSnapshotDto>;
   moveEntry: (

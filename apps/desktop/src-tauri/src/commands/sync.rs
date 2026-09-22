@@ -73,7 +73,7 @@ pub async fn test_sync_provider(
 pub async fn sync_now(
     profile_id: String,
     credentials: ProviderCredentialsDto,
-    master_password: String,
+    master_password: Option<String>,
     state: State<'_, AppState>,
     runtime: State<'_, SyncRuntime>,
 ) -> Result<SyncResultDto, DesktopErrorDto> {

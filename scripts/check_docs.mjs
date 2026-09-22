@@ -87,7 +87,7 @@ export function runChecks(root) {
   requirePattern(violations, "README.md", readme, /AtomicFile[\s\S]{0,300}save_uncertain[\s\S]{0,160}recovery_required/i, "M5.2 recovery and uncertainty boundary is missing");
   requirePattern(violations, "README.md", readme, /explicit Save/i, "M4.4 explicit Save UX is missing");
   requirePattern(violations, "README.md", readme, /external[\s\S]{0,180}(?:refus|not automatically merged)/i, "M4.4 external-conflict boundary is missing");
-  requirePattern(violations, "README.md", readme, /no Save As[\s\S]{0,100}(?:force overwrite|autosave)/i, "M4.4 persistence non-goals are missing");
+  requirePattern(violations, "README.md", readme, /no canonical-path retargeting Save As[\s\S]{0,140}(?:force overwrite|autosave)/i, "M4.4 persistence non-goals are missing");
   requirePattern(violations, "docs/architecture.md", architecture, /M4\.Q/, "architecture must describe M4.Q");
   requirePattern(violations, "README.md", readme, /make quality-check/, "canonical quality command is missing");
   requirePattern(violations, "README.md", readme, /Headless Linux/i, "headless desktop development guidance is missing");

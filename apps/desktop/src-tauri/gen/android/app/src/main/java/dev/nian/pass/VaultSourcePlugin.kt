@@ -39,6 +39,8 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
   private val sources = ConcurrentHashMap<String, SourceRecord>()
   private val saves = ConcurrentHashMap<String, SaveRecord>()
   private val reads = ConcurrentHashMap<String, ReadRecord>()
+  private val attachmentImports = ConcurrentHashMap<String, File>()
+  private val attachmentExports = ConcurrentHashMap<String, File>()
   private val autofillStore by lazy { AutofillMetadataStore(activity.applicationContext) }
 
   override fun load(webView: WebView) {
@@ -113,6 +115,131 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     } catch (_: Exception) {
       invoke.reject("picker_failed", "picker_failed")
     }
+  }
+
+  @Command
+  fun selectAttachmentImport(invoke: Invoke) {
+    try {
+      val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = "*/*"
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      startActivityForResult(invoke, intent, "attachmentImportResult")
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @ActivityCallback
+  fun attachmentImportResult(invoke: Invoke, result: ActivityResult) {
+    if (result.resultCode == Activity.RESULT_CANCELED) {
+      invoke.resolve(status("cancelled"))
+      return
+    }
+    val uri = result.data?.data
+    if (result.resultCode != Activity.RESULT_OK || uri == null) {
+      invoke.resolve(status("failed"))
+      return
+    }
+    try {
+      val token = VaultSourcePolicy.opaqueId()
+      val staged = stageAttachmentProvider(uri, token)
+      attachmentImports[token] = staged
+      invoke.resolve(JSObject().apply {
+        put("status", "selected")
+        put("importToken", token)
+        put("stagedPath", staged.absolutePath)
+        put("fileName", queryDisplayName(uri))
+      })
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @Command
+  fun finishAttachmentImport(invoke: Invoke) {
+    val token = invoke.getArgs().optString("token", "")
+    val file = attachmentImports.remove(token)
+    if (file != null && (!file.exists() || file.delete())) invoke.resolve(status("ok"))
+    else invoke.resolve(status("failed"))
+  }
+
+  @Command
+  fun prepareAttachmentExport(invoke: Invoke) {
+    try {
+      val token = VaultSourcePolicy.opaqueId()
+      val candidate = managedTransactionFile(transactionDirectory(), "$token.candidate", mustExist = false)
+      if (candidate.exists()) throw IllegalStateException("candidate already exists")
+      attachmentExports[token] = candidate
+      invoke.resolve(JSObject().apply {
+        put("status", "ready")
+        put("exportToken", token)
+        put("candidatePath", candidate.absolutePath)
+      })
+    } catch (_: Exception) {
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @Command
+  fun exportAttachment(invoke: Invoke) {
+    val token = invoke.getArgs().optString("token", "")
+    val candidate = attachmentExports[token]
+    if (candidate == null || !candidate.isFile) {
+      invoke.resolve(status("failed"))
+      return
+    }
+    try {
+      val suggestedName = VaultSourcePolicy.displayName(invoke.getArgs().optString("suggestedName", ""))
+      val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = "application/octet-stream"
+        putExtra(Intent.EXTRA_TITLE, suggestedName)
+      }
+      startActivityForResult(invoke, intent, "attachmentExportResult")
+    } catch (_: Exception) {
+      attachmentExports.remove(token)
+      candidate.delete()
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @ActivityCallback
+  fun attachmentExportResult(invoke: Invoke, result: ActivityResult) {
+    val token = invoke.getArgs().optString("token", "")
+    val candidate = attachmentExports.remove(token)
+    if (candidate == null) {
+      invoke.resolve(status("failed"))
+      return
+    }
+    if (result.resultCode == Activity.RESULT_CANCELED) {
+      candidate.delete()
+      invoke.resolve(status("cancelled"))
+      return
+    }
+    val uri = result.data?.data
+    if (result.resultCode != Activity.RESULT_OK || uri == null) {
+      candidate.delete()
+      invoke.resolve(status("failed"))
+      return
+    }
+    try {
+      writeProvider(uri, candidate)
+      candidate.delete()
+      invoke.resolve(status("ok"))
+    } catch (_: Exception) {
+      candidate.delete()
+      invoke.resolve(status("failed"))
+    }
+  }
+
+  @Command
+  fun abortAttachmentExport(invoke: Invoke) {
+    val token = invoke.getArgs().optString("token", "")
+    val candidate = attachmentExports.remove(token)
+    if (candidate != null && (!candidate.exists() || candidate.delete())) invoke.resolve(status("ok"))
+    else invoke.resolve(status("failed"))
   }
 
   @Command
@@ -528,6 +655,7 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     val approved = args.optBoolean("approved", false)
     val username = args.getString("username")
     val password = args.getString("password")
+    val totp = args.optString("totp", "").takeIf { it.isNotEmpty() }
     val candidateToken = credentialActivity?.intent?.getStringExtra(AutofillIntents.EXTRA_CANDIDATE_TOKEN)
     val record = AutofillRuntime.registry.request(requestToken)
     val candidate = candidateToken?.let { AutofillRuntime.registry.candidate(it, requestToken) }
@@ -562,6 +690,11 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
             }
             record.fields.passwordIds.forEach { id ->
               setValue(id, AutofillValue.forText(password), presentation)
+            }
+            if (totp != null) {
+              record.fields.totpIds.forEach { id ->
+                setValue(id, AutofillValue.forText(totp), presentation)
+              }
             }
           }.build()
           result.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, dataset)
@@ -703,6 +836,31 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     return sources[token] ?: throw IllegalArgumentException("unknown source")
   }
 
+  private fun stageAttachmentProvider(uri: Uri, token: String): File {
+    val directory = transactionDirectory()
+    val completed = managedTransactionFile(directory, "$token.read", mustExist = false)
+    val partial = managedTransactionFile(directory, "$token.partial", mustExist = false)
+    completed.delete()
+    partial.delete()
+    try {
+      val input = activity.contentResolver.openInputStream(uri)
+        ?: throw IllegalStateException("attachment unavailable")
+      input.use { source ->
+        FileOutputStream(partial).use { destination ->
+          copyStreamBounded(source, destination, MAX_ATTACHMENT_BYTES)
+          destination.flush()
+          destination.fd.sync()
+        }
+      }
+      if (!partial.renameTo(completed)) throw IllegalStateException("attachment staging commit failed")
+      return completed
+    } catch (error: Exception) {
+      partial.delete()
+      completed.delete()
+      throw error
+    }
+  }
+
   private fun stageProvider(
     uri: Uri,
     directory: File,
@@ -762,6 +920,22 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
       }
     }
     if (fingerprint(destination) != expected) throw IllegalStateException("backup verification failed")
+  }
+
+  private fun copyStreamBounded(
+    source: java.io.InputStream,
+    destination: java.io.OutputStream,
+    limit: Long,
+  ) {
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+      val count = source.read(buffer)
+      if (count < 0) break
+      total = Math.addExact(total, count.toLong())
+      if (total > limit) throw IllegalStateException("attachment too large")
+      destination.write(buffer, 0, count)
+    }
   }
 
   private fun copyStream(source: java.io.InputStream, destination: java.io.OutputStream) {
@@ -923,5 +1097,6 @@ class VaultSourcePlugin(private val activity: Activity) : Plugin(activity) {
     const val IMPORT_DIRECTORY = "nian-pass-imports"
     const val TRANSACTION_DIRECTORY = "nian-pass-transactions"
     const val DEFAULT_BUFFER_SIZE = 64 * 1024
+    const val MAX_ATTACHMENT_BYTES = 64L * 1024L * 1024L
   }
 }

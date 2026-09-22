@@ -1,7 +1,9 @@
 use std::path::Path;
 
+use kdbx::KdbxCredential;
+use sync_engine::SyncCredential;
 use sync_provider_core::CiphertextDigest;
-use vault_core::SecretString;
+use vault_core::{SecretBytes, SecretString};
 use vault_session::SessionError;
 
 use super::{DesktopError, DesktopVaultService, random_process_token};
@@ -13,6 +15,26 @@ pub(crate) struct DesktopSyncCapture {
 }
 
 impl DesktopVaultService {
+    /// Retain a short-lived, zeroizing copy of the selected keyfile only for
+    /// the active sync operation. Profiles and journal contain ciphertext only.
+    pub(crate) fn sync_credential(
+        &self,
+        password: Option<SecretString>,
+    ) -> Result<SyncCredential, DesktopError> {
+        if self.session.is_none() {
+            return Err(DesktopError::Locked);
+        }
+        let current = self.save_credential.as_ref().ok_or(DesktopError::Locked)?;
+        let keyfile = current
+            .keyfile()
+            .map(|keyfile| SecretBytes::new(keyfile.expose_secret().to_vec()));
+        let credential = SyncCredential::new(password, keyfile);
+        if !credential.has_component() {
+            return Err(DesktopError::SyncCredentialsRequired);
+        }
+        Ok(credential)
+    }
+
     pub(crate) fn sync_capture(&self) -> Result<DesktopSyncCapture, DesktopError> {
         let session = self.session.as_ref().ok_or(DesktopError::Locked)?;
         let encrypted = session
@@ -42,7 +64,7 @@ impl DesktopVaultService {
         expected_authority: &str,
         expected_digest: &str,
         ciphertext: &[u8],
-        credential: &SecretString,
+        credential: KdbxCredential<'_>,
     ) -> Result<(), DesktopError> {
         if self.browser_session_id.as_deref() != Some(expected_authority) {
             return Err(DesktopError::ExternalChange);

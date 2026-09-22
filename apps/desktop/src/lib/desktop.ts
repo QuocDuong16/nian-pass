@@ -1,28 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type {
-  ClipboardReceiptDto,
-  ClosePolicyDto,
-  CreateEntryRequest,
-  CreatedEntryDto,
-  CreatedGroupDto,
-  DesktopErrorCode,
-  EntryDetailDto,
-  EntryId,
-  GroupId,
-  LockResultDto,
-  SelectedVaultDto,
-  SetCustomFieldRequest,
-  UpdateEntryRequest,
-  VaultSnapshotDto,
-} from "../types/desktop";
-import type { RuntimeInfoDto } from "../types/runtime";
-import { createSyncApi, type SyncApi } from "./sync-api";
+import type { DesktopErrorCode } from "../types/desktop";
+import type { DesktopApi, RuntimeApi } from "./desktop-api-types";
+import { createClipboardApi } from "./clipboard-api";
+import { createCredentialApi } from "./credential-api";
+import { createSyncApi } from "./sync-api";
+
+export type { DesktopApi, RuntimeApi } from "./desktop-api-types";
 import {
-  parseClipboardReceipt,
+  parseAttachmentExportReceipt,
+  parseEntryAttachments,
   parseEntryDetail,
+  parseEntryHistory,
   parseLockResult,
   parseSecretString,
+  parseTotpCode,
 } from "./entry-validation";
 import {
   parseClosePolicy,
@@ -33,59 +25,14 @@ import {
   parseSelectedVault,
   parseVaultSnapshot,
 } from "./validation";
+import {
+  parseDatabaseMetadata,
+  parseDatabaseMetadataUpdateReceipt,
+  parseHistoryPolicy,
+  parseHistoryPolicyUpdateReceipt,
+} from "./database-settings-validation";
+import { parsePasswordHealthReport } from "./password-health-validation";
 import { parseRuntimeInfo } from "./runtime-validation";
-
-export interface RuntimeApi {
-  getInfo: () => Promise<RuntimeInfoDto>;
-}
-
-export interface DesktopApi extends SyncApi {
-  selectVault: () => Promise<SelectedVaultDto | null>;
-  createVault: (
-    vaultName: string,
-    password: string,
-  ) => Promise<VaultSnapshotDto | null>;
-  unlockVault: (password: string) => Promise<VaultSnapshotDto>;
-  getVaultSnapshot: () => Promise<VaultSnapshotDto>;
-  saveVault: () => Promise<VaultSnapshotDto>;
-  reloadVault: (password: string) => Promise<VaultSnapshotDto>;
-  getEntryDetail: (entryId: EntryId) => Promise<EntryDetailDto>;
-  revealEntryPassword: (entryId: EntryId) => Promise<string>;
-  revealEntryNotes: (entryId: EntryId) => Promise<string>;
-  revealEntryTitle: (entryId: EntryId) => Promise<string>;
-  revealEntryUsername: (entryId: EntryId) => Promise<string>;
-  revealEntryUrl: (entryId: EntryId) => Promise<string>;
-  revealEntryCustomField: (entryId: EntryId, name: string) => Promise<string>;
-  copyEntryUsername: (entryId: EntryId) => Promise<ClipboardReceiptDto>;
-  copyEntryPassword: (entryId: EntryId) => Promise<ClipboardReceiptDto>;
-  updateEntry: (request: UpdateEntryRequest) => Promise<VaultSnapshotDto>;
-  createEntry: (request: CreateEntryRequest) => Promise<CreatedEntryDto>;
-  deleteEntry: (entryId: EntryId) => Promise<VaultSnapshotDto>;
-  moveEntry: (
-    entryId: EntryId,
-    destinationGroupId: GroupId,
-  ) => Promise<VaultSnapshotDto>;
-  createGroup: (
-    parentGroupId: GroupId,
-    name: string,
-  ) => Promise<CreatedGroupDto>;
-  renameGroup: (groupId: GroupId, name: string) => Promise<VaultSnapshotDto>;
-  moveGroup: (
-    groupId: GroupId,
-    destinationGroupId: GroupId,
-  ) => Promise<VaultSnapshotDto>;
-  deleteGroup: (groupId: GroupId) => Promise<VaultSnapshotDto>;
-  setEntryCustomField: (
-    request: SetCustomFieldRequest,
-  ) => Promise<VaultSnapshotDto>;
-  deleteEntryCustomField: (
-    entryId: EntryId,
-    name: string,
-  ) => Promise<VaultSnapshotDto>;
-  closePolicy: () => Promise<ClosePolicyDto>;
-  lockVault: () => Promise<LockResultDto>;
-  discardChangesAndLock: () => Promise<LockResultDto>;
-}
 
 export class DesktopCommandError extends Error {
   readonly code: DesktopErrorCode;
@@ -111,6 +58,16 @@ function toDesktopError(error: unknown): DesktopCommandError {
   return new DesktopCommandError("internal");
 }
 
+function parseVoid(value: unknown): void {
+  if (value !== null) throw new Error("invalid desktop void response");
+}
+
+function parseBoolean(value: unknown): boolean {
+  if (typeof value !== "boolean")
+    throw new Error("invalid desktop boolean response");
+  return value;
+}
+
 async function call<T>(
   command: string,
   parse: (value: unknown) => T,
@@ -134,6 +91,7 @@ export const desktopApi: DesktopApi = {
     call("select_vault", (value) =>
       value === null ? null : parseSelectedVault(value),
     ),
+  ...createCredentialApi(call),
   createVault: (vaultName, password) =>
     call(
       "create_vault",
@@ -142,37 +100,104 @@ export const desktopApi: DesktopApi = {
     ),
   unlockVault: (password) =>
     call("unlock_vault", parseVaultSnapshot, { password }),
+  unlockVaultWithKeyfile: (password) =>
+    call("unlock_vault_with_keyfile", parseVaultSnapshot, { password }),
   getVaultSnapshot: () => call("vault_snapshot", parseVaultSnapshot),
   saveVault: () => call("save_vault", parseCleanVaultSnapshot),
+  exportVaultCopy: () => call("export_vault_copy", parseBoolean),
+  getDatabaseMetadata: () => call("database_metadata", parseDatabaseMetadata),
+  updateDatabaseMetadata: (name, description, defaultUsername) =>
+    call("update_database_metadata", parseDatabaseMetadataUpdateReceipt, {
+      name,
+      description,
+      defaultUsername,
+    }),
+  getHistoryPolicy: () => call("history_policy", parseHistoryPolicy),
+  setHistoryMaxItems: (maxItems) =>
+    call("set_history_max_items", parseHistoryPolicyUpdateReceipt, {
+      maxItems,
+    }),
+  setRecycleBinEnabled: (enabled) =>
+    call("set_recycle_bin_enabled", parseVaultSnapshot, { enabled }),
   reloadVault: (password) =>
     call("reload_vault", parseCleanVaultSnapshot, { password }),
+  getPasswordHealthReport: () =>
+    call("password_health_report", parsePasswordHealthReport),
   getEntryDetail: (entryId) =>
     call("entry_detail", parseEntryDetail, { entryId }),
+  getEntryAttachments: (entryId) =>
+    call("entry_attachments", parseEntryAttachments, { entryId }),
+  importEntryCustomIcon: (entryId) =>
+    call(
+      "import_entry_custom_icon",
+      (value) => (value === null ? null : parseVaultSnapshot(value)),
+      { entryId },
+    ),
+  importEntryAttachment: (entryId) =>
+    call(
+      "import_entry_attachment",
+      (value) => (value === null ? null : parseVaultSnapshot(value)),
+      { entryId },
+    ),
+  exportEntryAttachment: (entryId, name) =>
+    call(
+      "export_entry_attachment",
+      (value) => (value === null ? null : parseAttachmentExportReceipt(value)),
+      { entryId, name },
+    ),
+  getEntryHistory: (entryId) =>
+    call("entry_history", parseEntryHistory, { entryId }),
+  restoreEntryHistory: (entryId, historyIndex, expectedDocumentRevision) =>
+    call("restore_entry_history", parseVaultSnapshot, {
+      entryId,
+      historyIndex,
+      expectedDocumentRevision,
+    }),
   revealEntryPassword: (entryId) =>
     call("reveal_entry_password", parseSecretString, { entryId }),
   revealEntryNotes: (entryId) =>
     call("reveal_entry_notes", parseSecretString, { entryId }),
+  revealEntryTotp: (entryId) =>
+    call("reveal_entry_totp", parseTotpCode, { entryId }),
   revealEntryTitle: (entryId) =>
     call("reveal_entry_title", parseSecretString, { entryId }),
   revealEntryUsername: (entryId) =>
     call("reveal_entry_username", parseSecretString, { entryId }),
   revealEntryUrl: (entryId) =>
     call("reveal_entry_url", parseSecretString, { entryId }),
+  openEntryUrl: (entryId) => call("open_entry_url", parseVoid, { entryId }),
   revealEntryCustomField: (entryId, name) =>
     call("reveal_entry_custom_field", parseSecretString, { entryId, name }),
-  copyEntryUsername: (entryId) =>
-    call("copy_entry_username", parseClipboardReceipt, { entryId }),
-  copyEntryPassword: (entryId) =>
-    call("copy_entry_password", parseClipboardReceipt, { entryId }),
+  ...createClipboardApi(call),
   updateEntry: (request) =>
     call("update_entry", parseVaultSnapshot, { request }),
+  setEntryTags: (entryId, tags) =>
+    call("set_entry_tags", parseVaultSnapshot, { request: { entryId, tags } }),
   createEntry: (request) =>
     call("create_entry", parseCreatedEntry, { request }),
+  duplicateEntry: (entryId) =>
+    call("duplicate_entry", parseCreatedEntry, { entryId }),
   deleteEntry: (entryId) =>
     call("delete_entry", parseVaultSnapshot, { entryId }),
+  restoreEntry: (entryId) =>
+    call("restore_entry", parseVaultSnapshot, { entryId }),
+  permanentlyDeleteEntry: (entryId) =>
+    call("permanently_delete_entry", parseVaultSnapshot, { entryId }),
   moveEntry: (entryId, destinationGroupId) =>
     call("move_entry", parseVaultSnapshot, {
       request: { entryId, destinationGroupId },
+    }),
+  moveEntries: (entryIds, destinationGroupId) =>
+    call("move_entries", parseVaultSnapshot, {
+      request: { entryIds, destinationGroupId },
+    }),
+  trashEntries: (entryIds) =>
+    call("trash_entries", parseVaultSnapshot, { request: { entryIds } }),
+  restoreEntries: (entryIds) =>
+    call("restore_entries", parseVaultSnapshot, { request: { entryIds } }),
+  permanentlyDeleteEntries: (entryIds) =>
+    call("permanently_delete_entries", parseVaultSnapshot, {
+      request: { entryIds },
     }),
   createGroup: (parentGroupId, name) =>
     call("create_group", parseCreatedGroup, {
@@ -186,6 +211,10 @@ export const desktopApi: DesktopApi = {
     }),
   deleteGroup: (groupId) =>
     call("delete_group", parseVaultSnapshot, { groupId }),
+  restoreGroup: (groupId) =>
+    call("restore_group", parseVaultSnapshot, { groupId }),
+  permanentlyDeleteGroup: (groupId) =>
+    call("permanently_delete_group", parseVaultSnapshot, { groupId }),
   setEntryCustomField: (request) =>
     call("set_entry_custom_field", parseVaultSnapshot, { request }),
   deleteEntryCustomField: (entryId, name) =>

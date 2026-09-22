@@ -12,8 +12,7 @@ use vault_core::SecretString;
 
 #[cfg(target_os = "android")]
 use crate::dto::{
-    EntryDetailDto, MobileCreatedEntryDto, MobileCreatedGroupDto, MobileSelectedVaultDto,
-    MobileVaultSnapshotDto,
+    MobileCreatedEntryDto, MobileCreatedGroupDto, MobileSelectedVaultDto, MobileVaultSnapshotDto,
 };
 #[cfg(target_os = "android")]
 use crate::mobile::{
@@ -22,11 +21,11 @@ use crate::mobile::{
     mutations::{
         MobileCreateEntryRequest, MobileCreateGroupRequest, MobileMoveEntryRequest,
         MobileMoveGroupRequest, MobileRenameGroupRequest, MobileSetCustomFieldRequest,
-        MobileUpdateEntryRequest,
+        MobileSetEntryTagsRequest, MobileUpdateEntryRequest,
     },
     persistence,
     source::AndroidVaultSource,
-    state::{MobileSecretKind, MobileVaultService},
+    state::MobileVaultService,
 };
 #[cfg(all(test, not(target_os = "android")))]
 use crate::mobile::{MobileError, state::MobileVaultService};
@@ -167,71 +166,6 @@ pub(crate) async fn mobile_unlock_vault(
 }
 
 #[cfg(target_os = "android")]
-macro_rules! read_command {
-    ($name:ident, $result:ty, $call:expr) => {
-        #[tauri::command]
-        pub(crate) fn $name(state: State<'_, MobileAppState>) -> Result<$result, MobileErrorDto> {
-            $call(&*lock_service(&state)?).map_err(Into::into)
-        }
-    };
-}
-
-#[cfg(target_os = "android")]
-read_command!(
-    mobile_vault_snapshot,
-    MobileVaultSnapshotDto,
-    MobileVaultService::snapshot
-);
-
-#[cfg(target_os = "android")]
-#[tauri::command]
-pub(crate) fn mobile_entry_detail(
-    entry_id: String,
-    state: State<'_, MobileAppState>,
-) -> Result<EntryDetailDto, MobileErrorDto> {
-    lock_service(&state)?
-        .entry_detail(&entry_id)
-        .map_err(Into::into)
-}
-
-#[cfg(target_os = "android")]
-macro_rules! load_secret_command {
-    ($name:ident, $kind:ident) => {
-        #[tauri::command]
-        pub(crate) fn $name(
-            entry_id: String,
-            state: State<'_, MobileAppState>,
-        ) -> Result<String, MobileErrorDto> {
-            lock_service(&state)?
-                .entry_secret(&entry_id, MobileSecretKind::$kind)
-                .map(|secret| secret.expose_secret().to_owned())
-                .map_err(Into::into)
-        }
-    };
-}
-
-#[cfg(target_os = "android")]
-load_secret_command!(mobile_load_entry_title, Title);
-#[cfg(target_os = "android")]
-load_secret_command!(mobile_load_entry_username, Username);
-#[cfg(target_os = "android")]
-load_secret_command!(mobile_load_entry_url, Url);
-#[cfg(target_os = "android")]
-load_secret_command!(mobile_load_entry_notes, Notes);
-#[cfg(target_os = "android")]
-#[tauri::command]
-pub(crate) fn mobile_load_entry_custom_field(
-    entry_id: String,
-    name: String,
-    state: State<'_, MobileAppState>,
-) -> Result<String, MobileErrorDto> {
-    lock_service(&state)?
-        .entry_custom_field(&entry_id, &name)
-        .map(|secret| secret.expose_secret().to_owned())
-        .map_err(Into::into)
-}
-
-#[cfg(target_os = "android")]
 macro_rules! mutation_command {
     ($name:ident, $request:ident, $request_ty:ty, $result:ty, $method:ident) => {
         #[tauri::command]
@@ -251,6 +185,14 @@ mutation_command!(
     MobileUpdateEntryRequest,
     MobileVaultSnapshotDto,
     update_entry
+);
+#[cfg(target_os = "android")]
+mutation_command!(
+    mobile_set_entry_tags,
+    request,
+    MobileSetEntryTagsRequest,
+    MobileVaultSnapshotDto,
+    set_entry_tags
 );
 #[cfg(target_os = "android")]
 mutation_command!(
@@ -510,6 +452,11 @@ mod tests {
                 url: None,
                 password: None,
                 notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             })
             .expect("mutate");
 

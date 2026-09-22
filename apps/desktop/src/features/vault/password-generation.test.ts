@@ -22,27 +22,23 @@ test("generated passwords include every selected character class", () => {
   expect(password).not.toMatch(/[Il1O0o]/u);
 });
 
-test("generation clamps requested lengths without dropping the selected alphabet", () => {
-  const short = generatePassword({
-    ...defaults,
-    length: 1,
-    lowercase: false,
-    digits: false,
-    symbols: false,
-    avoidAmbiguous: false,
-  });
-  const long = generatePassword({
-    ...defaults,
-    length: 999,
-    uppercase: false,
-    lowercase: false,
-    symbols: false,
-  });
-
-  expect(short).toHaveLength(8);
-  expect(short).toMatch(/^[A-Z]+$/u);
-  expect(long).toHaveLength(128);
-  expect(long).toMatch(/^\d+$/u);
+test("rejects invalid lengths rather than generating a short password", () => {
+  for (const length of [
+    0,
+    1,
+    7,
+    129,
+    999,
+    8.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ]) {
+    expect(() => generatePassword({ ...defaults, length })).toThrow(
+      "Password length must be between 8 and 128",
+    );
+  }
+  expect(generatePassword({ ...defaults, length: 8 })).toHaveLength(8);
+  expect(generatePassword({ ...defaults, length: 128 })).toHaveLength(128);
 });
 
 test("generation fails closed when no character set is selected", () => {

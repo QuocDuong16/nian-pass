@@ -1,9 +1,9 @@
 use sync_provider_core::{CiphertextDigest, ProviderError, RemoteObjectProvider, RemoteRead};
-use vault_core::SecretString;
 use vault_sync::MergeOutcome;
 
 use crate::{
-    ConflictChoice, ConflictOperation, LocalSnapshot, LocalVault, SyncError, SyncStore,
+    ConflictChoice, ConflictOperation, LocalSnapshot, LocalVault, SyncCredential, SyncError,
+    SyncStore,
     codec::{open_document, serialize_verified},
     commit::{CommitPlan, CommitRemote},
     conflict::describe,
@@ -50,12 +50,16 @@ impl SyncEngine {
         &self,
         provider: &P,
         local: &L,
-        master_password: SecretString,
+        credential: impl Into<SyncCredential>,
     ) -> Result<SyncOutcome, SyncError> {
         self.conflict_authority.invalidate_pending_conflict()?;
+        let credential = credential.into();
+        if !credential.has_component() {
+            return Err(SyncError::VaultAuthenticationFailed);
+        }
         let local_snapshot = local.capture_clean()?;
         if self
-            .recover_loaded(provider, local, &master_password, &local_snapshot)
+            .recover_loaded(provider, local, &credential, &local_snapshot)
             .await?
         {
             return Ok(SyncOutcome::Done(SyncCompletion::Recovered));
@@ -68,7 +72,7 @@ impl SyncEngine {
                 self.commit_candidate(
                     provider,
                     local,
-                    &master_password,
+                    &credential,
                     CommitPlan::new(
                         local_snapshot,
                         None,
@@ -80,8 +84,8 @@ impl SyncEngine {
             }
             (None, RemoteRead::Present(remote)) => {
                 let (remote_bytes, remote_revision) = remote.into_parts();
-                let local_document = open_document(local_snapshot.ciphertext(), &master_password)?;
-                let remote_document = open_document(&remote_bytes, &master_password)?;
+                let local_document = open_document(local_snapshot.ciphertext(), &credential)?;
+                let remote_document = open_document(&remote_bytes, &credential)?;
                 if local_document.semantically_equals(&remote_document) {
                     self.require_local_unchanged(local, &local_snapshot)?;
                     self.store.write_base(&remote_bytes, remote_revision)?;
@@ -101,15 +105,8 @@ impl SyncEngine {
             }
             (Some(_), RemoteRead::Missing) => Err(SyncError::RemoteChanged),
             (Some(base), RemoteRead::Present(remote)) => {
-                self.merge_existing(
-                    provider,
-                    local,
-                    &master_password,
-                    local_snapshot,
-                    base,
-                    remote,
-                )
-                .await
+                self.merge_existing(provider, local, &credential, local_snapshot, base, remote)
+                    .await
             }
         }
     }
@@ -121,8 +118,17 @@ impl SyncEngine {
         choice: ConflictChoice,
         provider: &P,
         local: &L,
-        master_password: SecretString,
+        credential: impl Into<SyncCredential>,
     ) -> Result<SyncOutcome, SyncError> {
+        let credential = credential.into();
+        if !credential.has_component() {
+            return Err(SyncError::VaultAuthenticationFailed);
+        }
+        // Authenticate before consuming the single-use conflict token. A
+        // mistyped password must not strand the confirmation UI on a token
+        // that was spent without any local or remote mutation.
+        let current_local = local.capture_clean()?;
+        open_document(current_local.ciphertext(), &credential)?;
         let pending = self.conflict_authority.take(conflict_operation_id)?;
 
         self.require_base_unchanged(pending.base_digest.as_ref())?;
@@ -140,7 +146,7 @@ impl SyncEngine {
                 self.commit_candidate(
                     provider,
                     local,
-                    &master_password,
+                    &credential,
                     CommitPlan::new(
                         pending.local,
                         Some(pending.remote_revision),
@@ -154,7 +160,7 @@ impl SyncEngine {
                 self.commit_candidate(
                     provider,
                     local,
-                    &master_password,
+                    &credential,
                     CommitPlan::new(
                         pending.local,
                         Some(pending.remote_revision),
@@ -171,15 +177,15 @@ impl SyncEngine {
         &self,
         provider: &P,
         local: &L,
-        password: &SecretString,
+        credential: &SyncCredential,
         local_snapshot: LocalSnapshot,
         base: BaseState,
         remote: sync_provider_core::RemoteObject,
     ) -> Result<SyncOutcome, SyncError> {
         let (remote_bytes, remote_revision) = remote.into_parts();
-        let base_document = open_document(&base.ciphertext, password)?;
-        let local_document = open_document(local_snapshot.ciphertext(), password)?;
-        let remote_document = open_document(&remote_bytes, password)?;
+        let base_document = open_document(&base.ciphertext, credential)?;
+        let local_document = open_document(local_snapshot.ciphertext(), credential)?;
+        let remote_document = open_document(&remote_bytes, credential)?;
         match vault_sync::merge(&base_document, &local_document, &remote_document)? {
             MergeOutcome::Equivalent => {
                 self.require_local_unchanged(local, &local_snapshot)?;
@@ -190,7 +196,7 @@ impl SyncEngine {
                 self.commit_candidate(
                     provider,
                     local,
-                    password,
+                    credential,
                     CommitPlan::new(
                         local_snapshot,
                         Some(remote_revision),
@@ -204,7 +210,7 @@ impl SyncEngine {
                 self.commit_candidate(
                     provider,
                     local,
-                    password,
+                    credential,
                     CommitPlan::new(
                         local_snapshot,
                         Some(remote_revision),
@@ -215,11 +221,11 @@ impl SyncEngine {
                 .await
             }
             MergeOutcome::Merged(merged) => {
-                let candidate = serialize_verified(merged.document(), password)?;
+                let candidate = serialize_verified(merged.document(), credential)?;
                 self.commit_candidate_bytes(
                     provider,
                     local,
-                    password,
+                    credential,
                     candidate,
                     CommitPlan::new(
                         local_snapshot,
@@ -250,7 +256,7 @@ impl SyncEngine {
         &self,
         provider: &P,
         local: &L,
-        password: &SecretString,
+        credential: &SyncCredential,
         plan: CommitPlan,
     ) -> Result<SyncOutcome, SyncError> {
         let candidate = match &plan.remote_action {
@@ -259,8 +265,8 @@ impl SyncEngine {
                 plan.local_snapshot.ciphertext().to_vec()
             }
         };
-        open_document(&candidate, password)?;
-        self.commit_candidate_bytes(provider, local, password, candidate, plan)
+        open_document(&candidate, credential)?;
+        self.commit_candidate_bytes(provider, local, credential, candidate, plan)
             .await
     }
 
@@ -268,7 +274,7 @@ impl SyncEngine {
         &self,
         provider: &P,
         local: &L,
-        password: &SecretString,
+        credential: &SyncCredential,
         candidate: Vec<u8>,
         plan: CommitPlan,
     ) -> Result<SyncOutcome, SyncError> {
@@ -298,7 +304,7 @@ impl SyncEngine {
             Err(ProviderError::WriteResultUncertain) => {
                 let current = local.capture_clean()?;
                 if self
-                    .recover_loaded(provider, local, password, &current)
+                    .recover_loaded(provider, local, credential, &current)
                     .await?
                 {
                     return Ok(SyncOutcome::Done(SyncCompletion::Recovered));
@@ -318,7 +324,7 @@ impl SyncEngine {
             .mark_remote_committed(&mut journal, remote_revision.clone())?;
 
         if candidate != local_snapshot.ciphertext() {
-            local.replace_if_unchanged(&local_snapshot, &candidate, password)?;
+            local.replace_if_unchanged(&local_snapshot, &candidate, credential)?;
         } else {
             self.require_local_unchanged(local, &local_snapshot)?;
         }

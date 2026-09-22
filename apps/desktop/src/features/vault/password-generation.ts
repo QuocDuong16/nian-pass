@@ -34,17 +34,33 @@ function secureIndex(upperExclusive: number): number {
   return (value[0] ?? 0) % upperExclusive;
 }
 
+export function hasValidPasswordOptions(options: GeneratorOptions): boolean {
+  return (
+    Number.isSafeInteger(options.length) &&
+    options.length >= 8 &&
+    options.length <= 128 &&
+    (options.uppercase ||
+      options.lowercase ||
+      options.digits ||
+      options.symbols)
+  );
+}
+
 export function generatePassword(options: GeneratorOptions): string {
+  if (
+    !Number.isSafeInteger(options.length) ||
+    options.length < 8 ||
+    options.length > 128
+  ) {
+    throw new Error("Password length must be between 8 and 128");
+  }
   const selected = (Object.keys(SETS) as (keyof typeof SETS)[])
     .filter((key) => options[key])
     .map((key) => allowedCharacters(SETS[key], options.avoidAmbiguous));
   if (selected.length === 0) {
     throw new Error("Select at least one character set");
   }
-  const length = Math.max(
-    selected.length,
-    Math.min(128, Math.max(8, options.length)),
-  );
+  const length = options.length;
   const combined = selected.join("");
   const output = selected.map(
     (characters) => characters[secureIndex(characters.length)] ?? "",

@@ -29,7 +29,12 @@
         },
         "passwordPresent": true,
         "notesPresent": false,
-        "tags": ["test"]
+        "totpPresent": false,
+        "tags": ["test"],
+        "expiresAtUnixSeconds": null,
+        "icon": {
+          "kind": "none"
+        }
       }
     ],
     "fileName": "example.kdbx",
@@ -37,7 +42,9 @@
       "formatVersion": "4.1",
       "writable": true,
       "writeRestriction": null
-    }
+    },
+    "recycleBinEnabled": true,
+    "recycleBinGroupId": null
   },
   "createdEntry": {
     "createdEntryId": "entry-created",
@@ -68,7 +75,12 @@
           },
           "passwordPresent": false,
           "notesPresent": false,
-          "tags": []
+          "totpPresent": false,
+          "tags": [],
+          "expiresAtUnixSeconds": null,
+          "icon": {
+            "kind": "none"
+          }
         }
       ],
       "fileName": "example.kdbx",
@@ -76,7 +88,9 @@
         "formatVersion": "4.1",
         "writable": true,
         "writeRestriction": null
-      }
+      },
+      "recycleBinEnabled": true,
+      "recycleBinGroupId": null
     }
   },
   "createdGroup": {
@@ -104,7 +118,9 @@
         "formatVersion": "4.1",
         "writable": true,
         "writeRestriction": null
-      }
+      },
+      "recycleBinEnabled": true,
+      "recycleBinGroupId": null
     }
   },
   "closePolicies": [
@@ -129,6 +145,7 @@
     },
     "passwordPresent": true,
     "notesPresent": true,
+    "totpPresent": false,
     "customFields": [
       {
         "name": "Recovery hint",
@@ -139,7 +156,11 @@
         "protection": "unprotected"
       }
     ],
-    "tags": ["test"]
+    "tags": ["test"],
+    "expiresAtUnixSeconds": null,
+    "icon": {
+      "kind": "none"
+    }
   },
   "clipboardReceipt": {
     "copied": true,
@@ -166,6 +187,12 @@
     "group_not_found",
     "invalid_request",
     "invalid_move",
+    "history_changed",
+    "history_restore_unsupported",
+    "attachment_not_found",
+    "attachment_already_exists",
+    "attachment_too_large",
+    "attachment_io_failed",
     "reserved_field",
     "secret_unavailable",
     "unsaved_changes",
@@ -192,5 +219,62 @@
     "unsupported_write_format",
     "unsupported_persistence_platform",
     "read_only_source"
-  ]
+  ],
+  "entryHistory": {
+    "documentRevision": "18446744073709551615",
+    "items": [
+      {
+        "index": 0,
+        "modifiedAtUnixSeconds": 2000000000,
+        "title": {
+          "kind": "visible",
+          "value": "Previous Example"
+        },
+        "username": {
+          "kind": "protected"
+        },
+        "url": {
+          "kind": "missing"
+        },
+        "passwordPresent": true,
+        "notesPresent": false,
+        "totpPresent": true,
+        "tags": ["history"],
+        "expiresAtUnixSeconds": null,
+        "restorable": true
+      }
+    ]
+  },
+  "entryAttachments": [
+    {
+      "name": "manual.pdf",
+      "sizeBytes": 1536,
+      "protected": true
+    }
+  ],
+  "attachmentExportReceipt": {
+    "exported": true
+  },
+  "passwordHealthReport": {
+    "totalEntries": 3,
+    "passwordEntries": 2,
+    "minimumLength": 12,
+    "weakScoreThreshold": 3,
+    "issues": [
+      {
+        "entryId": "entry-example",
+        "groupId": "group-root",
+        "title": {
+          "kind": "visible",
+          "value": "Example"
+        },
+        "missingPassword": false,
+        "emptyPassword": false,
+        "reusedPassword": true,
+        "belowMinimumLength": true,
+        "weakPassword": true,
+        "strengthScore": 2
+      }
+    ]
+  }
 }

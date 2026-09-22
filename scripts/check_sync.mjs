@@ -128,7 +128,7 @@ export function runChecks(root) {
     violations.push("explicit sync-state reset must remain profile-scoped and operation-gated");
   }
   if (
-    !/pub async fn sync[\s\S]{0,520}invalidate_pending_conflict\(\)\?;[\s\S]{0,160}capture_clean\(\)\?/.test(
+    !/pub async fn sync[\s\S]{0,520}invalidate_pending_conflict\(\)\?;[\s\S]{0,360}capture_clean\(\)\?/.test(
       engineSource,
     )
   ) {

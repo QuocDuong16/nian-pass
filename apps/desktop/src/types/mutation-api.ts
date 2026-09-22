@@ -24,6 +24,10 @@ export interface CustomFieldEditorApi<
   TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
 > {
   revealEntryCustomField: (entryId: EntryId, name: string) => Promise<string>;
+  copyEntryCustomField?: (
+    entryId: EntryId,
+    name: string,
+  ) => Promise<{ copied: boolean; expiresInMs: number }>;
   setEntryCustomField: (request: SetCustomFieldRequest) => Promise<TSnapshot>;
   deleteEntryCustomField: (
     entryId: EntryId,
@@ -34,7 +38,12 @@ export interface CustomFieldEditorApi<
 export interface EntryActionsApi<
   TSnapshot extends VaultCoreSnapshotDto = VaultSnapshotDto,
 > {
+  duplicateEntry?: (
+    entryId: EntryId,
+  ) => Promise<CreatedEntryBaseDto<TSnapshot>>;
   deleteEntry: (entryId: EntryId) => Promise<TSnapshot>;
+  restoreEntry?: (entryId: EntryId) => Promise<TSnapshot>;
+  permanentlyDeleteEntry?: (entryId: EntryId) => Promise<TSnapshot>;
   moveEntry: (
     entryId: EntryId,
     destinationGroupId: GroupId,
@@ -62,4 +71,6 @@ export interface GroupActionsApi<
     destinationGroupId: GroupId,
   ) => Promise<TSnapshot>;
   deleteGroup: (groupId: GroupId) => Promise<TSnapshot>;
+  restoreGroup?: (groupId: GroupId) => Promise<TSnapshot>;
+  permanentlyDeleteGroup?: (groupId: GroupId) => Promise<TSnapshot>;
 }

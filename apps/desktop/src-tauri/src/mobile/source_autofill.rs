@@ -52,6 +52,8 @@ struct FulfillmentRequest<'a> {
     entry_id: &'a str,
     username: &'a str,
     password: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    totp: Option<&'a str>,
     approved: bool,
 }
 
@@ -151,6 +153,7 @@ impl AndroidVaultSource {
         entry_id: &str,
         username: &str,
         password: &str,
+        totp: Option<&str>,
         approved: bool,
     ) -> Result<(), MobileError> {
         self.void_command(
@@ -160,6 +163,7 @@ impl AndroidVaultSource {
                 entry_id,
                 username,
                 password,
+                totp,
                 approved,
             },
         )

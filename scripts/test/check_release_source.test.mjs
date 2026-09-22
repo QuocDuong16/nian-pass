@@ -577,7 +577,10 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   );
   writeFileSync(
     workflowPath,
-    workflow.replace("          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n", ""),
+    workflow.replace(
+      "          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n",
+      "",
+    ),
   );
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
@@ -586,7 +589,10 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   writeFileSync(
     workflowPath,
     workflow
-      .replace("          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n", "")
+      .replace(
+        "          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n",
+        "",
+      )
       .replace(
         "          pnpm --filter @nian-pass/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc\n",
         "          pnpm --filter @nian-pass/desktop tauri build --ci --bundles nsis --target x86_64-pc-windows-msvc\n          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n",
@@ -595,6 +601,36 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
     /VerifyOnly must run before the desktop Tauri build/,
+  );
+  writeFileSync(
+    workflowPath,
+    workflow.replace(
+      "          cargo test --locked --target x86_64-pc-windows-msvc -p windows-safe-replace\n",
+      "",
+    ),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /native ReplaceFileW adapter tests/,
+  );
+  writeFileSync(
+    workflowPath,
+    workflow.replace(
+      '            "WINDOWS_REPLACEFILE_DACL_PRESERVATION=PASS",\n',
+      "",
+    ),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /separate Windows persistence evidence markers/,
+  );
+  writeFileSync(
+    workflowPath,
+    workflow.replace("            windows-persistence-evidence.txt\n", ""),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /persistence evidence artifact/,
   );
 });
 
@@ -614,8 +650,8 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replaceAll(
-      '$actualNode -ne $expectedNode',
-      '$actualNode -eq $expectedNode',
+      "$actualNode -ne $expectedNode",
+      "$actualNode -eq $expectedNode",
     ),
   );
   assert.match(
@@ -659,10 +695,7 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
 
   writeFileSync(
     helperPath,
-    helper.replace(
-      "$selected = $commands[0]",
-      "$selected = $commands[1]",
-    ),
+    helper.replace("$selected = $commands[0]", "$selected = $commands[1]"),
   );
   assert.match(
     windowsNodeBootstrapViolations(root).join("\n"),
@@ -684,8 +717,8 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      '$pnpmVersion -ne $env:PNPM_VERSION',
-      '$pnpmVersion -eq $env:PNPM_VERSION',
+      "$pnpmVersion -ne $env:PNPM_VERSION",
+      "$pnpmVersion -eq $env:PNPM_VERSION",
     ),
   );
   assert.match(
@@ -708,8 +741,8 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      'process.version !== `v${expected}`',
-      'process.version === `v${expected}`',
+      "process.version !== `v${expected}`",
+      "process.version === `v${expected}`",
     ),
   );
   assert.match(
@@ -732,8 +765,8 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      '$PSNativeCommandUseErrorActionPreference = $true',
-      '$PSNativeCommandUseErrorActionPreference = $false',
+      "$PSNativeCommandUseErrorActionPreference = $true",
+      "$PSNativeCommandUseErrorActionPreference = $false",
     ),
   );
   assert.match(
@@ -745,7 +778,7 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
     helperPath,
     helper.replace(
       'Assert-PathUnderRunnerTemp "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT $toolRoot',
-      '$toolRoot = $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT',
+      "$toolRoot = $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT",
     ),
   );
   assert.match(
@@ -757,7 +790,7 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
     helperPath,
     helper.replace(
       'Assert-PathUnderRunnerTemp "COREPACK_HOME" $env:COREPACK_HOME $corepackHome',
-      '$corepackHome = $env:COREPACK_HOME',
+      "$corepackHome = $env:COREPACK_HOME",
     ),
   );
   assert.match(
@@ -768,7 +801,7 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      '  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT',
+      "  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT",
       '  npm install --global --prefix $toolRoot "corepack@$env:COREPACK_VERSION"',
     ),
   );
@@ -780,7 +813,7 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      '  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT',
+      "  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT",
       '  Invoke-WebRequest "https://example.invalid/tool"',
     ),
   );
@@ -792,7 +825,7 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      '  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT',
+      "  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT",
       '  Invoke-RestMethod "https://example.invalid/tool"',
     ),
   );
@@ -804,8 +837,8 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      '  Assert-PnpmRuntimeNode $ToolRoot $pnpmPath',
-      '  # pnpm runtime guard removed',
+      "  Assert-PnpmRuntimeNode $ToolRoot $pnpmPath",
+      "  # pnpm runtime guard removed",
     ),
   );
   assert.match(
@@ -822,7 +855,10 @@ test("Windows release workflow verifies the persisted private toolchain before b
   );
   const missing = workflowFixture(
     t,
-    workflow.replace("          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n", ""),
+    workflow.replace(
+      "          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n",
+      "",
+    ),
     "nian-pass-missing-windows-verify-only-",
   );
   assert.match(
@@ -832,8 +868,8 @@ test("Windows release workflow verifies the persisted private toolchain before b
   const late = workflowFixture(
     t,
     workflow.replace(
-      "          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n          if ((git rev-parse HEAD).Trim() -ne \"${{ needs.preflight.outputs.commit }}\") { throw \"release commit mismatch\" }\n          ./scripts/release_windows.ps1",
-      "          if ((git rev-parse HEAD).Trim() -ne \"${{ needs.preflight.outputs.commit }}\") { throw \"release commit mismatch\" }\n          ./scripts/release_windows.ps1\n          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly",
+      '          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly\n          if ((git rev-parse HEAD).Trim() -ne "${{ needs.preflight.outputs.commit }}") { throw "release commit mismatch" }\n          ./scripts/release_windows.ps1',
+      '          if ((git rev-parse HEAD).Trim() -ne "${{ needs.preflight.outputs.commit }}") { throw "release commit mismatch" }\n          ./scripts/release_windows.ps1\n          ./scripts/bootstrap_windows_node_tools.ps1 -VerifyOnly',
     ),
     "nian-pass-late-windows-verify-only-",
   );

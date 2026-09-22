@@ -73,7 +73,48 @@ test("group create and rename use stable selected GroupIds", async () => {
   });
 });
 
-test("recursive group deletion warning is explicit and falls back to parent", async () => {
+test("group move uses an explicit non-Trash destination", async () => {
+  const api = mutationApi();
+  const onChanged = vi.fn();
+  const snapshot = {
+    ...mutationSnapshot,
+    groups: [
+      { ...group(0), childGroupIds: ["group-child", "group-destination"] },
+      group(1),
+      {
+        id: "group-destination",
+        name: "Destination",
+        childGroupIds: [],
+        entryIds: [],
+      },
+    ],
+  };
+  render(
+    <GroupActions
+      api={api}
+      group={group(1)}
+      snapshot={snapshot}
+      disabled={false}
+      onChanged={onChanged}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move group" }));
+  fireEvent.change(screen.getByLabelText("Destination parent"), {
+    target: { value: "group-destination" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => {
+    expect(api.moveGroup).toHaveBeenCalledWith(
+      "group-child",
+      "group-destination",
+    );
+  });
+  expect(onChanged).toHaveBeenCalledWith(mutationSnapshot, "group-child");
+});
+
+test("normal group subtree moves to Trash and falls back to its parent", async () => {
   const api = mutationApi();
   const onChanged = vi.fn();
   render(
@@ -86,21 +127,98 @@ test("recursive group deletion warning is explicit and falls back to parent", as
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
-  fireEvent.click(
-    screen.getByRole("menuitem", { name: "Permanently delete group" }),
-  );
-  expect(screen.getByText(/every descendant group/)).toBeVisible();
   expect(
-    screen.getByText(/Deletion tombstones will be recorded/),
-  ).toBeVisible();
-  const confirmDelete = screen
-    .getAllByRole("button", { name: "Permanently delete group" })
-    .at(-1);
-  if (confirmDelete === undefined)
-    throw new Error("delete confirmation missing");
-  fireEvent.click(confirmDelete);
+    screen.queryByRole("menuitem", { name: "Delete permanently" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Move group to Trash" }),
+  );
+  expect(screen.getByText(/descendants will move to Trash/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
   await waitFor(() => {
     expect(api.deleteGroup).toHaveBeenCalledWith("group-child");
   });
   expect(onChanged).toHaveBeenCalledWith(mutationSnapshot, "group-root");
+  expect(api.permanentlyDeleteGroup).not.toHaveBeenCalled();
+});
+
+test("recycled group can restore or be permanently deleted only inside Trash", async () => {
+  const recycledSnapshot = {
+    ...mutationSnapshot,
+    recycleBinGroupId: "group-trash",
+    groups: [
+      {
+        ...group(0),
+        childGroupIds: ["group-trash"],
+      },
+      {
+        id: "group-trash",
+        name: "Recycle Bin",
+        childGroupIds: ["group-child"],
+        entryIds: [],
+      },
+      group(1),
+    ],
+  };
+  const api = mutationApi({
+    restoreGroup: vi.fn().mockResolvedValue(mutationSnapshot),
+    permanentlyDeleteGroup: vi.fn().mockResolvedValue(recycledSnapshot),
+  });
+  const onChanged = vi.fn();
+  const { rerender } = render(
+    <GroupActions
+      api={api}
+      group={group(1)}
+      snapshot={recycledSnapshot}
+      disabled={false}
+      onChanged={onChanged}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  expect(
+    screen.queryByRole("menuitem", { name: "Move group" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Restore group" }));
+  await waitFor(() => {
+    expect(api.restoreGroup).toHaveBeenCalledWith("group-child");
+  });
+  expect(onChanged).toHaveBeenCalledWith(mutationSnapshot, "group-child");
+
+  rerender(
+    <GroupActions
+      api={api}
+      group={group(1)}
+      snapshot={recycledSnapshot}
+      disabled={false}
+      onChanged={onChanged}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Delete permanently" }));
+  expect(screen.getByText(/records deletion tombstones/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+  await waitFor(() => {
+    expect(api.permanentlyDeleteGroup).toHaveBeenCalledWith("group-child");
+  });
+  expect(onChanged).toHaveBeenLastCalledWith(recycledSnapshot, "group-trash");
+});
+
+test("group Trash action is absent when recycle bin is disabled", () => {
+  render(
+    <GroupActions
+      api={mutationApi()}
+      group={group(1)}
+      snapshot={{ ...mutationSnapshot, recycleBinEnabled: false }}
+      disabled={false}
+      onChanged={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Group actions" }));
+  expect(
+    screen.queryByRole("menuitem", { name: "Move group to Trash" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("menuitem", { name: "Delete permanently" }),
+  ).not.toBeInTheDocument();
 });

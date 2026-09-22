@@ -34,6 +34,83 @@ pub(crate) fn with_service<T>(
     operation(&mut service).map_err(Into::into)
 }
 
+pub(crate) async fn copy_generated_password(
+    password: String,
+    state: AppState,
+) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
+    let clipboard = state.clipboard.clone();
+    let copy = tauri::async_runtime::spawn_blocking(move || {
+        state.copy_generated_password(SecretString::new(password))
+    })
+    .await
+    .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))??;
+    schedule_expiration(clipboard, copy.generation);
+    Ok(copy.into())
+}
+
+pub(crate) async fn copy_entry_totp(
+    entry_id: String,
+    state: AppState,
+) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
+    let clipboard = state.clipboard.clone();
+    let copy = tauri::async_runtime::spawn_blocking(move || state.copy_entry_totp(&entry_id))
+        .await
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))??;
+    schedule_expiration(clipboard, copy.generation);
+    Ok(copy.into())
+}
+
+pub(crate) async fn copy_entry_title(
+    entry_id: String,
+    state: AppState,
+) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
+    let clipboard = state.clipboard.clone();
+    let copy = tauri::async_runtime::spawn_blocking(move || state.copy_entry_title(&entry_id))
+        .await
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))??;
+    schedule_expiration(clipboard, copy.generation);
+    Ok(copy.into())
+}
+
+pub(crate) async fn copy_entry_url(
+    entry_id: String,
+    state: AppState,
+) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
+    let clipboard = state.clipboard.clone();
+    let copy = tauri::async_runtime::spawn_blocking(move || state.copy_entry_url(&entry_id))
+        .await
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))??;
+    schedule_expiration(clipboard, copy.generation);
+    Ok(copy.into())
+}
+
+pub(crate) async fn copy_entry_notes(
+    entry_id: String,
+    state: AppState,
+) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
+    let clipboard = state.clipboard.clone();
+    let copy = tauri::async_runtime::spawn_blocking(move || state.copy_entry_notes(&entry_id))
+        .await
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))??;
+    schedule_expiration(clipboard, copy.generation);
+    Ok(copy.into())
+}
+
+pub(crate) async fn copy_entry_custom_field(
+    entry_id: String,
+    name: String,
+    state: AppState,
+) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
+    let clipboard = state.clipboard.clone();
+    let copy = tauri::async_runtime::spawn_blocking(move || {
+        state.copy_entry_custom_field(&entry_id, &name)
+    })
+    .await
+    .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))??;
+    schedule_expiration(clipboard, copy.generation);
+    Ok(copy.into())
+}
+
 pub(crate) async fn copy_entry(
     entry_id: String,
     state: AppState,

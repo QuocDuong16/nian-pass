@@ -6,6 +6,7 @@ import { EntryCreateDialog } from "../vault/EntryCreateDialog";
 import { EntryList } from "../vault/EntryList";
 import { GroupActions } from "../vault/GroupActions";
 import { GroupTree } from "../vault/GroupTree";
+import { isGroupInRecycleBin } from "../vault/recycle-bin";
 import { MobileEntryDetail } from "./MobileEntryDetail";
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
   snapshot: MobileVaultSnapshotDto;
   disabled: boolean;
   readOnly?: boolean;
+  nativeAttachmentActions: boolean;
   onSnapshot: (snapshot: MobileVaultSnapshotDto) => void;
   onDraftChange: (active: boolean) => void;
   onBusyChange: (busy: boolean) => void;
@@ -51,6 +53,13 @@ export function MobileVaultBrowser(props: Props) {
     const entry = entriesById.get(id);
     return entry === undefined ? [] : [entry];
   });
+  const selectedGroupRecycled = isGroupInRecycleBin(
+    props.snapshot,
+    selectedGroup.id,
+  );
+  const activeGroups = props.snapshot.groups.filter(
+    (group) => !isGroupInRecycleBin(props.snapshot, group.id),
+  );
 
   useEffect(() => {
     onDraftChange(creating || detailDraft || groupDraft);
@@ -116,6 +125,7 @@ export function MobileVaultBrowser(props: Props) {
         <div className="group-pane">
           <GroupTree
             rootGroupId={props.snapshot.rootGroupId}
+            recycleBinGroupId={props.snapshot.recycleBinGroupId}
             groupsById={groupsById}
             selectedGroupId={selectedGroup.id}
             onSelect={(groupId) => {
@@ -127,7 +137,7 @@ export function MobileVaultBrowser(props: Props) {
               setDetailDraft(false);
             }}
           />
-          {props.readOnly === true ? null : (
+          {props.readOnly === true || selectedGroupRecycled ? null : (
             <GroupActions
               api={props.api}
               group={selectedGroup}
@@ -143,7 +153,7 @@ export function MobileVaultBrowser(props: Props) {
           )}
         </div>
         <div className="entry-column">
-          {props.readOnly === true ? null : (
+          {props.readOnly === true || selectedGroupRecycled ? null : (
             <button
               type="button"
               disabled={props.disabled}
@@ -172,9 +182,10 @@ export function MobileVaultBrowser(props: Props) {
             key={detail.id}
             api={props.api}
             detail={detail}
-            groups={props.snapshot.groups}
+            groups={activeGroups}
             disabled={props.disabled}
-            readOnly={props.readOnly === true}
+            readOnly={props.readOnly === true || selectedGroupRecycled}
+            nativeAttachmentActions={props.nativeAttachmentActions}
             onDraftChange={setDetailDraft}
             onBusyChange={setDetailBusy}
             onSnapshot={acceptSnapshot}
@@ -187,7 +198,10 @@ export function MobileVaultBrowser(props: Props) {
             }}
           />
         )}
-        {creating && !props.disabled && props.readOnly !== true ? (
+        {creating &&
+        !props.disabled &&
+        props.readOnly !== true &&
+        !selectedGroupRecycled ? (
           <EntryCreateDialog
             api={props.api}
             groupId={selectedGroup.id}

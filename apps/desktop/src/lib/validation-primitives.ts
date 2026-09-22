@@ -33,6 +33,14 @@ export function stringValue(value: unknown): string {
   return value;
 }
 
+export function nullableSafeInteger(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    return invalidContract();
+  }
+  return value;
+}
+
 export function parseSummaryText(value: unknown): SummaryTextDto {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return invalidContract();

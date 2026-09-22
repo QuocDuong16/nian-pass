@@ -3,16 +3,15 @@ use std::{
     io::{Cursor, Write},
 };
 
-use kdbx::{KdbxDocument, KdbxError};
-use vault_core::SecretString;
+use kdbx::{KdbxCredential, KdbxDocument, KdbxError};
 
 #[cfg(unix)]
 use super::NoopObserver;
 
 use super::{
     FileFingerprint, ManagedTemp, SAVE_TEMP_PREFIX, SessionError, VaultSession, backup_path,
-    fingerprint_path, map_final_open_error, open_document, open_stable_document, platform,
-    validate_current_target,
+    fingerprint_path, map_final_open_error, open_document_with_credential,
+    open_stable_document_with_credential, platform, validate_current_target,
 };
 
 /// Exact clean encrypted generation captured for provider-independent sync.
@@ -61,7 +60,7 @@ impl VaultSession {
         &mut self,
         expected: &FileFingerprint,
         ciphertext: &[u8],
-        credential: &SecretString,
+        credential: KdbxCredential<'_>,
     ) -> Result<(), SessionError> {
         if self.is_dirty() {
             return Err(SessionError::UnsavedChanges);
@@ -78,7 +77,7 @@ impl VaultSession {
         validate_current_target(&self.path)?;
         self.require_source_unchanged()?;
         let candidate_document =
-            KdbxDocument::open_reader(&mut Cursor::new(ciphertext), credential.expose_secret())
+            KdbxDocument::open_reader_with_credential(&mut Cursor::new(ciphertext), credential)
                 .map_err(SessionError::TempVerificationFailed)?;
         let candidate_fingerprint = FileFingerprint::from_reader(&mut Cursor::new(ciphertext))
             .map_err(SessionError::WriteTemp)?;
@@ -99,7 +98,7 @@ impl VaultSession {
             .map_err(SessionError::SyncTemp)?;
         prepared.close();
 
-        let reopened = open_document(prepared.path(), credential)
+        let reopened = open_document_with_credential(prepared.path(), credential)
             .map_err(SessionError::TempVerificationFailed)?;
         candidate_document
             .verify_semantic_equivalence(&reopened)
@@ -141,7 +140,8 @@ impl VaultSession {
         let durability = platform::sync_parent(parent);
 
         let (final_document, final_fingerprint) =
-            open_stable_document(&self.path, credential).map_err(map_final_open_error)?;
+            open_stable_document_with_credential(&self.path, credential)
+                .map_err(map_final_open_error)?;
         if final_fingerprint != candidate_fingerprint {
             return Err(SessionError::FinalExternalModificationDetected);
         }

@@ -139,11 +139,14 @@ tests assert 0700 directories and 0600 BASE/journal/metadata files.
 `windows-cross-check` compiles the engine, all three providers, desktop integration,
 and the narrow ACL-preserving `ReplaceFileW` adapter for
 `x86_64-pc-windows-gnu`. Cross-compilation is not Windows runtime evidence.
-Real WebDAV, AWS S3, S3-compatible, Windows desktop-to-gateway, Linux
-desktop-to-gateway, HTTPS reverse-proxy, and container runtime smoke remain
-manual and must each be reported as RUN or NOT RUN. Ordinary CI stays Forgejo-owned; M7
-added no GitHub Actions workflow; M8 adds only the tag/manual existing-tag
-multi-platform release workflow and does not duplicate ordinary CI.
+The manual `windows-runtime-diagnostic` workflow on `windows-2025` additionally
+runs native `windows-safe-replace` byte/DACL tests, Windows replacement-transaction
+recovery tests, and the ordinary-Save fail-closed regression before building the
+desktop binary, then uploads explicit evidence markers. It is diagnostic evidence,
+not ordinary CI and does not authorize ordinary Windows Save. Real WebDAV, AWS S3, S3-compatible,
+Windows desktop-to-gateway, Linux desktop-to-gateway, HTTPS reverse-proxy, and
+container runtime smoke remain manual and must each be reported as RUN or NOT RUN.
+Ordinary CI stays Forgejo-owned; the GitHub workflows remain release/diagnostic only.
 
 M6.5 keeps `browser-source-check` and `browser-extension-check` and adds
 `browser-native-protocol-check`, `browser-native-host-check`, and
@@ -313,8 +316,9 @@ or repeated registry failure remains blocking; registry errors are never
 ignored and audit never auto-fixes.
 
 M4.2 additionally forbids `navigator.clipboard`, including window/global aliases,
-and every JavaScript clipboard plugin dependency. Username/password copy must use
-the semantic desktop IPC adapter rather than a generic browser write API.
+and every JavaScript clipboard plugin dependency. Entry Title, Username, URL,
+Notes, Password, and Custom Field copy must use the semantic desktop IPC adapter
+rather than a generic browser write API.
 
 ## Coverage ratchets
 

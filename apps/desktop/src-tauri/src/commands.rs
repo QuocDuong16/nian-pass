@@ -1,23 +1,29 @@
-use tauri::AppHandle;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use vault_core::SecretString;
 
+mod attachments;
+mod clipboard;
+mod custom_icons;
+mod database_settings;
+mod export_copy;
+mod keyfile;
 mod sync;
-pub use self::sync::*;
+mod url_open;
+mod vault_mutations;
+pub use self::{
+    attachments::*, clipboard::*, custom_icons::*, database_settings::*, export_copy::*,
+    keyfile::*, sync::*, url_open::*, vault_mutations::*,
+};
 
 use crate::dto::{EntryDetailDto, SelectedVaultDto, VaultSnapshotDto};
 use crate::platform::RuntimeInfoDto;
 
 use crate::{
     browser_bridge::BrowserBridgeState,
-    command_support::{copy_entry, reveal_entry_value, with_service},
-    dto::{ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, LockResultDto},
+    command_support::reveal_entry_value,
+    dto::{ClosePolicyDto, LockResultDto, TotpCodeDto},
     errors::DesktopErrorDto,
-    mutations::{
-        CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
-        RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
-    },
     state::{AppState, DesktopError},
 };
 
@@ -140,6 +146,22 @@ pub async fn unlock_vault(
 }
 
 #[tauri::command]
+pub async fn unlock_vault_with_keyfile(
+    password: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let password = password.map(SecretString::new);
+        let mut service = service.lock().map_err(|_| DesktopError::Internal)?;
+        service.unlock_with_components(password)
+    })
+    .await
+    .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub fn vault_snapshot(state: State<'_, AppState>) -> Result<VaultSnapshotDto, DesktopErrorDto> {
     let service = state
         .service
@@ -154,8 +176,23 @@ pub async fn save_vault(state: State<'_, AppState>) -> Result<VaultSnapshotDto, 
 }
 
 #[tauri::command]
+pub async fn change_master_password(
+    new_password: String,
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    crate::persistence::change_master_password(new_password, state).await
+}
+
+#[tauri::command]
+pub async fn remove_master_password(
+    state: State<'_, AppState>,
+) -> Result<VaultSnapshotDto, DesktopErrorDto> {
+    crate::persistence::remove_master_password(state).await
+}
+
+#[tauri::command]
 pub async fn reload_vault(
-    password: String,
+    password: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<VaultSnapshotDto, DesktopErrorDto> {
     crate::persistence::reload(password, state).await
@@ -184,6 +221,23 @@ pub fn reveal_entry_password(
         .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
     let secret = service.entry_password(&entry_id)?;
     Ok(secret.expose_secret().to_owned())
+}
+
+#[tauri::command]
+pub fn reveal_entry_totp(
+    entry_id: String,
+    state: State<'_, AppState>,
+) -> Result<TotpCodeDto, DesktopErrorDto> {
+    let service = state
+        .service
+        .lock()
+        .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
+    let value = service.entry_totp_code(&entry_id)?;
+    Ok(TotpCodeDto {
+        code: value.code().expose_secret().to_owned(),
+        valid_for_seconds: value.valid_for_seconds(),
+        period_seconds: value.period_seconds(),
+    })
 }
 
 #[tauri::command]
@@ -250,87 +304,6 @@ pub fn reveal_entry_custom_field(
 }
 
 #[tauri::command]
-pub fn update_entry(
-    request: UpdateEntryRequestDto,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.update_entry(request))
-}
-
-#[tauri::command]
-pub fn create_entry(
-    request: CreateEntryRequestDto,
-    state: State<'_, AppState>,
-) -> Result<CreatedEntryDto, DesktopErrorDto> {
-    with_service(state, |service| service.create_entry(request))
-}
-
-#[tauri::command]
-pub fn delete_entry(
-    entry_id: String,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.delete_entry(entry_id))
-}
-
-#[tauri::command]
-pub fn move_entry(
-    request: MoveEntryRequestDto,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.move_entry(request))
-}
-
-#[tauri::command]
-pub fn create_group(
-    request: CreateGroupRequestDto,
-    state: State<'_, AppState>,
-) -> Result<CreatedGroupDto, DesktopErrorDto> {
-    with_service(state, |service| service.create_group(request))
-}
-
-#[tauri::command]
-pub fn rename_group(
-    request: RenameGroupRequestDto,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.rename_group(request))
-}
-
-#[tauri::command]
-pub fn move_group(
-    request: MoveGroupRequestDto,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.move_group(request))
-}
-
-#[tauri::command]
-pub fn delete_group(
-    group_id: String,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.delete_group(group_id))
-}
-
-#[tauri::command]
-pub fn set_entry_custom_field(
-    request: SetCustomFieldRequestDto,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.set_custom_field(request))
-}
-
-#[tauri::command]
-pub fn delete_entry_custom_field(
-    entry_id: String,
-    name: String,
-    state: State<'_, AppState>,
-) -> Result<VaultSnapshotDto, DesktopErrorDto> {
-    with_service(state, |service| service.delete_custom_field(entry_id, name))
-}
-
-#[tauri::command]
 pub async fn close_policy(state: State<'_, AppState>) -> Result<ClosePolicyDto, DesktopErrorDto> {
     crate::close_trace::trace("RUST_CLOSE_POLICY_ENTER");
     let state = state.inner().clone();
@@ -352,22 +325,6 @@ pub async fn close_policy(state: State<'_, AppState>) -> Result<ClosePolicyDto, 
     })
     .await
     .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?
-}
-
-#[tauri::command]
-pub async fn copy_entry_username(
-    entry_id: String,
-    state: State<'_, AppState>,
-) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
-    copy_entry(entry_id, state.inner().clone(), false).await
-}
-
-#[tauri::command]
-pub async fn copy_entry_password(
-    entry_id: String,
-    state: State<'_, AppState>,
-) -> Result<ClipboardReceiptDto, DesktopErrorDto> {
-    copy_entry(entry_id, state.inner().clone(), true).await
 }
 
 #[tauri::command]
@@ -400,24 +357,31 @@ mod tests {
         },
     };
 
+    use kdbx::KdbxCredential;
     use serde::de::DeserializeOwned;
     use serde_json::{Value, from_str, from_value, json, to_value};
     use tauri::{
         Manager,
         test::{mock_app, mock_builder, mock_context, noop_assets},
     };
-    use vault_core::{EntryId, SecretString};
+    use vault_core::{EntryId, SecretBytes, SecretString};
     use vault_session::VaultSession;
 
     use super::{
-        close_policy, copy_entry_password, copy_entry_username, create_entry, create_group,
-        create_vault, create_vault_with_picker, delete_entry, delete_entry_custom_field,
-        delete_group, delete_sync_profile, discard_changes_and_lock, entry_detail, lock_vault,
-        move_entry, move_group, reload_vault, rename_group, reset_sync_state,
-        resolve_browser_connection, resolve_sync_conflict, reveal_entry_custom_field,
-        reveal_entry_notes, reveal_entry_password, reveal_entry_title, reveal_entry_url,
-        reveal_entry_username, runtime_info, save_sync_profile, save_vault, select_vault,
-        set_entry_custom_field, sync_now, sync_profiles, test_sync_provider, update_entry,
+        change_master_password, clear_keyfile, close_policy, copy_entry_custom_field,
+        copy_entry_notes, copy_entry_password, copy_entry_title, copy_entry_totp_code,
+        copy_entry_url, copy_entry_username, create_entry, create_group, create_vault,
+        create_vault_with_picker, credential_has_password, delete_entry, delete_entry_custom_field,
+        delete_group, delete_sync_profile, discard_changes_and_lock, duplicate_entry, entry_detail,
+        entry_history, lock_vault, move_entries, move_entry, move_group, password_health_report,
+        permanently_delete_entries, permanently_delete_entry, permanently_delete_group,
+        reload_vault, remove_master_password, rename_group, reset_sync_state,
+        resolve_browser_connection, resolve_sync_conflict, restore_entries, restore_entry,
+        restore_entry_history, restore_group, reveal_entry_custom_field, reveal_entry_notes,
+        reveal_entry_password, reveal_entry_title, reveal_entry_totp, reveal_entry_url,
+        reveal_entry_username, runtime_info, save_sync_profile, save_vault, select_keyfile,
+        select_vault, set_entry_custom_field, set_entry_tags, sync_now, sync_profiles,
+        test_sync_provider, trash_entries, unlock_vault_with_keyfile, update_entry,
     };
     use crate::{
         browser_bridge::BrowserBridgeState,
@@ -425,8 +389,10 @@ mod tests {
         dto::ClosePolicyDto,
         errors::DesktopErrorDto,
         mutations::{
-            CreateEntryRequestDto, CreateGroupRequestDto, MoveEntryRequestDto, MoveGroupRequestDto,
-            RenameGroupRequestDto, SetCustomFieldRequestDto, UpdateEntryRequestDto,
+            BulkDeleteEntriesRequestDto, BulkMoveEntriesRequestDto, BulkRestoreEntriesRequestDto,
+            BulkTrashEntriesRequestDto, CreateEntryRequestDto, CreateGroupRequestDto,
+            MoveEntryRequestDto, MoveGroupRequestDto, RenameGroupRequestDto,
+            SetCustomFieldRequestDto, SetEntryTagsRequestDto, UpdateEntryRequestDto,
         },
         state::{AppState, DesktopError},
         sync::{
@@ -484,6 +450,45 @@ mod tests {
         assert_eq!(
             to_value(error).expect("stable error should serialize"),
             json!({ "code": "operation_in_progress" })
+        );
+    }
+
+    #[test]
+    fn keyfile_commands_share_the_vault_operation_gate_and_clear_through_the_wrapper() {
+        let app = mock_app();
+        app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let state = app.state::<AppState>();
+        let active = state
+            .begin_vault_operation()
+            .expect("first operation should acquire the gate");
+
+        let result =
+            tauri::async_runtime::block_on(select_keyfile(app.handle().clone(), state.clone()));
+        let Err(error) = result else {
+            panic!("busy keyfile command must fail before opening the picker");
+        };
+        assert_eq!(
+            to_value(error).expect("stable busy error"),
+            json!({ "code": "operation_in_progress" })
+        );
+
+        drop(active);
+        assert!(clear_keyfile(state).is_ok());
+    }
+
+    #[test]
+    fn keyfile_unlock_command_preserves_typed_service_failures() {
+        let app = mock_app();
+        app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let state = app.state::<AppState>();
+
+        let result = tauri::async_runtime::block_on(unlock_vault_with_keyfile(None, state));
+        let Err(error) = result else {
+            panic!("unlock without a selected vault must fail");
+        };
+        assert_eq!(
+            to_value(error).expect("stable unlock error"),
+            json!({ "code": "no_vault_selected" })
         );
     }
 
@@ -742,11 +747,98 @@ mod tests {
             .expect("external save should succeed");
 
         let Ok(reloaded) =
-            tauri::async_runtime::block_on(reload_vault("demopass".to_owned(), state))
+            tauri::async_runtime::block_on(reload_vault(Some("demopass".to_owned()), state))
         else {
             panic!("reload command should succeed");
         };
         assert!(!reloaded.dirty);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_rotation_command_uses_operation_gate_and_returns_safe_snapshot() {
+        let (_directory, path, app) = writable_app();
+        let state = app.state::<AppState>();
+        let lease = state
+            .begin_vault_operation()
+            .expect("operation gate should be available");
+        let blocked = tauri::async_runtime::block_on(change_master_password(
+            "public-rotation-a".to_owned(),
+            state.clone(),
+        ));
+        let Err(error) = blocked else {
+            panic!("rotation should respect operation gate");
+        };
+        assert_eq!(
+            to_value(error).expect("stable busy error should serialize"),
+            json!({ "code": "operation_in_progress" })
+        );
+        drop(lease);
+
+        let rotated = tauri::async_runtime::block_on(change_master_password(
+            "public-rotation-b".to_owned(),
+            state,
+        ));
+        let Ok(rotated) = rotated else {
+            panic!("rotation command should succeed");
+        };
+        assert!(!rotated.dirty);
+        let serialized = to_value(&rotated).expect("snapshot should serialize");
+        assert!(!serialized.to_string().contains("public-rotation-b"));
+        assert!(
+            VaultSession::open(&path, &SecretString::new("public-rotation-b".to_owned())).is_ok()
+        );
+        assert!(VaultSession::open(&path, &SecretString::new("demopass".to_owned())).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_master_command_fails_without_keyfile_and_obeys_gate_with_safe_snapshot() {
+        const KEYFILE: &[u8] = b"public-command-keyfile-factor";
+        let (_directory, path, app) = writable_app();
+        let state = app.state::<AppState>();
+        let before = fs::read(&path).expect("original source");
+        let Err(no_keyfile) = tauri::async_runtime::block_on(remove_master_password(state.clone()))
+        else {
+            panic!("password-only vault cannot remove its only factor");
+        };
+        assert_eq!(
+            to_value(no_keyfile).expect("stable error"),
+            json!({ "code": "invalid_request" })
+        );
+        assert_eq!(fs::read(&path).expect("untouched source"), before);
+        {
+            let mut service = state.service.lock().expect("service lock");
+            service
+                .replace_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+                .expect("add keyfile");
+        }
+        let lease = state.begin_vault_operation().expect("acquire gate");
+        let Err(blocked) = tauri::async_runtime::block_on(remove_master_password(state.clone()))
+        else {
+            panic!("concurrent credential mutation must fail");
+        };
+        assert_eq!(
+            to_value(blocked).expect("stable busy error"),
+            json!({ "code": "operation_in_progress" })
+        );
+        drop(lease);
+        let Ok(snapshot) = tauri::async_runtime::block_on(remove_master_password(state.clone()))
+        else {
+            panic!("keyfile-backed removal should succeed");
+        };
+        assert!(!snapshot.dirty);
+        let json = to_value(&snapshot).expect("safe snapshot").to_string();
+        assert!(!json.contains("public-command-keyfile-factor"));
+        assert!(!json.contains("demopass"));
+        let Ok(false) = credential_has_password(state) else {
+            panic!("status should show no retained password");
+        };
+        assert!(
+            VaultSession::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)),)
+                .is_ok()
+        );
+        assert!(VaultSession::open(&path, &SecretString::new("demopass".to_owned())).is_err());
     }
 
     #[test]
@@ -763,6 +855,12 @@ mod tests {
             DesktopError::GroupNotFound,
             DesktopError::InvalidRequest,
             DesktopError::InvalidMove,
+            DesktopError::HistoryChanged,
+            DesktopError::HistoryRestoreUnsupported,
+            DesktopError::AttachmentNotFound,
+            DesktopError::AttachmentAlreadyExists,
+            DesktopError::AttachmentTooLarge,
+            DesktopError::AttachmentIoFailed,
             DesktopError::ReservedField,
             DesktopError::SecretUnavailable,
             DesktopError::UnsavedChanges,
@@ -845,7 +943,7 @@ mod tests {
             tauri::async_runtime::block_on(sync_now(
                 saved.profile_id.clone(),
                 empty_credentials(),
-                "SYNTHETIC_MASTER_PASSWORD".to_owned(),
+                Some("SYNTHETIC_MASTER_PASSWORD".to_owned()),
                 state.clone(),
                 runtime.clone(),
             ))
@@ -900,6 +998,13 @@ mod tests {
             .expect("fixture username entry")
             .id
             .clone();
+        let url_id = snapshot
+            .entries
+            .iter()
+            .find(|entry| !matches!(entry.url, crate::dto::SummaryTextDto::Missing))
+            .expect("fixture URL entry")
+            .id
+            .clone();
 
         let Ok(detail) = entry_detail(password_id.clone(), state.clone()) else {
             panic!("entry detail should succeed");
@@ -909,8 +1014,12 @@ mod tests {
             panic!("password reveal should succeed");
         };
         assert!(!password.is_empty());
-        assert!(reveal_entry_notes(notes_id, state.clone()).is_ok());
+        assert!(reveal_entry_notes(notes_id.clone(), state.clone()).is_ok());
 
+        assert!(
+            tauri::async_runtime::block_on(copy_entry_title(password_id.clone(), state.clone()))
+                .is_ok()
+        );
         let Ok(password_receipt) =
             tauri::async_runtime::block_on(copy_entry_password(password_id, state.clone()))
         else {
@@ -921,7 +1030,391 @@ mod tests {
         assert!(
             tauri::async_runtime::block_on(copy_entry_username(username_id, state.clone())).is_ok()
         );
+        assert!(tauri::async_runtime::block_on(copy_entry_url(url_id, state.clone())).is_ok());
+        assert!(tauri::async_runtime::block_on(copy_entry_notes(notes_id, state.clone())).is_ok());
         assert!(tauri::async_runtime::block_on(lock_vault(state)).is_ok());
+    }
+
+    #[test]
+    fn totp_commands_generate_and_copy_only_ephemeral_codes() {
+        const URI: &str = "otpauth://totp/NianPass:test?secret=JBSWY3DPEHPK3PXP&period=30&digits=6";
+        let app = unlocked_app();
+        let state = app.state::<AppState>();
+        let entry_id = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should exist")
+            .entries
+            .first()
+            .expect("fixture entry")
+            .id
+            .clone();
+
+        let Ok(configured) = update_entry(
+            request::<UpdateEntryRequestDto>(json!({
+                "entryId": entry_id,
+                "totpEnabled": true,
+                "totpUri": URI
+            })),
+            state.clone(),
+        ) else {
+            panic!("TOTP configuration should succeed");
+        };
+        assert!(
+            configured
+                .entries
+                .iter()
+                .any(|entry| { entry.id == entry_id && entry.totp_present })
+        );
+        let configured_json = to_value(&configured)
+            .expect("snapshot should serialize")
+            .to_string();
+        assert!(!configured_json.contains("JBSWY3DPEHPK3PXP"));
+        assert!(!configured_json.contains("otpauth"));
+
+        let Ok(revealed) = reveal_entry_totp(entry_id.clone(), state.clone()) else {
+            panic!("TOTP reveal should generate an ephemeral code");
+        };
+        assert!(revealed.code.bytes().all(|byte| byte.is_ascii_digit()));
+        assert_eq!(revealed.code.len(), 6);
+        assert!(revealed.valid_for_seconds > 0);
+        assert!(revealed.valid_for_seconds <= revealed.period_seconds);
+
+        let Ok(receipt) =
+            tauri::async_runtime::block_on(copy_entry_totp_code(entry_id, state.clone()))
+        else {
+            panic!("TOTP copy should succeed");
+        };
+        let receipt_json = to_value(receipt)
+            .expect("receipt should serialize")
+            .to_string();
+        assert!(!receipt_json.contains(&revealed.code));
+        assert!(!receipt_json.contains("JBSWY3DPEHPK3PXP"));
+
+        assert!(tauri::async_runtime::block_on(discard_changes_and_lock(state)).is_ok());
+    }
+
+    #[test]
+    fn password_health_command_is_secret_free_and_read_only() {
+        let app = unlocked_app();
+        let state = app.state::<AppState>();
+        let before = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should exist");
+        let Ok(report) = password_health_report(state.clone()) else {
+            panic!("password health report should succeed");
+        };
+        assert!(report.password_entries <= report.total_entries);
+        assert_eq!(report.minimum_length, kdbx::PASSWORD_POLICY_MIN_LENGTH);
+        let encoded = to_value(report)
+            .expect("password health report should serialize")
+            .to_string();
+        assert!(!encoded.contains("demopass"));
+        assert!(!encoded.contains("fingerprint"));
+        assert!(!encoded.contains("passwordValue"));
+        let after = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should remain available");
+        assert_eq!(before.dirty, after.dirty);
+    }
+
+    #[test]
+    fn history_commands_keep_revisions_secret_free_and_revalidate_staleness() {
+        let (_directory, _path, app) = writable_app();
+        let state = app.state::<AppState>();
+        let before = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should exist");
+        let entry = before
+            .entries
+            .iter()
+            .find(|entry| matches!(entry.title, crate::dto::SummaryTextDto::Visible { .. }))
+            .expect("fixture should contain a visible title")
+            .clone();
+        let original_title = match &entry.title {
+            crate::dto::SummaryTextDto::Visible { value } => value.clone(),
+            _ => panic!("selected title should be visible"),
+        };
+
+        let Ok(_) = update_entry(
+            request::<UpdateEntryRequestDto>(json!({
+                "entryId": entry.id,
+                "title": "History command after"
+            })),
+            state.clone(),
+        ) else {
+            panic!("history preparation update should succeed");
+        };
+        let Ok(history) = entry_history(entry.id.clone(), state.clone()) else {
+            panic!("history command should succeed");
+        };
+        assert_eq!(history.items.len(), 1);
+        let encoded = to_value(&history).expect("history should serialize");
+        assert_eq!(encoded["documentRevision"].as_str(), Some("1"));
+        assert!(encoded.to_string().contains(&original_title));
+        assert!(!encoded.to_string().contains("demopass"));
+        assert!(encoded.get("password").is_none());
+
+        let Ok(restored) = restore_entry_history(
+            entry.id.clone(),
+            history.items[0].index,
+            history.document_revision.clone(),
+            state.clone(),
+        ) else {
+            panic!("history restore command should succeed");
+        };
+        let restored_entry = restored
+            .entries
+            .iter()
+            .find(|candidate| candidate.id == entry.id)
+            .expect("restored entry should remain");
+        assert!(matches!(
+            &restored_entry.title,
+            crate::dto::SummaryTextDto::Visible { value } if value == &original_title
+        ));
+
+        let Ok(fresh_history) = entry_history(entry.id.clone(), state.clone()) else {
+            panic!("fresh history should list");
+        };
+        let Ok(_) = update_entry(
+            request::<UpdateEntryRequestDto>(json!({
+                "entryId": entry.id,
+                "title": "History command newer"
+            })),
+            state.clone(),
+        ) else {
+            panic!("newer history update should succeed");
+        };
+        let Err(stale) = restore_entry_history(entry.id, 0, fresh_history.document_revision, state)
+        else {
+            panic!("stale history restore must fail");
+        };
+        assert_eq!(
+            to_value(stale).expect("stale history error should serialize"),
+            json!({ "code": "history_changed" })
+        );
+    }
+
+    #[test]
+    fn bulk_entry_commands_are_atomic_and_keep_trash_semantics_explicit() {
+        let (_directory, _path, app) = writable_app();
+        let state = app.state::<AppState>();
+        let root = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should exist")
+            .root_group_id;
+
+        let Ok(destination) = create_group(
+            request::<CreateGroupRequestDto>(json!({
+                "parentGroupId": root,
+                "name": "Bulk destination"
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk destination should be created");
+        };
+        let destination_id = destination.created_group_id;
+
+        let create_bulk_entry = |title: &str| {
+            let Ok(created) = create_entry(
+                request::<CreateEntryRequestDto>(json!({
+                    "groupId": root,
+                    "title": title,
+                    "username": "",
+                    "url": "",
+                    "password": null,
+                    "notes": null
+                })),
+                state.clone(),
+            ) else {
+                panic!("bulk fixture entry should be created");
+            };
+            created.created_entry_id
+        };
+        let first = create_bulk_entry("Bulk first");
+        let second = create_bulk_entry("Bulk second");
+
+        let Ok(moved) = move_entries(
+            request::<BulkMoveEntriesRequestDto>(json!({
+                "entryIds": [first, second],
+                "destinationGroupId": destination_id
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk move should succeed");
+        };
+        for entry_id in [&first, &second] {
+            let entry = moved
+                .entries
+                .iter()
+                .find(|entry| &entry.id == entry_id)
+                .expect("moved entry should remain projected");
+            assert_eq!(entry.group_id, destination_id);
+        }
+
+        let Err(duplicate) = move_entries(
+            request::<BulkMoveEntriesRequestDto>(json!({
+                "entryIds": [first, first],
+                "destinationGroupId": root
+            })),
+            state.clone(),
+        ) else {
+            panic!("duplicate bulk IDs must fail");
+        };
+        assert_eq!(
+            to_value(duplicate).expect("bulk validation error should serialize"),
+            json!({ "code": "invalid_request" })
+        );
+        let after_rejected_move = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should exist");
+        assert!([&first, &second].iter().all(|entry_id| {
+            after_rejected_move
+                .entries
+                .iter()
+                .find(|entry| &entry.id == *entry_id)
+                .is_some_and(|entry| entry.group_id == destination_id)
+        }));
+
+        let Ok(trashed) = trash_entries(
+            request::<BulkTrashEntriesRequestDto>(json!({
+                "entryIds": [first, second]
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk Trash should succeed");
+        };
+        let recycle_bin_id = trashed
+            .recycle_bin_group_id
+            .clone()
+            .expect("bulk Trash should materialize the recycle bin");
+        assert!([&first, &second].iter().all(|entry_id| {
+            trashed
+                .entries
+                .iter()
+                .find(|entry| &entry.id == *entry_id)
+                .is_some_and(|entry| entry.group_id == recycle_bin_id)
+        }));
+
+        let third = create_bulk_entry("Bulk third");
+        let Err(recycled_source_move) = move_entries(
+            request::<BulkMoveEntriesRequestDto>(json!({
+                "entryIds": [first],
+                "destinationGroupId": root
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk Move must not move a recycled entry directly");
+        };
+        assert_eq!(
+            to_value(recycled_source_move).expect("recycled source error should serialize"),
+            json!({ "code": "invalid_request" })
+        );
+
+        let Ok(restored) = restore_entries(
+            request::<BulkRestoreEntriesRequestDto>(json!({
+                "entryIds": [first, second]
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk Restore should succeed");
+        };
+        assert!([&first, &second].iter().all(|entry_id| {
+            restored
+                .entries
+                .iter()
+                .find(|entry| &entry.id == *entry_id)
+                .is_some_and(|entry| entry.group_id == destination_id)
+        }));
+
+        let Ok(retrashed) = trash_entries(
+            request::<BulkTrashEntriesRequestDto>(json!({
+                "entryIds": [first, second]
+            })),
+            state.clone(),
+        ) else {
+            panic!("restored entries should be trashable again");
+        };
+        assert!([&first, &second].iter().all(|entry_id| {
+            retrashed
+                .entries
+                .iter()
+                .find(|entry| &entry.id == *entry_id)
+                .is_some_and(|entry| entry.group_id == recycle_bin_id)
+        }));
+
+        let mixed_live = create_bulk_entry("Bulk mixed live");
+        let Err(mixed_delete) = permanently_delete_entries(
+            request::<BulkDeleteEntriesRequestDto>(json!({
+                "entryIds": [first, mixed_live]
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk permanent delete must reject mixed live/recycled entries");
+        };
+        assert_eq!(
+            to_value(mixed_delete).expect("mixed delete error should serialize"),
+            json!({ "code": "invalid_request" })
+        );
+
+        let Ok(deleted) = permanently_delete_entries(
+            request::<BulkDeleteEntriesRequestDto>(json!({
+                "entryIds": [first, second]
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk permanent delete should succeed for recycled entries");
+        };
+        assert!(
+            [&first, &second]
+                .iter()
+                .all(|entry_id| deleted.entries.iter().all(|entry| &entry.id != *entry_id))
+        );
+        assert!(deleted.entries.iter().any(|entry| entry.id == mixed_live));
+
+        let Err(recycle_move) = move_entries(
+            request::<BulkMoveEntriesRequestDto>(json!({
+                "entryIds": [third],
+                "destinationGroupId": recycle_bin_id
+            })),
+            state.clone(),
+        ) else {
+            panic!("bulk Move must not bypass Trash semantics");
+        };
+        assert_eq!(
+            to_value(recycle_move).expect("recycle move error should serialize"),
+            json!({ "code": "invalid_request" })
+        );
+        let final_snapshot = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .snapshot()
+            .expect("snapshot should exist");
+        assert!(
+            final_snapshot
+                .entries
+                .iter()
+                .find(|entry| entry.id == third)
+                .is_some_and(|entry| entry.group_id == root)
+        );
     }
 
     #[test]
@@ -980,6 +1473,21 @@ mod tests {
         );
 
         assert!(
+            set_entry_tags(
+                request::<SetEntryTagsRequestDto>(json!({
+                    "entryId": entry,
+                    "tags": ["finance", "primary"]
+                })),
+                state.clone(),
+            )
+            .is_ok()
+        );
+        let Ok(tagged) = entry_detail(entry.clone(), state.clone()) else {
+            panic!("tagged detail should be available");
+        };
+        assert_eq!(tagged.tags, ["finance", "primary"]);
+
+        assert!(
             set_entry_custom_field(
                 request::<SetCustomFieldRequestDto>(json!({
                     "entryId": entry,
@@ -1001,6 +1509,13 @@ mod tests {
             .as_deref(),
             Some("M4.3-COMMAND-CUSTOM")
         );
+        let custom_copy = tauri::async_runtime::block_on(copy_entry_custom_field(
+            entry.clone(),
+            "M4.3 command custom".to_owned(),
+            state.clone(),
+        ));
+        assert!(custom_copy.is_ok());
+
         assert!(
             delete_entry_custom_field(
                 entry.clone(),
@@ -1023,6 +1538,11 @@ mod tests {
         ) else {
             panic!("entry command should create");
         };
+        let Ok(duplicated) = duplicate_entry(created.created_entry_id.clone(), state.clone())
+        else {
+            panic!("entry command should duplicate");
+        };
+        assert!(duplicated.created_entry_id != created.created_entry_id);
         assert!(
             move_entry(
                 request::<MoveEntryRequestDto>(json!({
@@ -1033,7 +1553,30 @@ mod tests {
             )
             .is_ok()
         );
-        assert!(delete_entry(created.created_entry_id, state.clone()).is_ok());
+        assert!(
+            permanently_delete_entry(created.created_entry_id.clone(), state.clone()).is_err(),
+            "permanent entry deletion must be rejected outside Trash"
+        );
+        let Ok(trashed_entry) = delete_entry(created.created_entry_id.clone(), state.clone())
+        else {
+            panic!("entry should move to Trash");
+        };
+        let recycle_bin = trashed_entry
+            .recycle_bin_group_id
+            .clone()
+            .expect("Trash should exist after first soft delete");
+        assert!(trashed_entry.entries.iter().any(|candidate| {
+            candidate.id == created.created_entry_id && candidate.group_id == recycle_bin
+        }));
+        let Ok(restored_entry) = restore_entry(created.created_entry_id.clone(), state.clone())
+        else {
+            panic!("entry restore should succeed");
+        };
+        assert!(restored_entry.entries.iter().any(|candidate| {
+            candidate.id == created.created_entry_id && candidate.group_id != recycle_bin
+        }));
+        assert!(delete_entry(created.created_entry_id.clone(), state.clone()).is_ok());
+        assert!(permanently_delete_entry(created.created_entry_id.clone(), state.clone()).is_ok());
 
         let Ok(group) = create_group(
             request::<CreateGroupRequestDto>(json!({
@@ -1073,7 +1616,39 @@ mod tests {
             )
             .is_ok()
         );
-        assert!(delete_group(group_destination.created_group_id, state.clone()).is_ok());
+        assert!(
+            permanently_delete_group(group_destination.created_group_id.clone(), state.clone())
+                .is_err(),
+            "permanent group deletion must be rejected outside Trash"
+        );
+        let Ok(trashed_group) =
+            delete_group(group_destination.created_group_id.clone(), state.clone())
+        else {
+            panic!("group subtree should move to Trash");
+        };
+        let recycle_bin = trashed_group
+            .recycle_bin_group_id
+            .clone()
+            .expect("Trash should remain available");
+        assert!(
+            trashed_group
+                .groups
+                .iter()
+                .any(|candidate| { candidate.id == group_destination.created_group_id })
+        );
+        let Ok(restored_group) =
+            restore_group(group_destination.created_group_id.clone(), state.clone())
+        else {
+            panic!("group restore should succeed");
+        };
+        assert!(restored_group.groups.iter().any(|candidate| {
+            candidate.id == group_destination.created_group_id && candidate.id != recycle_bin
+        }));
+        assert!(delete_group(group_destination.created_group_id.clone(), state.clone()).is_ok());
+        assert!(
+            permanently_delete_group(group_destination.created_group_id.clone(), state.clone())
+                .is_ok()
+        );
 
         assert!(matches!(
             tauri::async_runtime::block_on(close_policy(state.clone())),

@@ -153,33 +153,43 @@ documented destination-DACL, EFS, compression, and named-stream merge contract.
 They therefore cannot safely replace a restrictive vault with a temp that may
 have inherited a broader directory DACL.
 
-Safe public wrappers were evaluated rather than introducing local Win32 FFI.
-This is historical M3.1 evidence, not a claim that Rust 1.98.0 changed the
-result; Windows writes remain disabled until that platform is reevaluated.
-`winsafe` 0.0.28 exposes `ReplaceFileW`, but accepts UTF-8 strings rather than
-arbitrary Windows paths and cannot strengthen the operating-system failure
-contract. `atomic-write-file` 0.3.1, `atomicwrites` 0.4.4, and `safe-write` 0.2.0
-use rename/`MoveFileExW` on Windows and do not preserve the required destination
-security metadata. `windows-acl` 0.3.0 can inspect or modify ACLs but does not
-supply an atomic replacement primitive, and applying a DACL after publication
-would create an unacceptable exposure window. No dependency was added.
+The current tree now isolates the required unsafe Win32 call in the narrow
+`windows-safe-replace` crate. It calls `ReplaceFileW` with UTF-16 paths, a real
+backup name, null reserved pointers, and zero flags, so ACL/merge errors are not
+ignored. M7 may use that boundary when applying an already-encrypted sync
+candidate. This does not relax the separate ordinary-Save policy.
 
 The first-backup case remains a separate blocker: publishing a new `.bak` must
 not expose a temp with broader inherited access than the primary, and this must
-be established before its name becomes visible. The current Forgejo
-infrastructure has a Windows cross-compilation job but no native Windows runner,
-so destination and backup DACL behavior cannot receive the required runtime
-evidence here. Until an operation satisfies both the replacement failure
-contract and first-backup security contract, followed by native DACL tests,
-`SAVE_SUPPORTED` remains false on Windows.
+be established before its name becomes visible. Ordinary Forgejo CI still has
+only Windows cross-compilation, while the manual GitHub
+`windows-runtime-diagnostic` workflow now runs native `windows-safe-replace`
+tests including a destination-versus-prepared DACL mismatch, then verifies the
+result and first backup both retain the original primary DACL. It also runs the
+`vault-session` replacement transaction tests, including recovery after a
+simulated `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`-style partial move. The same
+native job now exercises the complete candidate ordinary-Save pipeline through
+serialization, temp verification, `ReplaceFileW`, exact previous-generation
+backup verification, final reopen, and semantic verification. It also proves a
+second successful Save rotates the backup to the exact encrypted primary it
+replaces, a wrong credential leaves both primary and backup untouched, and an
+external-generation conflict preserves the external primary and existing backup.
+The native candidate path also reopens successful keyfile-only and
+password-plus-keyfile saves with the same composite authority. A separate regression proves
+the public Save entry point remains fail-closed. This test-only
+candidate path does not change product capability. A reviewed native workflow
+run is still required before this is accepted as runtime evidence, and a
+separate policy review is required before ordinary Save can use the primitive. Until then,
+`SAVE_SUPPORTED` remains false on Windows and the architecture guard rejects an
+accidental enablement.
 
 ## Platform behavior
 
-| Platform | Atomic replacement implementation | Parent directory sync | Runtime evidence |
-|---|---|---|---|
-| Linux/Unix | Same-filesystem `std::fs::rename` replacement; destination is never removed first | Directory handle `sync_all` | Linux tests passed |
-| macOS | Unix replacement and directory sync implementation | Directory handle `sync_all` | Not runtime tested |
-| Windows | Write persistence explicitly unsupported after M3.1 primitive evaluation; typed fail-closed error before transaction I/O | Not applicable while writes are disabled | Local `x86_64-pc-windows-gnu --all-targets` check passed and CI gate configured; native runtime and DACL behavior not tested |
+| Platform   | Atomic replacement implementation                                                                                | Parent directory sync                        | Runtime evidence                                                                                                                                                                                             |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Linux/Unix | Same-filesystem `std::fs::rename` replacement; destination is never removed first                                | Directory handle `sync_all`                  | Linux tests passed                                                                                                                                                                                           |
+| macOS      | Unix replacement and directory sync implementation                                                               | Directory handle `sync_all`                  | Not runtime tested                                                                                                                                                                                           |
+| Windows    | Ordinary Save is explicitly unsupported; M7 sync local-apply uses the isolated zero-flag `ReplaceFileW` boundary | Ordinary Save: not applicable while disabled | Manual `windows-runtime-diagnostic` covers native byte/DACL/transaction tests plus the full test-only ordinary-Save candidate pipeline and public fail-closed regression; a reviewed run is still required before accepting runtime evidence |
 
 If the replacement primitive fails on a filesystem, save fails safely. M3 does
 not downgrade to truncating the primary. Cloud-synchronized folders, network
@@ -206,14 +216,14 @@ post-commit: no baseline is accepted and the session remains dirty/unreconciled.
 The desktop preserves that commit-boundary distinction with a small stable
 error surface:
 
-| Session failure | Desktop code | Session state implication |
-|---|---|---|
-| Ordinary pre-commit failure | `save_failed` | Normally remains dirty; the primary was not replaced |
-| `CredentialMismatch` | `save_authentication_failed` | Remains dirty; credential validation precedes replacement |
-| `ExternalModificationDetected` | `external_change` | The pre-commit external generation is retained and the session remains dirty |
-| `FinalExternalModificationDetected` | `external_change` | Another writer changed the target after Nian Pass replaced it; no final generation is accepted |
-| `FinalReadFailed` or `FinalVerificationFailed` | `save_uncertain` | Replacement occurred before final verification and baseline reconciliation; the session remains dirty/unreconciled |
-| Backup update/durability failure or `DurabilityUncertain` | `save_uncertain` | The canonical baseline may already be updated and the session may be clean |
+| Session failure                                           | Desktop code                 | Session state implication                                                                                          |
+| --------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Ordinary pre-commit failure                               | `save_failed`                | Normally remains dirty; the primary was not replaced                                                               |
+| `CredentialMismatch`                                      | `save_authentication_failed` | Remains dirty; credential validation precedes replacement                                                          |
+| `ExternalModificationDetected`                            | `external_change`            | The pre-commit external generation is retained and the session remains dirty                                       |
+| `FinalExternalModificationDetected`                       | `external_change`            | Another writer changed the target after Nian Pass replaced it; no final generation is accepted                     |
+| `FinalReadFailed` or `FinalVerificationFailed`            | `save_uncertain`             | Replacement occurred before final verification and baseline reconciliation; the session remains dirty/unreconciled |
+| Backup update/durability failure or `DurabilityUncertain` | `save_uncertain`             | The canonical baseline may already be updated and the session may be clean                                         |
 
 `save_uncertain` therefore does not imply either success or failure, and it does
 not imply a particular dirty value. The frontend refreshes `vault_snapshot`,
@@ -258,8 +268,16 @@ in-memory edits. Although `SecretString` zeroizes its owned buffer, the complete
 `keepass-rs::Database` contains ordinary allocated strings. M3 cannot guarantee
 immediate physical erasure of every prior plaintext allocation.
 
-There is no Save As/export, master-password rotation, keyfile support, automatic
-backup recovery, file watcher, autosave timer, cloud merge, or background task.
+There is no canonical-path retargeting Save As, hardware-key challenge-response, automatic backup recovery, file
+watcher, autosave timer, cloud merge, or background task. Desktop credential rotation is an
+explicit clean-session transaction: master-password changes preserve any retained keyfile,
+keyfile add/replace preserves the retained password, and keyfile removal is refused if it would
+remove the final credential component. Each rotation authenticates the current encrypted
+generation, writes and verifies a candidate under the replacement composite credential, preserves
+the exact prior encrypted generation as backup, and updates retained authority only after a
+verified commit. Uncertain post-replacement failures reconcile old versus new authority against
+the canonical generation before changing retained state. Rotation never absorbs dirty edits as an
+implicit Save.
 
 M4.5 inactivity handling does not alter this persistence contract. Clean idle
 state calls ordinary `lock_vault`; dirty idle state is visually shielded and
@@ -303,3 +321,7 @@ honor local descriptor sync as durable cloud commit. A residual writer race
 exists between final source check and destructive write; read-back detects final
 candidate loss but cannot eliminate every interleaving. Providers without a
 persisted writable grant are browse-only and return `persistence_unsupported`.
+
+### Verified encrypted export copy
+
+Desktop `export_vault_copy` is separate from ordinary Save. It serializes the current Rust-owned in-memory document, including dirty local edits, with the retained composite credential into a private same-directory temporary file. Rust reopens and semantic-verifies the candidate, publishes it only to a previously nonexistent destination, reopens the published file, and syncs the destination directory where supported. Existing destinations are refused rather than overwritten. The selected canonical source, source fingerprint, dirty revision, and sync binding do not change.

@@ -1,8 +1,7 @@
 use sync_provider_core::CiphertextDigest;
 use thiserror::Error;
-use vault_core::SecretString;
 
-use crate::SourceBinding;
+use crate::{SourceBinding, SyncCredential};
 
 /// Clean exact local generation captured before network work.
 pub struct LocalSnapshot {
@@ -84,6 +83,6 @@ pub trait LocalVault: Send + Sync {
         &self,
         expected: &LocalSnapshot,
         ciphertext: &[u8],
-        master_password: &SecretString,
+        credential: &SyncCredential,
     ) -> Result<(), LocalCommitError>;
 }

@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use sync_engine::{LocalCommitError, LocalSnapshot, LocalVault, SourceBinding};
-use vault_core::SecretString;
+use sync_engine::{LocalCommitError, LocalSnapshot, LocalVault, SourceBinding, SyncCredential};
 
 use crate::state::{DesktopError, DesktopVaultService};
 
@@ -36,7 +35,7 @@ impl LocalVault for DesktopLocal {
         &self,
         expected: &LocalSnapshot,
         ciphertext: &[u8],
-        master_password: &SecretString,
+        credential: &SyncCredential,
     ) -> Result<(), LocalCommitError> {
         self.service
             .lock()
@@ -46,7 +45,7 @@ impl LocalVault for DesktopLocal {
                 expected.authority_token(),
                 expected.digest().as_str(),
                 ciphertext,
-                master_password,
+                credential.as_kdbx(),
             )
             .map_err(map_desktop_error)
     }

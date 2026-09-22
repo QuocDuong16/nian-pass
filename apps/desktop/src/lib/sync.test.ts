@@ -44,6 +44,8 @@ const gatewayProfile = {
 
 const snapshot = {
   dirty: false,
+  recycleBinEnabled: true,
+  recycleBinGroupId: null,
   fileName: "fixture.kdbx",
   capabilities: {
     formatVersion: "4.1",

@@ -45,7 +45,7 @@ futures-util = "=0.3.32"
 http-body-util = "=0.1.5"
 hyper = { version = "=1.11.0", features = ["http1", "server"] }
 hyper-util = { version = "=0.1.20", features = ["tokio"] }
-keepass = { version = "=0.13.21", default-features = false, features = ["save_kdbx4"] }
+keepass = { version = "=0.13.21", default-features = false, features = ["save_kdbx4", "totp"] }
 getrandom = "=0.4.3"
 rpassword = "=7.5.4"
 reqwest = { version = "=0.13.4", default-features = false, features = ["rustls-no-provider", "stream"] }

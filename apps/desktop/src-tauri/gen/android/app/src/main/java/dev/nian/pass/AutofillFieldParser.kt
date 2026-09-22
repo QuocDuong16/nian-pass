@@ -5,7 +5,7 @@ import android.text.InputType
 import android.view.View
 import android.view.autofill.AutofillId
 
-internal enum class AutofillFieldRole { USERNAME, PASSWORD, IGNORE }
+internal enum class AutofillFieldRole { USERNAME, PASSWORD, TOTP, IGNORE }
 
 internal data class AutofillFieldModel(
   val hints: List<String>,
@@ -24,11 +24,19 @@ internal object AutofillFieldClassifier {
     View.AUTOFILL_HINT_PASSWORD.lowercase(),
     "current-password",
   )
+  private val totpHints = setOf(
+    "smsotpcode",
+    "otp",
+    "otpcode",
+    "one-time-code",
+    "onetimecode",
+  )
 
   fun classify(model: AutofillFieldModel): AutofillFieldRole {
     val hints = model.hints.map(String::lowercase)
     val htmlType = model.htmlType?.lowercase()
     val variation = model.inputType and InputType.TYPE_MASK_VARIATION
+    if (hints.any(totpHints::contains)) return AutofillFieldRole.TOTP
     if (
       hints.any(passwordHints::contains) ||
       htmlType == "password" ||
@@ -55,6 +63,7 @@ internal object AssistStructureParser {
   fun parse(structure: AssistStructure): ParsedAssistRequest? {
     val usernames = mutableListOf<AutofillId>()
     val passwords = mutableListOf<AutofillId>()
+    val totps = mutableListOf<AutofillId>()
     var webDomain: String? = null
     for (windowIndex in 0 until structure.windowNodeCount) {
       traverse(structure.getWindowNodeAt(windowIndex).rootViewNode) { node ->
@@ -70,13 +79,14 @@ internal object AssistStructureParser {
         ) {
           AutofillFieldRole.USERNAME -> usernames += id
           AutofillFieldRole.PASSWORD -> passwords += id
+          AutofillFieldRole.TOTP -> totps += id
           AutofillFieldRole.IGNORE -> Unit
         }
       }
     }
-    if (passwords.isEmpty()) return null
+    if (passwords.isEmpty() && totps.isEmpty()) return null
     return ParsedAssistRequest(
-      ParsedAutofillFields(usernames.distinct(), passwords.distinct()),
+      ParsedAutofillFields(usernames.distinct(), passwords.distinct(), totps.distinct()),
       webDomain?.trim()?.takeIf { it.isNotEmpty() },
     )
   }

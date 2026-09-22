@@ -5,15 +5,16 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use kdbx::KdbxDocument;
+use kdbx::{KdbxCredential, KdbxDocument};
 use sync_engine::{
     ConflictOperation, LocalCommitError, LocalSnapshot, LocalVault, ProfileId, SourceBinding,
-    StoreError, SyncCompletion, SyncEngine, SyncError, SyncOutcome, SyncStore, TargetBinding,
+    StoreError, SyncCompletion, SyncCredential, SyncEngine, SyncError, SyncOutcome, SyncStore,
+    TargetBinding,
 };
 use sync_provider_core::{
     CiphertextDigest, ProviderError, RemoteObject, RemoteObjectProvider, RemoteRead, RemoteRevision,
 };
-use vault_core::{EntryId, SecretString, SummaryText};
+use vault_core::{EntryId, SecretBytes, SecretString, SummaryText};
 
 const PASSWORD: &str = "demopass";
 
@@ -267,7 +268,7 @@ impl LocalVault for FakeLocal {
         &self,
         expected: &LocalSnapshot,
         ciphertext: &[u8],
-        _master_password: &SecretString,
+        _credential: &SyncCredential,
     ) -> Result<(), LocalCommitError> {
         let mut state = self.state.lock().map_err(|_| LocalCommitError::Failed)?;
         if state.locked {
@@ -1309,4 +1310,231 @@ async fn base_metadata_for_another_profile_fails_closed() {
     )
     .expect("metadata should write");
     assert!(sync(&engine, &provider, &local).await.is_err());
+}
+
+const TEST_SYNC_KEYFILE: &[u8] = b"public-sync-keyfile-material";
+
+fn test_sync_credential(password: Option<&str>) -> SyncCredential {
+    SyncCredential::new(
+        password.map(|value| SecretString::new(value.to_owned())),
+        Some(SecretBytes::new(TEST_SYNC_KEYFILE.to_vec())),
+    )
+}
+
+fn test_rekeyed_fixture(password: Option<&str>) -> Vec<u8> {
+    let document =
+        KdbxDocument::open_reader(&mut Cursor::new(fixture()), PASSWORD).expect("fixture opens");
+    let mut result = Vec::new();
+    document
+        .save_to_writer_with_credential(
+            &mut result,
+            KdbxCredential::new(password, Some(TEST_SYNC_KEYFILE)),
+        )
+        .expect("keyfile serialization");
+    result
+}
+
+fn test_keyfile_title(bytes: &[u8], password: Option<&str>, title: &str) -> Vec<u8> {
+    let credential = KdbxCredential::new(password, Some(TEST_SYNC_KEYFILE));
+    let mut document =
+        KdbxDocument::open_reader_with_credential(&mut Cursor::new(bytes), credential)
+            .expect("keyfile source opens");
+    let entry = document.projection().expect("projection").root().entries()[0]
+        .id()
+        .clone();
+    document
+        .set_entry_title(&entry, title)
+        .expect("title update");
+    let mut result = Vec::new();
+    document
+        .save_to_writer_with_credential(&mut result, credential)
+        .expect("updated keyfile serialization");
+    result
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn keyfile_only_sync_rejects_wrong_key_and_uploads_verified_ciphertext() {
+    let base = test_rekeyed_fixture(None);
+    let (_dir, engine, local, provider, _) = setup(base.clone(), None);
+    assert!(matches!(
+        engine
+            .sync(
+                provider.as_ref(),
+                local.as_ref(),
+                SyncCredential::new(None, None)
+            )
+            .await,
+        Err(SyncError::VaultAuthenticationFailed)
+    ));
+    assert!(matches!(
+        engine
+            .sync(
+                provider.as_ref(),
+                local.as_ref(),
+                SyncCredential::new(None, Some(SecretBytes::new(b"wrong-keyfile".to_vec())))
+            )
+            .await,
+        Err(SyncError::VaultAuthenticationFailed)
+    ));
+    assert_eq!(provider.write_count(), 0);
+    assert!(matches!(
+        engine
+            .sync(
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(None)
+            )
+            .await,
+        Ok(SyncOutcome::Done(SyncCompletion::CreatedRemote))
+    ));
+    assert_eq!(provider.bytes(), Some(base));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn keyfile_only_sync_fast_forwards_and_recovers_lost_write_receipt() {
+    let base = test_rekeyed_fixture(None);
+    let (_dir, engine, local, provider, _) = setup(base.clone(), None);
+    engine
+        .sync(
+            provider.as_ref(),
+            local.as_ref(),
+            test_sync_credential(None),
+        )
+        .await
+        .expect("seed base");
+    let local_next = test_keyfile_title(&base, None, "local keyfile change");
+    local.externally_save(local_next.clone());
+    provider.lose_next_response();
+    assert!(matches!(
+        engine
+            .sync(
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(None)
+            )
+            .await,
+        Ok(SyncOutcome::Done(SyncCompletion::Recovered))
+    ));
+    assert_eq!(provider.write_count(), 2, "no duplicate remote write");
+    let remote_next = test_keyfile_title(&local_next, None, "remote keyfile change");
+    provider.externally_replace(remote_next.clone());
+    assert!(matches!(
+        engine
+            .sync(
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(None)
+            )
+            .await,
+        Ok(SyncOutcome::Done(SyncCompletion::AppliedRemote))
+    ));
+    assert_eq!(local.bytes(), remote_next);
+    assert!(
+        KdbxDocument::open_reader_with_credential(
+            &mut Cursor::new(local.bytes()),
+            KdbxCredential::new(None, Some(TEST_SYNC_KEYFILE))
+        )
+        .is_ok()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composite_sync_rejects_missing_password_before_remote_write() {
+    let base = test_rekeyed_fixture(Some(PASSWORD));
+    let (_dir, engine, local, provider, _) = setup(base.clone(), None);
+    assert!(matches!(
+        engine
+            .sync(
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(None)
+            )
+            .await,
+        Err(SyncError::VaultAuthenticationFailed)
+    ));
+    assert_eq!(provider.write_count(), 0);
+    assert!(matches!(
+        engine
+            .sync(
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(Some(PASSWORD))
+            )
+            .await,
+        Ok(SyncOutcome::Done(SyncCompletion::CreatedRemote))
+    ));
+    assert_eq!(provider.bytes(), Some(base));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn composite_conflict_wrong_password_does_not_consume_resolution_token() {
+    let base = test_rekeyed_fixture(Some(PASSWORD));
+    let (_dir, engine, local, provider, _) = setup(base.clone(), None);
+    engine
+        .sync(
+            provider.as_ref(),
+            local.as_ref(),
+            test_sync_credential(Some(PASSWORD)),
+        )
+        .await
+        .expect("seed encrypted base");
+    let local_change = test_keyfile_title(&base, Some(PASSWORD), "local divergence");
+    let remote_change = test_keyfile_title(&base, Some(PASSWORD), "remote divergence");
+    local.externally_save(local_change.clone());
+    provider.externally_replace(remote_change.clone());
+    let conflict = match engine
+        .sync(
+            provider.as_ref(),
+            local.as_ref(),
+            test_sync_credential(Some(PASSWORD)),
+        )
+        .await
+        .expect("conflict discovery")
+    {
+        SyncOutcome::Conflict(conflict) => conflict,
+        SyncOutcome::Done(_) => panic!("same entry field divergence must conflict"),
+    };
+    let writes_before = provider.write_count();
+
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(Some("wrong-password")),
+            )
+            .await,
+        Err(SyncError::VaultAuthenticationFailed)
+    ));
+    assert_eq!(provider.write_count(), writes_before);
+    assert_eq!(provider.bytes(), Some(remote_change.clone()));
+    assert_eq!(local.bytes(), local_change);
+
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(Some(PASSWORD)),
+            )
+            .await,
+        Ok(SyncOutcome::Done(SyncCompletion::AppliedRemote))
+    ));
+    assert_eq!(local.bytes(), remote_change);
+    assert!(matches!(
+        engine
+            .resolve(
+                conflict.id(),
+                sync_engine::ConflictChoice::KeepRemote,
+                provider.as_ref(),
+                local.as_ref(),
+                test_sync_credential(Some(PASSWORD)),
+            )
+            .await,
+        Err(SyncError::StaleConflict)
+    ));
 }

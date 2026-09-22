@@ -165,6 +165,97 @@ test("mobile adapter invokes semantic source and vault commands", async () => {
   expect(invoke).toHaveBeenNthCalledWith(5, "mobile_lock_vault", undefined);
 });
 
+test("mobile TOTP reveal uses the narrow ephemeral command", async () => {
+  invoke.mockResolvedValueOnce({
+    code: "654321",
+    validForSeconds: 12,
+    periodSeconds: 30,
+  });
+
+  await expect(mobileApi.revealEntryTotp("entry-example")).resolves.toEqual({
+    code: "654321",
+    validForSeconds: 12,
+    periodSeconds: 30,
+  });
+  expect(invoke).toHaveBeenCalledWith("mobile_entry_totp_code", {
+    entryId: "entry-example",
+  });
+});
+
+test("mobile entry history is fetched through the semantic Rust command", async () => {
+  const history = {
+    documentRevision: "7",
+    items: [
+      {
+        index: 0,
+        modifiedAtUnixSeconds: null,
+        title: { kind: "visible" as const, value: "Previous title" },
+        username: { kind: "missing" as const },
+        url: { kind: "missing" as const },
+        passwordPresent: true,
+        notesPresent: false,
+        totpPresent: true,
+        tags: ["archive"],
+        expiresAtUnixSeconds: null,
+        restorable: true,
+      },
+    ],
+  };
+  invoke.mockResolvedValueOnce(history);
+
+  await expect(mobileApi.getEntryHistory("entry-example")).resolves.toEqual(
+    history,
+  );
+  expect(invoke).toHaveBeenCalledWith("mobile_entry_history", {
+    entryId: "entry-example",
+  });
+});
+
+test("mobile attachment metadata uses the semantic Rust read command", async () => {
+  const attachments = [
+    { name: "recovery.pdf", sizeBytes: 1536, protected: true },
+  ];
+  invoke.mockResolvedValueOnce(attachments);
+
+  await expect(mobileApi.getEntryAttachments("entry-example")).resolves.toEqual(
+    attachments,
+  );
+  expect(invoke).toHaveBeenCalledWith("mobile_entry_attachments", {
+    entryId: "entry-example",
+  });
+});
+
+test("mobile attachment import and export stay behind semantic Rust commands", async () => {
+  invoke
+    .mockResolvedValueOnce(contract.dirtySnapshot)
+    .mockResolvedValueOnce({ exported: true });
+
+  await expect(
+    mobileApi.importEntryAttachment("entry-example"),
+  ).resolves.toEqual(contract.dirtySnapshot);
+  await expect(
+    mobileApi.exportEntryAttachment("entry-example", "recovery.pdf"),
+  ).resolves.toEqual({ exported: true });
+  expect(invoke).toHaveBeenNthCalledWith(1, "mobile_import_entry_attachment", {
+    entryId: "entry-example",
+  });
+  expect(invoke).toHaveBeenNthCalledWith(2, "mobile_export_entry_attachment", {
+    entryId: "entry-example",
+    name: "recovery.pdf",
+  });
+});
+
+test("mobile tags use the dedicated semantic Rust command", async () => {
+  invoke.mockResolvedValueOnce(contract.dirtySnapshot);
+
+  await expect(
+    mobileApi.setEntryTags("entry-example", ["mobile", "finance"]),
+  ).resolves.toEqual(contract.dirtySnapshot);
+  expect(invoke).toHaveBeenCalledWith("mobile_set_entry_tags", {
+    request: { entryId: "entry-example", tags: ["mobile", "finance"] },
+  });
+});
+
 test("mobile mutation and persistence calls use narrow reviewed payloads", async () => {
   invoke
     .mockResolvedValueOnce(contract.dirtySnapshot)

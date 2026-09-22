@@ -10,7 +10,11 @@ import type {
 } from "../../types/desktop";
 import type { EntryEditApi } from "../../types/mutation-api";
 import { EditableMetadataField } from "./EditableMetadataField";
-import { PasswordGenerator } from "./PasswordGenerator";
+import { EntryExpiryEditor } from "./EntryExpiryEditor";
+import { EntryIconEditor } from "./EntryIconEditor";
+import { EntryPasswordEditor } from "./EntryPasswordEditor";
+import { formatExpiryInput, parseExpiryInput } from "./entry-expiry";
+import { entryIconSelection, iconRequestFromSelection } from "./entry-icons";
 import { useSecretDraft } from "./useSecretDraft";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
 
@@ -40,6 +44,14 @@ export function EntryEditForm<
   const url = useSecretDraft();
   const notes = useSecretDraft();
   const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
+  const [expiryEnabled, setExpiryEnabled] = useState(
+    detail.expiresAtUnixSeconds !== null,
+  );
+  const [expiryInput, setExpiryInput] = useState(
+    formatExpiryInput(detail.expiresAtUnixSeconds),
+  );
+  const initialIconSelection = entryIconSelection(detail.icon);
+  const [iconSelection, setIconSelection] = useState(initialIconSelection);
   const [applying, setApplying] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -58,8 +70,13 @@ export function EntryEditForm<
     onCancel();
   };
 
+  const expiryUnixSeconds = expiryEnabled
+    ? parseExpiryInput(expiryInput)
+    : null;
+  const expiryInvalid = expiryEnabled && expiryUnixSeconds === null;
+
   const apply = async () => {
-    if (disabled || applying) return;
+    if (disabled || applying || expiryInvalid) return;
     setApplying(true);
     setFailed(false);
     const request: UpdateEntryRequest = { entryId: detail.id };
@@ -76,6 +93,18 @@ export function EntryEditForm<
     addMetadata("url", url.value, detail.url);
     if (passwordDraft !== null) request.password = passwordDraft;
     if (notes.value !== null) request.notes = notes.value;
+    const expiryChanged =
+      expiryEnabled !== (detail.expiresAtUnixSeconds !== null) ||
+      (expiryEnabled && expiryUnixSeconds !== detail.expiresAtUnixSeconds);
+    if (expiryChanged) {
+      request.expires = expiryEnabled;
+      if (expiryUnixSeconds !== null)
+        request.expiryUnixSeconds = expiryUnixSeconds;
+    }
+    if (iconSelection !== initialIconSelection) {
+      const iconRequest = iconRequestFromSelection(iconSelection);
+      if (iconRequest !== undefined) request.icon = iconRequest;
+    }
     try {
       const snapshot = await api.updateEntry(request);
       clearSecrets();
@@ -115,7 +144,7 @@ export function EntryEditForm<
             size="sm"
             variant="primary"
             type="submit"
-            disabled={disabled || applying}
+            disabled={disabled || applying || expiryInvalid}
           >
             {applying ? "Applying…" : "Apply changes"}
           </Button>
@@ -143,40 +172,27 @@ export function EntryEditForm<
         load={() => api.revealEntryUrl(detail.id)}
       />
 
-      <div className="form-field">
-        <label htmlFor="new-password">Password</label>
-        {passwordDraft === null ? (
-          <button
-            type="button"
-            onClick={() => {
-              setPasswordDraft("");
-            }}
-          >
-            Set new password
-          </button>
-        ) : (
-          <input
-            id="new-password"
-            type="password"
-            autoComplete="new-password"
-            spellCheck={false}
-            value={passwordDraft}
-            disabled={disabled || applying}
-            onChange={(event) => {
-              setPasswordDraft(event.currentTarget.value);
-            }}
-          />
-        )}
-        <small>
-          Existing password is never preloaded. Empty sets an empty password.
-        </small>
-        <PasswordGenerator
-          disabled={disabled || applying}
-          onGenerated={(generated) => {
-            setPasswordDraft(generated);
-          }}
-        />
-      </div>
+      <EntryPasswordEditor
+        value={passwordDraft}
+        disabled={disabled || applying}
+        onChange={setPasswordDraft}
+      />
+
+      <EntryIconEditor
+        current={detail.icon}
+        value={iconSelection}
+        disabled={disabled || applying}
+        onChange={setIconSelection}
+      />
+
+      <EntryExpiryEditor
+        enabled={expiryEnabled}
+        value={expiryInput}
+        disabled={disabled || applying}
+        invalid={expiryInvalid}
+        onEnabledChange={setExpiryEnabled}
+        onValueChange={setExpiryInput}
+      />
 
       <div className="form-field">
         <label htmlFor="edit-notes">Notes</label>

@@ -4,19 +4,29 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use vault_core::{EntryId, SecretString};
+use vault_core::{EntryId, SecretBytes, SecretString};
 use vault_session::{VaultSession, WriteRestriction};
 
+mod attachments;
 mod browser;
+mod credential;
+mod credential_flow;
+mod custom_icons;
+mod database_settings;
 mod error;
+mod export_copy;
+mod generated_clipboard;
+mod history;
+mod keyfile_credential;
+mod password_health;
 mod snapshot;
 mod sync_support;
+mod totp;
 
+use credential::DesktopVaultCredential;
 pub use error::DesktopError;
 pub(crate) use error::map_mutation_error;
-use error::{
-    map_clipboard_error, map_create_error, map_open_error, map_provider_error, map_save_error,
-};
+use error::{map_clipboard_error, map_create_error, map_provider_error};
 
 use crate::{
     clipboard::{ClipboardClearStatus, ClipboardCopy, ClipboardPort, DesktopClipboardService},
@@ -27,7 +37,8 @@ use crate::{
 pub struct DesktopVaultService {
     selected_path: Option<PathBuf>,
     session: Option<VaultSession>,
-    save_credential: Option<SecretString>,
+    save_credential: Option<DesktopVaultCredential>,
+    pending_keyfile: Option<SecretBytes>,
     browser_session_id: Option<String>,
 }
 
@@ -38,6 +49,7 @@ impl DesktopVaultService {
             selected_path: None,
             session: None,
             save_credential: None,
+            pending_keyfile: None,
             browser_session_id: None,
         }
     }
@@ -49,6 +61,7 @@ impl DesktopVaultService {
 
         let file_name = display_file_name(&path).ok_or(DesktopError::UnsupportedVault)?;
         self.selected_path = Some(path);
+        self.pending_keyfile = None;
         Ok(SelectedVaultDto { file_name })
     }
 
@@ -67,25 +80,8 @@ impl DesktopVaultService {
         let browser_session_id = random_process_token()?;
         self.selected_path = Some(session.path().to_owned());
         self.session = Some(session);
-        self.save_credential = Some(credential);
-        self.browser_session_id = Some(browser_session_id);
-        Ok(snapshot)
-    }
-
-    pub fn unlock(&mut self, credential: SecretString) -> Result<VaultSnapshotDto, DesktopError> {
-        if self.session.is_some() {
-            return Err(DesktopError::AlreadyUnlocked);
-        }
-
-        let path = self
-            .selected_path
-            .as_deref()
-            .ok_or(DesktopError::NoVaultSelected)?;
-        let session = VaultSession::open(path, &credential).map_err(map_open_error)?;
-        let snapshot = snapshot::from_session(&session).map_err(map_open_error)?;
-        let browser_session_id = random_process_token()?;
-        self.session = Some(session);
-        self.save_credential = Some(credential);
+        self.save_credential = Some(DesktopVaultCredential::password(credential));
+        self.pending_keyfile = None;
         self.browser_session_id = Some(browser_session_id);
         Ok(snapshot)
     }
@@ -93,32 +89,6 @@ impl DesktopVaultService {
     pub fn snapshot(&self) -> Result<VaultSnapshotDto, DesktopError> {
         let session = self.session.as_ref().ok_or(DesktopError::Locked)?;
         snapshot::from_session(session).map_err(|_| DesktopError::Internal)
-    }
-
-    pub fn save(&mut self) -> Result<VaultSnapshotDto, DesktopError> {
-        self.require_writable()?;
-        let credential = self.save_credential.as_ref().ok_or(DesktopError::Locked)?;
-        let session = self.session.as_mut().ok_or(DesktopError::Locked)?;
-        session.save(credential).map_err(map_save_error)?;
-        self.snapshot()
-    }
-
-    pub fn reload(&mut self, credential: SecretString) -> Result<VaultSnapshotDto, DesktopError> {
-        let path = self
-            .session
-            .as_ref()
-            .ok_or(DesktopError::Locked)?
-            .path()
-            .to_owned();
-        let candidate =
-            VaultSession::open(path, &credential).map_err(|_| DesktopError::ReloadFailed)?;
-        let snapshot =
-            snapshot::from_session(&candidate).map_err(|_| DesktopError::ReloadFailed)?;
-        let browser_session_id = random_process_token()?;
-        self.session = Some(candidate);
-        self.save_credential = Some(credential);
-        self.browser_session_id = Some(browser_session_id);
-        Ok(snapshot)
     }
 
     pub(crate) fn session_mut(&mut self) -> Result<&mut VaultSession, DesktopError> {
@@ -219,6 +189,7 @@ impl DesktopVaultService {
     pub fn discard_and_lock(&mut self) -> Result<(), DesktopError> {
         let session = self.session.take().ok_or(DesktopError::Locked)?;
         self.save_credential = None;
+        self.pending_keyfile = None;
         self.browser_session_id = None;
         session.lock();
         self.selected_path = None;
@@ -292,8 +263,28 @@ impl AppState {
         self.copy_entry_secret(entry_id, DesktopVaultService::entry_password)
     }
 
+    pub fn copy_entry_title(&self, entry_id: &str) -> Result<ClipboardCopy, DesktopError> {
+        self.copy_entry_secret(entry_id, DesktopVaultService::entry_title)
+    }
+
     pub fn copy_entry_username(&self, entry_id: &str) -> Result<ClipboardCopy, DesktopError> {
         self.copy_entry_secret(entry_id, DesktopVaultService::entry_username)
+    }
+
+    pub fn copy_entry_url(&self, entry_id: &str) -> Result<ClipboardCopy, DesktopError> {
+        self.copy_entry_secret(entry_id, DesktopVaultService::entry_url)
+    }
+
+    pub fn copy_entry_notes(&self, entry_id: &str) -> Result<ClipboardCopy, DesktopError> {
+        self.copy_entry_secret(entry_id, DesktopVaultService::entry_notes)
+    }
+
+    pub fn copy_entry_custom_field(
+        &self,
+        entry_id: &str,
+        name: &str,
+    ) -> Result<ClipboardCopy, DesktopError> {
+        self.copy_secret_with(|service| service.entry_custom_field(entry_id, name))
     }
 
     pub fn lock(&self) -> Result<ClipboardClearStatus, DesktopError> {
@@ -339,6 +330,13 @@ impl AppState {
         entry_id: &str,
         read: fn(&DesktopVaultService, &str) -> Result<SecretString, DesktopError>,
     ) -> Result<ClipboardCopy, DesktopError> {
+        self.copy_secret_with(|service| read(service, entry_id))
+    }
+
+    fn copy_secret_with(
+        &self,
+        read: impl FnOnce(&DesktopVaultService) -> Result<SecretString, DesktopError>,
+    ) -> Result<ClipboardCopy, DesktopError> {
         // Lock order is operation gate -> vault service. Clipboard state is
         // touched only after the vault-service guard has been released.
         let _operation = self
@@ -347,7 +345,7 @@ impl AppState {
             .map_err(|_| DesktopError::Internal)?;
         let secret = {
             let service = self.service.lock().map_err(|_| DesktopError::Internal)?;
-            read(&service, entry_id)?
+            read(&service)?
         };
         self.clipboard.copy(&secret).map_err(map_clipboard_error)
     }
@@ -397,14 +395,18 @@ mod tests {
     };
 
     use credential_provider_core::CredentialTarget;
+    #[cfg(unix)]
+    use kdbx::{KdbxCredential, KdbxDocument};
     use serde_json::{Map, Value, to_value};
-    use vault_core::{EntryId, NewEntry, SecretString};
+    use vault_core::{EntryId, FieldProtection, NewEntry, SecretBytes, SecretString};
     use vault_session::{VaultSession, WriteRestriction};
 
     use vault_session::SessionError;
 
+    use super::error::map_save_error;
     use super::{
-        AppState, DesktopError, DesktopVaultService, map_save_error, write_restriction_error,
+        AppState, DesktopError, DesktopVaultCredential, DesktopVaultService,
+        write_restriction_error,
     };
     use crate::{
         clipboard::{ClipboardClearStatus, ClipboardPort},
@@ -523,6 +525,724 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg(unix)]
+    #[test]
+    fn desktop_keyfile_unlock_retry_save_and_lock_keep_authority_in_rust() {
+        const KEYFILE: &[u8] = b"public-desktop-keyfile-material";
+        let directory = TestDir::create();
+        let path = directory.0.join("keyfile-vault.kdbx");
+        let document = KdbxDocument::new("Desktop keyfile");
+        let mut file = fs::File::create(&path).expect("keyfile vault create");
+        document
+            .save_to_writer_with_credential(&mut file, KdbxCredential::new(None, Some(KEYFILE)))
+            .expect("keyfile vault serialize");
+        file.sync_all().expect("keyfile vault sync");
+
+        let mut service = DesktopVaultService::new();
+        service
+            .select_path(path.clone())
+            .expect("select keyfile vault");
+        service
+            .set_pending_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+            .expect("pending keyfile should be accepted");
+        assert!(matches!(
+            service.unlock_with_components(Some(SecretString::new(
+                "wrong-public-password".to_owned()
+            ))),
+            Err(DesktopError::UnlockFailed)
+        ));
+        assert!(
+            service.pending_keyfile.is_some(),
+            "failed unlock must retain the selected keyfile for retry"
+        );
+
+        service
+            .unlock_with_components(None)
+            .expect("keyfile-only retry should unlock");
+        assert!(service.pending_keyfile.is_none());
+        let sync_authority = service
+            .sync_credential(None)
+            .expect("native keyfile sync authority");
+        assert!(KdbxDocument::open_with_credential(&path, sync_authority.as_kdbx()).is_ok());
+        assert!(
+            service
+                .save_credential
+                .as_ref()
+                .and_then(DesktopVaultCredential::keyfile)
+                .is_some(),
+            "unlocked session must retain keyfile authority in Rust"
+        );
+
+        let root = service
+            .session
+            .as_ref()
+            .expect("session")
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        let created = service
+            .session_mut()
+            .expect("writable session")
+            .create_group(&root, "Saved through retained keyfile")
+            .expect("group mutation");
+        service
+            .save()
+            .expect("ordinary Save should reuse retained keyfile");
+
+        let reopened =
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .expect("saved keyfile vault should reopen");
+        assert!(
+            reopened
+                .projection()
+                .expect("projection")
+                .find_group(&created)
+                .is_some()
+        );
+
+        service
+            .reload_with_components(None)
+            .expect("keyfile-only reload should reuse retained keyfile");
+        assert!(
+            service
+                .snapshot()
+                .expect("reloaded snapshot")
+                .groups
+                .iter()
+                .any(|group| group.id == created.as_str())
+        );
+
+        service.lock().expect("clean keyfile session should lock");
+        assert!(service.save_credential.is_none());
+        assert!(service.pending_keyfile.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn master_password_rotation_preserves_keyfile_and_updates_retained_save_authority() {
+        const KEYFILE: &[u8] = b"public-rotation-keyfile-material";
+        let directory = TestDir::create();
+        let path = directory.0.join("rotation-vault.kdbx");
+        let document = KdbxDocument::new("Credential rotation");
+        let mut file = fs::File::create(&path).expect("rotation vault create");
+        document
+            .save_to_writer_with_credential(
+                &mut file,
+                KdbxCredential::new(Some("old-public-password"), Some(KEYFILE)),
+            )
+            .expect("rotation vault serialize");
+        file.sync_all().expect("rotation vault sync");
+
+        let mut service = DesktopVaultService::new();
+        service.select_path(path.clone()).expect("select vault");
+        service
+            .set_pending_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+            .expect("set keyfile");
+        service
+            .unlock_with_components(Some(SecretString::new("old-public-password".to_owned())))
+            .expect("composite credential should unlock");
+
+        let root_before_rotation = service
+            .session
+            .as_ref()
+            .expect("session")
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        service
+            .session_mut()
+            .expect("session")
+            .create_group(&root_before_rotation, "Unsaved before rotation")
+            .expect("mutation should succeed");
+        assert!(matches!(
+            service.change_master_password(SecretString::new("blocked-input".to_owned())),
+            Err(DesktopError::UnsavedChanges)
+        ));
+        service
+            .save()
+            .expect("explicit Save should clean the vault");
+
+        let rotated = service
+            .change_master_password(SecretString::new("new-public-password".to_owned()))
+            .expect("credential rotation should succeed");
+        assert!(!rotated.dirty);
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some("new-public-password"), Some(KEYFILE)),
+            )
+            .is_ok()
+        );
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some("old-public-password"), Some(KEYFILE)),
+            )
+            .is_err()
+        );
+
+        let root = service
+            .session
+            .as_ref()
+            .expect("session")
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        service
+            .session_mut()
+            .expect("session")
+            .create_group(&root, "After rotation")
+            .expect("mutation should succeed");
+        service.save().expect("new retained authority should save");
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some("new-public-password"), Some(KEYFILE)),
+            )
+            .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keyfile_rotation_add_replace_remove_preserves_retained_authority() {
+        const PASSWORD: &str = "public-keyfile-rotation-password";
+        const KEYFILE_A: &[u8] = b"public-keyfile-rotation-a";
+        const KEYFILE_B: &[u8] = b"public-keyfile-rotation-b";
+        let directory = TestDir::create();
+        let path = directory.0.join("keyfile-rotation.kdbx");
+        let document = KdbxDocument::new("Keyfile rotation");
+        let mut file = fs::File::create(&path).expect("rotation vault create");
+        document
+            .save_to_writer_with_credential(&mut file, KdbxCredential::password(PASSWORD))
+            .expect("rotation vault serialize");
+        file.sync_all().expect("rotation vault sync");
+
+        let mut service = DesktopVaultService::new();
+        service.select_path(path.clone()).expect("select vault");
+        service
+            .unlock(SecretString::new(PASSWORD.to_owned()))
+            .expect("password-only vault should unlock");
+        assert!(!service.credential_has_keyfile().expect("credential status"));
+
+        service
+            .replace_keyfile(SecretBytes::new(KEYFILE_A.to_vec()))
+            .expect("adding a keyfile should rotate the credential");
+        assert!(service.credential_has_keyfile().expect("credential status"));
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(PASSWORD), Some(KEYFILE_A)),
+            )
+            .is_ok()
+        );
+        assert!(KdbxDocument::open(&path, PASSWORD).is_err());
+
+        let root = service
+            .session
+            .as_ref()
+            .expect("session")
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        service
+            .session_mut()
+            .expect("session")
+            .create_group(&root, "Unsaved keyfile rotation")
+            .expect("mutation");
+        assert!(matches!(
+            service.replace_keyfile(SecretBytes::new(KEYFILE_B.to_vec())),
+            Err(DesktopError::UnsavedChanges)
+        ));
+        service.save().expect("save before replacing keyfile");
+
+        service
+            .replace_keyfile(SecretBytes::new(KEYFILE_B.to_vec()))
+            .expect("replacing the keyfile should rotate the credential");
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(PASSWORD), Some(KEYFILE_A)),
+            )
+            .is_err()
+        );
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(PASSWORD), Some(KEYFILE_B)),
+            )
+            .is_ok()
+        );
+
+        service
+            .remove_keyfile()
+            .expect("password component should permit keyfile removal");
+        assert!(!service.credential_has_keyfile().expect("credential status"));
+        assert!(KdbxDocument::open(&path, PASSWORD).is_ok());
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(PASSWORD), Some(KEYFILE_B)),
+            )
+            .is_err()
+        );
+
+        let root = service
+            .session
+            .as_ref()
+            .expect("session")
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        service
+            .session_mut()
+            .expect("session")
+            .create_group(&root, "Saved after keyfile removal")
+            .expect("mutation");
+        service.save().expect("retained password should save");
+        assert!(KdbxDocument::open(&path, PASSWORD).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keyfile_rotation_rejects_external_change_without_rewriting_vault() {
+        let (_directory, path, mut service) = isolated_service();
+        write_external_version(&path, "External wins over keyfile rotation");
+        let primary = fs::read(&path).expect("external primary");
+        let backup_path = path.with_extension("kdbx.bak");
+        let backup = fs::read(&backup_path).expect("external backup");
+        assert!(matches!(
+            service.replace_keyfile(SecretBytes::new(b"public-new-keyfile".to_vec())),
+            Err(DesktopError::ExternalChange)
+        ));
+        assert!(!service.credential_has_keyfile().expect("credential status"));
+        assert_eq!(fs::read(&path).expect("primary"), primary);
+        assert_eq!(fs::read(&backup_path).expect("backup"), backup);
+        assert!(KdbxDocument::open(&path, FIXTURE_PASSWORD).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keyfile_only_vault_refuses_to_remove_its_last_credential_component() {
+        const KEYFILE: &[u8] = b"public-keyfile-only-removal";
+        let directory = TestDir::create();
+        let path = directory.0.join("keyfile-only-removal.kdbx");
+        let document = KdbxDocument::new("Keyfile only removal");
+        let mut file = fs::File::create(&path).expect("keyfile vault create");
+        document
+            .save_to_writer_with_credential(&mut file, KdbxCredential::new(None, Some(KEYFILE)))
+            .expect("keyfile vault serialize");
+        file.sync_all().expect("keyfile vault sync");
+
+        let mut service = DesktopVaultService::new();
+        service.select_path(path.clone()).expect("select vault");
+        service
+            .set_pending_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+            .expect("select keyfile");
+        service
+            .unlock_with_components(None)
+            .expect("keyfile-only vault should unlock");
+
+        assert!(matches!(
+            service.remove_keyfile(),
+            Err(DesktopError::InvalidRequest)
+        ));
+        assert!(service.credential_has_keyfile().expect("credential status"));
+        assert!(
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removing_master_password_keeps_keyfile_only_authority_for_save_and_readdition() {
+        const KEYFILE: &[u8] = b"public-only-factor-after-removal";
+        const NEW_PASSWORD: &str = "new-public-master-password";
+        let (_directory, path, mut service) = isolated_service();
+        assert!(service.credential_has_password().expect("password status"));
+        assert!(matches!(
+            service.remove_master_password(),
+            Err(DesktopError::InvalidRequest)
+        ));
+        assert!(KdbxDocument::open(&path, FIXTURE_PASSWORD).is_ok());
+
+        service
+            .replace_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+            .expect("adding a keyfile should succeed");
+        let clean = service
+            .remove_master_password()
+            .expect("remove master password");
+        assert!(!clean.dirty);
+        assert!(!service.credential_has_password().expect("password status"));
+        assert!(service.credential_has_keyfile().expect("keyfile status"));
+        assert!(KdbxDocument::open(&path, FIXTURE_PASSWORD).is_err());
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(FIXTURE_PASSWORD), Some(KEYFILE)),
+            )
+            .is_err()
+        );
+        assert!(
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .is_ok()
+        );
+        assert!(matches!(
+            service.remove_keyfile(),
+            Err(DesktopError::InvalidRequest)
+        ));
+        assert!(matches!(
+            service.remove_master_password(),
+            Err(DesktopError::InvalidRequest)
+        ));
+
+        let entry_id = mutate_first_title(&mut service, "saved through keyfile only");
+        service.save().expect("save under keyfile-only authority");
+        let reopened =
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .expect("keyfile-only save must reopen");
+        assert!(
+            reopened
+                .projection()
+                .expect("projection")
+                .find_entry(&EntryId::new(entry_id))
+                .is_some()
+        );
+        service
+            .reload_with_components(None)
+            .expect("keyfile-only reload must work");
+
+        service
+            .change_master_password(SecretString::new(NEW_PASSWORD.to_owned()))
+            .expect("re-add master password");
+        assert!(
+            service
+                .credential_has_password()
+                .expect("password restored")
+        );
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(NEW_PASSWORD), Some(KEYFILE)),
+            )
+            .is_ok()
+        );
+        assert!(
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .is_err()
+        );
+        service
+            .remove_keyfile()
+            .expect("new password is sufficient");
+        assert!(KdbxDocument::open(&path, NEW_PASSWORD).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn master_password_removal_rejects_dirty_and_external_generations_without_writing() {
+        const KEYFILE: &[u8] = b"public-removal-external-keyfile";
+        let (_directory, path, mut service) = isolated_service();
+        service
+            .replace_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+            .expect("add keyfile");
+        mutate_first_title(&mut service, "unsaved before password removal");
+        assert!(matches!(
+            service.remove_master_password(),
+            Err(DesktopError::UnsavedChanges)
+        ));
+        service.save().expect("save local changes");
+        let mut external = VaultSession::open_with_credential(
+            &path,
+            KdbxCredential::new(Some(FIXTURE_PASSWORD), Some(KEYFILE)),
+        )
+        .expect("open external composite credential");
+        let first = external.projection().expect("projection").root().entries()[0]
+            .id()
+            .clone();
+        external
+            .document_mut()
+            .set_entry_title(&first, "new external generation")
+            .expect("external edit");
+        external
+            .save_with_credential(KdbxCredential::new(Some(FIXTURE_PASSWORD), Some(KEYFILE)))
+            .expect("external save");
+        let primary = fs::read(&path).expect("primary");
+        let backup_path = path.with_extension("kdbx.bak");
+        let backup = fs::read(&backup_path).expect("backup");
+        assert!(matches!(
+            service.remove_master_password(),
+            Err(DesktopError::ExternalChange)
+        ));
+        assert_eq!(fs::read(&path).expect("primary intact"), primary);
+        assert_eq!(fs::read(&backup_path).expect("backup intact"), backup);
+        assert!(
+            service
+                .credential_has_password()
+                .expect("password retained")
+        );
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(FIXTURE_PASSWORD), Some(KEYFILE)),
+            )
+            .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uncertain_master_removal_reconciles_only_the_installed_keyfile_authority() {
+        const KEYFILE: &[u8] = b"public-master-removal-reconcile";
+        let (_directory, path, mut service) = isolated_service();
+        service
+            .replace_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+            .expect("add keyfile");
+        service
+            .reconcile_rotation_authority(None)
+            .expect("no installation yet");
+        assert!(
+            service
+                .credential_has_password()
+                .expect("old authority unchanged")
+        );
+        let mut external = VaultSession::open_with_credential(
+            &path,
+            KdbxCredential::new(Some(FIXTURE_PASSWORD), Some(KEYFILE)),
+        )
+        .expect("external composite credential");
+        external
+            .rotate_credential(
+                KdbxCredential::new(Some(FIXTURE_PASSWORD), Some(KEYFILE)),
+                KdbxCredential::new(None, Some(KEYFILE)),
+            )
+            .expect("install keyfile-only credential");
+        service
+            .reconcile_rotation_authority(None)
+            .expect("reconcile installed authority");
+        assert!(
+            !service
+                .credential_has_password()
+                .expect("password no longer retained")
+        );
+        assert!(
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .is_ok()
+        );
+        mutate_first_title(&mut service, "save after uncertain removal reconciliation");
+        service.save().expect("retained authority supports save");
+        assert!(
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(None, Some(KEYFILE)))
+                .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn empty_password_is_not_a_remaining_factor_for_keyfile_removal() {
+        const KEYFILE: &[u8] = b"public-empty-password-keyfile";
+        let directory = TestDir::create();
+        let path = directory.0.join("empty-password-keyfile.kdbx");
+        let mut file = fs::File::create(&path).expect("create file");
+        KdbxDocument::new("Empty password composite")
+            .save_to_writer_with_credential(&mut file, KdbxCredential::new(Some(""), Some(KEYFILE)))
+            .expect("serialize composite");
+        file.sync_all().expect("sync composite");
+        let mut service = DesktopVaultService::new();
+        service.select_path(path.clone()).expect("select vault");
+        service
+            .set_pending_keyfile(SecretBytes::new(KEYFILE.to_vec()))
+            .expect("select keyfile");
+        service
+            .unlock_with_components(Some(SecretString::new(String::new())))
+            .expect("explicit empty password differs from missing password");
+        let original = fs::read(&path).expect("original generation");
+        assert!(matches!(
+            service.remove_keyfile(),
+            Err(DesktopError::InvalidRequest)
+        ));
+        assert_eq!(fs::read(&path).expect("unchanged generation"), original);
+        assert!(
+            KdbxDocument::open_with_credential(&path, KdbxCredential::new(Some(""), Some(KEYFILE)))
+                .is_ok()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keyfile_reconciliation_adopts_only_the_credential_proven_on_disk() {
+        const PASSWORD: &str = "public-reconcile-password";
+        const KEYFILE: &[u8] = b"public-reconcile-keyfile";
+        let directory = TestDir::create();
+        let path = directory.0.join("keyfile-reconcile.kdbx");
+        let document = KdbxDocument::new("Keyfile reconciliation");
+        let mut file = fs::File::create(&path).expect("vault create");
+        document
+            .save_to_writer_with_credential(&mut file, KdbxCredential::password(PASSWORD))
+            .expect("vault serialize");
+        file.sync_all().expect("vault sync");
+
+        let mut service = DesktopVaultService::new();
+        service.select_path(path.clone()).expect("select vault");
+        service
+            .unlock(SecretString::new(PASSWORD.to_owned()))
+            .expect("password-only unlock");
+
+        service
+            .reconcile_keyfile_authority(Some(SecretBytes::new(KEYFILE.to_vec())))
+            .expect("uninstalled keyfile must leave current authority intact");
+        assert!(!service.credential_has_keyfile().expect("credential status"));
+        assert!(KdbxDocument::open(&path, PASSWORD).is_ok());
+
+        let mut external = VaultSession::open(&path, &SecretString::new(PASSWORD.to_owned()))
+            .expect("external session open");
+        external
+            .rotate_credential(
+                KdbxCredential::password(PASSWORD),
+                KdbxCredential::new(Some(PASSWORD), Some(KEYFILE)),
+            )
+            .expect("external keyfile addition");
+
+        service
+            .reconcile_keyfile_authority(Some(SecretBytes::new(KEYFILE.to_vec())))
+            .expect("installed keyfile should become retained authority");
+        assert!(service.credential_has_keyfile().expect("credential status"));
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                service
+                    .save_credential
+                    .as_ref()
+                    .expect("retained credential")
+                    .as_kdbx(),
+            )
+            .is_ok()
+        );
+        assert!(KdbxDocument::open(&path, PASSWORD).is_err());
+
+        service
+            .reconcile_keyfile_authority(None)
+            .expect("uninstalled removal must leave composite authority intact");
+        assert!(service.credential_has_keyfile().expect("credential status"));
+
+        let mut external = VaultSession::open_with_credential(
+            &path,
+            KdbxCredential::new(Some(PASSWORD), Some(KEYFILE)),
+        )
+        .expect("external composite session open");
+        external
+            .rotate_credential(
+                KdbxCredential::new(Some(PASSWORD), Some(KEYFILE)),
+                KdbxCredential::password(PASSWORD),
+            )
+            .expect("external keyfile removal");
+
+        service
+            .reconcile_keyfile_authority(None)
+            .expect("installed removal should become retained authority");
+        assert!(!service.credential_has_keyfile().expect("credential status"));
+        assert!(KdbxDocument::open(&path, PASSWORD).is_ok());
+        assert!(
+            KdbxDocument::open_with_credential(
+                &path,
+                KdbxCredential::new(Some(PASSWORD), Some(KEYFILE)),
+            )
+            .is_err()
+        );
+
+        let root = service
+            .session
+            .as_ref()
+            .expect("reconciled session")
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        service
+            .session_mut()
+            .expect("reconciled session")
+            .create_group(&root, "Saved with reconciled password authority")
+            .expect("post-reconciliation mutation");
+        service.save().expect("reconciled authority should Save");
+        assert!(KdbxDocument::open(&path, PASSWORD).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uncertain_rotation_reconciliation_adopts_replacement_authority_only_when_canonical() {
+        let directory = TestDir::create();
+        let path = directory.0.join("rotation-reconcile.kdbx");
+        let document = KdbxDocument::new("Rotation reconciliation");
+        let mut file = fs::File::create(&path).expect("rotation vault create");
+        document
+            .save_to_writer_with_credential(&mut file, KdbxCredential::password("alpha"))
+            .expect("rotation vault serialize");
+        file.sync_all().expect("rotation vault sync");
+
+        let mut service = DesktopVaultService::new();
+        service.select_path(path.clone()).expect("select vault");
+        service
+            .unlock(SecretString::new("alpha".to_owned()))
+            .expect("source should unlock");
+
+        service
+            .reconcile_rotation_authority(Some(SecretString::new("beta".to_owned())))
+            .expect("unchanged source should keep current authority");
+        let retained = service
+            .save_credential
+            .as_ref()
+            .expect("retained credential");
+        assert!(KdbxDocument::open_with_credential(&path, retained.as_kdbx()).is_ok());
+        assert!(KdbxDocument::open(&path, "beta").is_err());
+
+        let mut external = VaultSession::open(&path, &SecretString::new("alpha".to_owned()))
+            .expect("external session should open");
+        external
+            .rotate_credential(
+                KdbxCredential::password("alpha"),
+                KdbxCredential::password("beta"),
+            )
+            .expect("external rotation should install replacement authority");
+
+        service
+            .reconcile_rotation_authority(Some(SecretString::new("beta".to_owned())))
+            .expect("reconciliation should preserve a usable authority");
+        let retained = service
+            .save_credential
+            .as_ref()
+            .expect("retained credential");
+        assert!(KdbxDocument::open_with_credential(&path, retained.as_kdbx()).is_ok());
+        assert!(KdbxDocument::open(&path, "alpha").is_err());
+
+        let root = service
+            .session
+            .as_ref()
+            .expect("reconciled session")
+            .projection()
+            .expect("projection")
+            .root()
+            .id()
+            .clone();
+        service
+            .session_mut()
+            .expect("reconciled session")
+            .create_group(&root, "After uncertain rotation")
+            .expect("mutation should succeed");
+        service.save().expect("reconciled baseline should save");
+        assert!(KdbxDocument::open(&path, "beta").is_ok());
+    }
+
     #[test]
     fn create_new_vault_is_clean_writable_persistable_and_drops_session_credential_on_lock() {
         let directory = TestDir::create();
@@ -1090,7 +1810,9 @@ mod tests {
         let before = fs::read(&path).expect("source should be readable");
         let entry_id = mutate_first_title(&mut service, "local retry edit");
 
-        service.save_credential = Some(SecretString::new("wrong-password".to_owned()));
+        service.save_credential = Some(DesktopVaultCredential::password(SecretString::new(
+            "wrong-password".to_owned(),
+        )));
         assert!(matches!(
             service.save(),
             Err(DesktopError::SaveAuthenticationFailed)
@@ -1104,7 +1826,7 @@ mod tests {
                 .expose_secret(),
             "local retry edit"
         );
-        service.save_credential = Some(credential());
+        service.save_credential = Some(DesktopVaultCredential::password(credential()));
         assert!(!service.save().expect("valid retry should succeed").dirty);
     }
 
@@ -1321,6 +2043,62 @@ mod tests {
     }
 
     #[test]
+    fn standalone_generator_copy_is_unlock_scoped_validated_and_lease_owned() {
+        let locked_clipboard = Arc::new(TestClipboard::default());
+        let locked = AppState::new(locked_clipboard.clone());
+        assert!(matches!(
+            locked.copy_generated_password(SecretString::new("synthetic-value".to_owned())),
+            Err(DesktopError::Locked)
+        ));
+        assert!(
+            locked_clipboard
+                .content
+                .lock()
+                .expect("clipboard")
+                .is_none()
+        );
+
+        let (state, clipboard, _) = unlocked_app();
+        for invalid in [
+            String::new(),
+            "has\nnewline".to_owned(),
+            "contains\tcontrol".to_owned(),
+            "outside-ascii-ö".to_owned(),
+            "X".repeat(257),
+        ] {
+            assert!(matches!(
+                state.copy_generated_password(SecretString::new(invalid)),
+                Err(DesktopError::InvalidRequest)
+            ));
+        }
+        assert!(clipboard.content.lock().expect("clipboard").is_none());
+
+        let original = state
+            .copy_generated_password(SecretString::new("first-password".to_owned()))
+            .expect("generated clipboard write");
+        assert_eq!(original.expires_in_ms, crate::clipboard::CLIPBOARD_CLEAR_MS);
+        let subsequent = state
+            .copy_generated_password(SecretString::new("second-password".to_owned()))
+            .expect("replacement clipboard write");
+        assert!(
+            matches!(
+                state.clipboard.expire_generation(original.generation),
+                ClipboardClearStatus::NotOwned
+            ),
+            "an older timer must not clear the new generated password"
+        );
+        assert_eq!(
+            clipboard.content.lock().expect("clipboard").as_deref(),
+            Some("second-password")
+        );
+        assert!(matches!(
+            state.clipboard.expire_generation(subsequent.generation),
+            ClipboardClearStatus::Cleared
+        ));
+        assert!(clipboard.content.lock().expect("clipboard").is_none());
+    }
+
+    #[test]
     fn semantic_copy_commands_write_secrets_but_return_only_safe_receipts() {
         let (state, clipboard, entry_id) = unlocked_app();
         let expected_password = state
@@ -1340,6 +2118,22 @@ mod tests {
             Some(expected_password.as_str())
         );
 
+        let expected_title = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .entry_title(&entry_id)
+            .expect("fixture title")
+            .expose_secret()
+            .to_owned();
+        state
+            .copy_entry_title(&entry_id)
+            .expect("title copy should succeed");
+        assert_eq!(
+            clipboard.content.lock().expect("clipboard lock").as_deref(),
+            Some(expected_title.as_str())
+        );
+
         let expected_username = state
             .service
             .lock()
@@ -1354,6 +2148,60 @@ mod tests {
         assert_eq!(
             clipboard.content.lock().expect("clipboard lock").as_deref(),
             Some(expected_username.as_str())
+        );
+
+        let expected_url = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .entry_url(&entry_id)
+            .expect("fixture URL")
+            .expose_secret()
+            .to_owned();
+        state
+            .copy_entry_url(&entry_id)
+            .expect("URL copy should succeed");
+        assert_eq!(
+            clipboard.content.lock().expect("clipboard lock").as_deref(),
+            Some(expected_url.as_str())
+        );
+
+        let expected_notes = state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .entry_notes(&entry_id)
+            .expect("fixture notes")
+            .expose_secret()
+            .to_owned();
+        state
+            .copy_entry_notes(&entry_id)
+            .expect("notes copy should succeed");
+        assert_eq!(
+            clipboard.content.lock().expect("clipboard lock").as_deref(),
+            Some(expected_notes.as_str())
+        );
+
+        let custom_value = "custom clipboard value";
+        state
+            .service
+            .lock()
+            .expect("desktop service lock")
+            .session_mut()
+            .expect("fixture session")
+            .set_entry_custom_field(
+                &EntryId::new(entry_id.clone()),
+                "Private",
+                &SecretString::new(custom_value.to_owned()),
+                FieldProtection::Protected,
+            )
+            .expect("custom field should be writable");
+        state
+            .copy_entry_custom_field(&entry_id, "Private")
+            .expect("custom field copy should succeed");
+        assert_eq!(
+            clipboard.content.lock().expect("clipboard lock").as_deref(),
+            Some(custom_value)
         );
     }
 
@@ -1572,6 +2420,8 @@ mod tests {
                 "dirty",
                 "fileName",
                 "capabilities",
+                "recycleBinEnabled",
+                "recycleBinGroupId",
                 "rootGroupId",
                 "groups",
                 "entries",
@@ -1609,6 +2459,9 @@ mod tests {
                     "url",
                     "passwordPresent",
                     "notesPresent",
+                    "totpPresent",
+                    "expiresAtUnixSeconds",
+                    "icon",
                     "tags",
                 ],
             );

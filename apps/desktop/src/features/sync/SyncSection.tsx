@@ -1,45 +1,25 @@
 import { ProviderFields } from "./ProviderFields";
 import { SyncConflictPanel } from "./SyncConflictPanel";
+import { SyncProfileSelect } from "./SyncProfileSelect";
 import type { ProviderKind, SyncSectionOptions } from "./types";
 import { useSyncSection } from "./useSyncSection";
 
 export function SyncSection(props: SyncSectionOptions) {
   const sync = useSyncSection(props);
   return (
-    <section className="sync-section" aria-labelledby="sync-heading">
-      <div className="section-heading-row">
-        <div>
-          <p className="eyebrow">Desktop explicit sync</p>
-          <h2 id="sync-heading">Sync</h2>
-        </div>
-        <select
-          aria-label="Saved sync profile"
-          value={sync.selectedId ?? ""}
-          disabled={sync.busy}
-          onChange={(event) => {
-            if (event.target.value === "") {
-              sync.startNewProfile();
-              return;
-            }
-            const profile = sync.profiles.find(
-              (candidate) => candidate.profileId === event.target.value,
-            );
-            if (profile !== undefined) sync.selectProfile(profile);
-          }}
-        >
-          <option value="">New profile</option>
-          {sync.profiles.map((profile) => (
-            <option key={profile.profileId} value={profile.profileId}>
-              {profile.target.provider === "webdav"
-                ? "WebDAV"
-                : profile.target.provider === "s3"
-                  ? "S3"
-                  : "Nian Pass Gateway"}
-              {profile.available ? "" : " (different vault)"}
-            </option>
-          ))}
-        </select>
-      </div>
+    <section
+      className="sync-section"
+      aria-labelledby={props.embedded ? undefined : "sync-heading"}
+      aria-label={props.embedded ? "Sync configuration" : undefined}
+    >
+      <SyncProfileSelect
+        profiles={sync.profiles}
+        selectedId={sync.selectedId}
+        busy={sync.busy}
+        embedded={props.embedded === true}
+        onNew={sync.startNewProfile}
+        onSelect={sync.selectProfile}
+      />
       <div className="sync-grid">
         <label className="form-field">
           Provider
@@ -101,8 +81,14 @@ export function SyncSection(props: SyncSectionOptions) {
         </label>
       </div>
       <p className="sync-note">
-        Provider credentials and the master password are used once and are not
-        persisted.
+        Provider credentials and any entered password are used once, then
+        cleared from this form. The active keyfile stays in Rust and is never
+        copied into browser state or sync profiles.
+        {sync.hasKeyfile === true
+          ? " Leave the master password blank for keyfile-only vaults; enter it for password + keyfile vaults."
+          : sync.hasKeyfile === false
+            ? " Enter the vault master password to synchronize."
+            : " Checking the active keyfile before enabling synchronization."}
       </p>
       <div className="dialog-actions stacked-actions">
         <button

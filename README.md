@@ -76,8 +76,9 @@ offline reset that removes only Nian Pass sync metadata; local and remote KDBX
 files remain untouched, and the next Sync now follows the normal initial-sync
 rules.
 
-Sync is manual only and requires a clean saved vault, the real master password,
-and freshly entered provider credentials. WebDAV passwords, S3 secret keys and
+Sync is manual only and requires a clean saved vault, the active keyfile when
+configured, an entered master password when applicable, and freshly entered
+provider credentials. WebDAV passwords, S3 secret keys and
 session tokens, gateway access tokens, and the master password are never persisted. Production
 endpoints require HTTPS; plaintext HTTP is accepted only on loopback for local
 tests. The gateway stores exact opaque encrypted KDBX bytes under validated
@@ -237,14 +238,19 @@ After a remembered vault successfully completes the existing two-phase Lock,
 native Android releases WRITE and verifies that only READ remains before Rust
 drops the decrypted session. Cold Autofill rehydration is always read-only.
 
+Android Autofill now recognizes explicit OTP fields and requests the current TOTP
+from Rust only during final fulfillment. The provisioning URI/seed never crosses
+the native bridge; Kotlin receives only the short-lived code when one exists.
+Writable Android mobile entry detail can configure, replace, remove, and explicitly
+reveal TOTP. The read-only iOS mobile flow can explicitly reveal a current code.
+
 Android still does not support biometric quick unlock, master-password or KDBX
-derived-key persistence, passkeys, TOTP autofill, external credential
-save/create, or sync. Biometric quick unlock remains deferred because the
+derived-key persistence, passkeys, external credential save/create, or sync. Biometric quick unlock remains deferred because the
 reviewed KDBX credential boundary does not expose reusable non-password unlock
 material suitable for Android Keystore auth-per-use wrapping; the separate
 M5.3 metadata key is never reused for that purpose. Deferred Apple work provides no
 current iOS CRUD/Save, Password AutoFill, biometric quick unlock, stored unlock
-material, passkeys, OTP, credential save/create, or sync support.
+material, passkeys, credential save/create, or sync support.
 
 `apps/desktop` remains the historical path for the shared Tauri application
 host. Renaming it is deferred to a dedicated mechanical refactor. Desktop and
@@ -291,9 +297,10 @@ filename and reviewed presentation DTOs.
 Password and notes plaintext cross into React only after their respective
 Reveal action, live in local detail state for at most 15 seconds, and clear on
 Hide, entry/group change, Lock, unmount, blur, or hidden visibility. JavaScript
-strings cannot be deterministically zeroized. Copy Password and Copy Username
-instead use semantic Rust IPC commands; password plaintext is never returned to
-React by the copy path.
+strings cannot be deterministically zeroized. Copy Title, Copy Password, Copy Username,
+Copy URL, Copy Notes, and Copy Custom Field instead use semantic Rust IPC commands.
+Protected titles, URL values, notes, and custom-field values can therefore be copied
+without revealing their plaintext to React; those copy paths return only safe clipboard receipts.
 
 After 30 seconds Nian Pass re-reads the active clipboard and clears it only if
 it still matches the value written by Nian Pass. Ownership uses a per-copy random
@@ -305,10 +312,27 @@ and clear remains a narrow residual race. Clipboard history, cloud clipboard
 sync, and third-party clipboard managers may retain copies outside the process's
 control.
 
-M4.5 deliberately has no Save As, autosave, force overwrite, automatic
+At the M4.5 lifecycle milestone, Save As, autosave, force overwrite, automatic
 local/external merge, recycle-bin workflow, password generator, TOTP/passkey
 editing, attachments, URL opening, search, cloud transport, biometrics, OS
-keychain unlock, screenshot-blocking native code, or updater. Applying a form still mutates only the unlocked
+keychain unlock, screenshot-blocking native code, and updater were deliberately
+out of scope. Later desktop work now adds safe metadata search, password
+generation (random characters and offline passphrases), a KDBX-native recycle-bin
+workflow, entry expiry, duplication, desktop TOTP configure/reveal/copy, and an
+on-demand local password-health report. Passphrases use independent unbiased
+Web Crypto selections from a bundled 7,772-word EFF-derived list distributed
+with KeePassXC, with 6–12 words, hyphen/space separators, and optional
+capitalization. This is a local new-password draft only, never an implicit
+mutation or Save; no password generator fetch or secret storage occurs. The
+wordlist attribution and CC BY 3.0 US license link are recorded in
+[`WORDLIST-ATTRIBUTION.md`](apps/desktop/src/features/vault/WORDLIST-ATTRIBUTION.md). The
+report analyzes active entries inside Rust for missing, empty, reused,
+under-12-character, or locally weak passwords; it excludes Trash and returns only
+secret-free issue metadata. The reported 0–4 strength score is a bounded local
+heuristic, not an entropy estimate or crack-time promise, and the report performs no
+online breach lookup.
+Passkeys and the other exclusions remain out of scope. Applying a form still mutates
+only the unlocked
 in-memory document; only explicit Save writes. Dirty Lock and close prompts
 offer Save, discard, or Cancel, and neither Lock nor close continues after a
 failed or conflicted Save. The main-window close request is prevented while a
@@ -367,16 +391,24 @@ pre-primary save does not advance the recovery generation. A clean save performs
 no filesystem I/O.
 
 The workspace also retains a KDBX-independent, secret-free metadata projection;
-an explicit zeroizing `SecretString` for narrow password and notes reads; an
-opaque `keepass-rs` adapter with preservation-aware field and structural
-mutations; and a small read-only CLI. Entries can be created, moved, and
-permanently deleted by stable UUID. Groups can be created, renamed, moved, and
-permanently deleted with root/cycle validation. Custom-field listing exposes
+an explicit zeroizing `SecretString` for narrow password, notes, custom-value,
+and TOTP-code handling; an opaque `keepass-rs` adapter with preservation-aware
+field and structural mutations; and a small read-only CLI. Entries can be created, duplicated, moved,
+moved to the KDBX recycle bin, restored, and permanently deleted from Trash by
+stable UUID. Duplication stays inside the Rust/KDBX trust boundary: it copies
+the current entry state and protection modes to a fresh UUID without projecting
+secret plaintext into the frontend or copying history. Groups can be created,
+renamed, moved, moved to Trash as a subtree, restored, and permanently deleted
+from Trash with root/cycle validation. Custom-field listing exposes
 only names and protection metadata; values require an explicit `SecretString`
 read. Group names, custom-field names, entry metadata, identifiers, and file
 paths remain privacy-sensitive even when they are not cryptographic secrets.
 Protected Title, UserName, and URL fields are represented without plaintext in
-bulk projections.
+bulk projections. TOTP is projected only as a presence boolean. Desktop code
+generation is an explicit narrow read, clipboard copy keeps the code in the
+Rust/OS clipboard path, and configure/replace/remove participates in the same
+atomic entry update as other edited fields. Existing provisioning material is
+never preloaded into React.
 
 Read support is verified only for the combinations backed by trusted fixtures.
 See [KDBX compatibility](docs/kdbx-compatibility.md) for the evidence matrix and
@@ -388,16 +420,70 @@ to a caller-owned writer, and verifies structural/custom-field self-roundtrips
 plus the exact external KeePassXC creation/open and title-mutation pipelines
 recorded in the compatibility matrix.
 
-There is no CLI mutation command and no raw database escape hatch. Product-level
-recycle-bin behavior, notes editing, TOTP, attachment/icon UI, expiry editing,
-history restore, duplicate, bulk operations, Android network sync,
-direct cloud OAuth providers, and server/gateway features remain out of scope.
+There is no CLI mutation command and no raw database escape hatch. Desktop entry
+history now exposes only secret-free historical metadata on demand and can restore
+attachment-free, non-custom-icon revisions entirely inside Rust/KDBX; the exact
+in-memory document revision is revalidated before restore, and the pre-restore
+current state becomes a new history item. Revisions involving attachments or custom
+icons fail closed rather than silently losing state. Desktop attachments can be
+listed as metadata, imported through a native file picker with a 64 MiB bound, and
+exported through a native save picker without attachment bytes crossing the WebView
+IPC boundary. Mobile entry detail reviews attachment name/size/protection metadata on demand on Android and iOS. Android also imports and exports attachments through native Storage Access Framework pickers with private staging, a 64 MiB import bound enforced by Kotlin and Rust, and no attachment bytes crossing WebView IPC; iOS remains metadata-only. Import rejects duplicate names instead of implicitly replacing data.
+Attachment delete/replace remains deferred because the pinned KDBX dependency cannot
+yet prove preservation of historical binary references. The shared desktop/mobile
+entry editor can view and assign all 69 standard KDBX built-in icons, clear an icon,
+and preserve an existing custom/non-standard icon without exposing custom-icon bytes.
+Desktop can also replace an entry icon with a native-picked PNG custom icon: Rust bounds
+the file to 4 MiB, validates PNG chunk structure and dimensions up to 4096 × 4096,
+tracks the prior entry state in KDBX history, and never sends image bytes or native paths
+through WebView IPC. Prior custom-icon objects are retained because historical revisions
+may still reference them. Favicon download, custom-icon maintenance/cleanup, iOS attachment import/export,
+Android network sync, direct cloud OAuth providers,
+passkeys, online breach checking, password-entropy/crack-time scoring, and server/gateway features
+remain out of scope.
+Desktop General Settings can edit KDBX database name, description, default username, the recycle-bin policy, and the finite `HistoryMaxItems` revision-count policy. Database metadata and history policy are loaded only while that settings page is open rather than being added to every browse snapshot. Empty metadata fields are stored as unset values; updates are atomic, bounded in Rust, mark the vault dirty, update the corresponding KDBX metadata timestamps plus `SettingsChanged`, and still require the normal explicit Save. Lowering the history item limit immediately prunes older revisions from the unlocked Rust document, `0` retains no revisions, and a blank control removes the finite item-count limit. The configured count is re-enforced after tracked entry edits and divergent sync merge. Disabling Trash is rejected until its subtree is empty, and re-enabling does not eagerly create a new Trash group. KDBX `HistoryMaxSize` is preserved but not edited or enforced because the pinned dependency does not expose an exact serialized-history-size boundary; encryption/KDF parameters likewise remain non-editable.
+Desktop and writable Android entry tags are editable through dedicated tracked mutations rather than a generic field path; iOS/read-only mobile browsing displays tags without exposing mutation controls. The complete ordered tag set is bounded in Rust to 64 exact, non-empty, duplicate-free values of at most 256 UTF-8 bytes each; one Apply creates at most one KDBX history revision, re-applies `HistoryMaxItems`, marks the vault dirty, and still requires explicit Save. The shared editor preserves tag spelling, spacing, order, and case exactly instead of trimming or case-folding user metadata.
+Desktop bulk entry operations support selecting up to 1024 entries per request. Active
+entries can move atomically to a non-Trash group or to Trash; recycled entries can be
+restored atomically or permanently deleted as one batch. Requests with no IDs, duplicate
+IDs, or more than 1024 IDs are rejected. Bulk Move cannot target Trash and cannot move
+entries that are already recycled, while Bulk Restore and Bulk Permanent Delete require
+current recycle-bin membership. Restore uses each entry's previous safe parent when it
+still exists outside Trash, otherwise the vault root.
+The Rust/KDBX layer validates the complete batch against a cloned candidate database,
+commits only after every entry succeeds, and advances the document revision at most once
+for a successful batch; a failed batch leaves the retained document unchanged.
+Desktop entry lists can be presentation-sorted by database order, title ascending or
+descending, username, URL, or nearest expiry timestamp. Sorting uses only the secret-free summary projection,
+keeps protected/missing values opaque, and never mutates KDBX child order or marks the
+vault dirty. Entry rows also surface bounded tag metadata and TOTP presence, support
+Arrow Up/Down plus Home/End keyboard navigation, and keep bulk-selection keyboard
+movement separate from selection toggling. The shared desktop/mobile group tree can
+collapse or expand branches without changing KDBX hierarchy.
+Desktop global search supports ordinary case-insensitive metadata substring matching and
+composable `tag:NAME`, `group:NAME`, `has:totp`, `has:password`, `has:notes`,
+`is:expired`, `is:expiring`, and `is:protected` filters. For example,
+`tag:"Personal Finance" has:totp` matches the exact tag (ignoring case), and
+`group:Work bank` combines group-name matching with visible metadata text.
+`is:expired` includes timestamps at or before the current instant;
+`is:expiring` includes only future expiries within the next 30 days. Quoting
+preserves multi-word filter values. Filters combine with AND, ignore entries in
+Trash and its descendants, do not inspect protected field contents, never request
+secret reveals, and do not mutate the vault. Clearing search restores group browsing.
 KDBX 3.1 and 4.0 open read-only on desktop: write capability is identified immediately after unlock, mutation and Save controls are disabled, and backend mutation commands reject the session before editing. KDBX 4.1 is the only currently writable local format; unsupported formats are never silently upgraded or rewritten.
 
-The deletion APIs remain explicitly named `permanently_delete_entry` and
-`permanently_delete_group`: they remove objects from the KDBX tree and create
-deleted-object tombstones; they do not implement KeePassXC's user-facing
-recycle-bin policy. Entry creation omits empty Title, UserName, and URL fields,
+The low-level `permanently_delete_entry` and `permanently_delete_group` adapter
+APIs still remove objects from the KDBX tree and create deleted-object
+tombstones, but product-level Delete does not call them directly. Desktop and
+mobile Delete move objects into the KDBX recycle bin without creating a
+tombstone. Desktop Restore uses the recorded previous parent when it is still
+valid and outside Trash, otherwise the vault root; desktop permanent deletion
+is accepted only for an object already inside the recycle-bin subtree. Desktop Settings
+can explicitly enable or disable the KDBX recycle-bin policy; disabling requires an
+empty Trash, keeps the stable recycle-bin identity, and remains an unsaved mutation
+until the normal Save flow succeeds. Recycled
+entries are excluded from browser, Android, and iOS credential candidate,
+identity, and final secret-release paths until restored. Entry creation omits empty Title, UserName, and URL fields,
 omits Password for `None`, and treats `Some("")` as an explicitly present,
 protected password.
 
@@ -629,10 +715,9 @@ dependency/advisory handling, and the reviewed exception process.
 
 Nian Pass remains experimental and is not production-ready. Desktop edits can
 be saved explicitly through M3 safe persistence, but external divergence is
-only detected and refused; it is not automatically merged. There is no Save As,
+only detected and refused; it is not automatically merged. Desktop can export the current Rust-owned state to a new verified encrypted KDBX copy without retargeting the session or overwriting an existing file. There is no canonical-path retargeting Save As,
 force overwrite, cloud transport/provider integration, file watcher, autosave
-timer, keyfile support, master-password rotation, biometric unlock, or
-guaranteed zeroization of decrypted
+timer, biometric unlock, or guaranteed zeroization of decrypted
 allocations owned by `keepass-rs` or JavaScript/WebView strings. The CLI remains read-only. Local persistence
 uses optimistic conflict detection rather than cooperative or distributed
 locking. Windows open/read sessions are supported, but dirty save currently
@@ -640,3 +725,37 @@ fails closed with `UnsupportedPersistencePlatform` pending a safe-Rust,
 security-preserving replacement implementation whose failure states also keep
 the canonical path present, plus native primary/backup DACL evidence. See [write
 safety](docs/write-safety.md) for exact guarantees and limitations.
+
+Desktop also provides a standalone offline password/passphrase generator in the unlocked
+vault toolbar, including read-only sessions. It does not create an entry or modify
+vault state. Generation uses Web Crypto's secure RNG; invalid character lengths
+(outside 8–128 or nonintegers) fail closed rather than silently generating a short
+password. Generated values stay transiently in the WebView dialog, are masked
+until explicitly shown, and are discarded from React state on close, blur,
+visibility loss, or idle privacy reset. Explicit Copy sends that value once to a
+Rust command that requires an unlocked session and returns only a clipboard
+receipt; the existing native 30-second ownership-aware clearing policy applies.
+JavaScript strings and OS clipboard history cannot be guaranteed zeroized.
+
+Desktop unlock supports password-only, keyfile-only, and password+keyfile KDBX
+credentials. The keyfile is selected with a native picker, bounded to 1 MiB,
+read only by Rust, and represented in React only by its filename. Raw keyfile
+bytes never cross Tauri IPC. After successful unlock, Rust retains the credential
+components required for verified ordinary Save and external-conflict Reload. Desktop
+Settings can rotate either credential component only from a clean writable session. Master-
+password rotation preserves any retained keyfile. Keyfile Add/Replace uses a native picker and
+preserves the retained password without sending it back through React. Master password removal
+is supported only when a retained keyfile exists and requires explicit acknowledgement that a
+separate accessible keyfile backup is essential. Adding a master password back to a keyfile-only
+vault is supported. Keyfile removal is rejected if it would leave no password or only an empty
+password, even through direct IPC. Historical `.bak` files may retain the previous credential:
+rotation alone does not revoke access to backups. Manual desktop cloud sync now uses the active Rust-owned keyfile plus an optional
+newly entered password. Keyfile-only sync sends no password over IPC; composite sync
+requires its password. Profiles, encrypted BASE, and recovery journals never store
+either credential component. Each rotation verifies the current composite
+authority, re-encrypts and reopens the candidate under the replacement credential, installs it
+through the same verified persistence transaction, and updates retained authority only after a
+proven commit. If a post-replacement failure leaves durability uncertain, Rust probes the
+canonical generation with both authorities and adopts the replacement only when the new
+credential opens and the old one no longer does. Lock or explicit discard drops that authority.
+Hardware-key challenge-response providers remain unsupported.

@@ -1,8 +1,7 @@
 use sync_provider_core::{CiphertextDigest, RemoteObjectProvider, RemoteRead};
-use vault_core::SecretString;
 
 use crate::{
-    LocalSnapshot, LocalVault, SyncEngine, SyncError,
+    LocalSnapshot, LocalVault, SyncCredential, SyncEngine, SyncError,
     codec::open_document,
     store::{JournalPhase, JournalRecord, LoadedJournal},
 };
@@ -12,7 +11,7 @@ impl SyncEngine {
         &self,
         provider: &P,
         local: &L,
-        password: &SecretString,
+        credential: &SyncCredential,
         current_local: &LocalSnapshot,
     ) -> Result<bool, SyncError> {
         let Some(LoadedJournal {
@@ -22,7 +21,7 @@ impl SyncEngine {
         else {
             return Ok(false);
         };
-        open_document(&candidate, password)?;
+        open_document(&candidate, credential)?;
         let remote = provider.read().await?;
         let (remote_matches_candidate, remote_unchanged, current_revision) = match remote {
             RemoteRead::Missing => (false, record.expected_remote_revision.is_none(), None),
@@ -61,7 +60,7 @@ impl SyncEngine {
                 if !local_matches_persisted(current_local, &record) {
                     return Err(SyncError::LocalChangedDuringRecovery);
                 }
-                local.replace_if_unchanged(current_local, &candidate, password)?;
+                local.replace_if_unchanged(current_local, &candidate, credential)?;
             }
             self.store.mark_local_committed(&mut record)?;
         }

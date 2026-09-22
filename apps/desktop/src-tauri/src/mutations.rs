@@ -1,10 +1,26 @@
+mod bulk;
+pub use bulk::{
+    BulkDeleteEntriesRequestDto, BulkMoveEntriesRequestDto, BulkRestoreEntriesRequestDto,
+    BulkTrashEntriesRequestDto,
+};
+
 use serde::Deserialize;
-use vault_core::{EntryId, EntryUpdate, FieldProtection, GroupId, NewEntry, SecretString};
+use vault_core::{
+    EntryExpiry, EntryIconUpdate, EntryId, EntryTotpUpdate, EntryUpdate, FieldProtection, GroupId,
+    MAX_STANDARD_ICON_ID, NewEntry, SecretString,
+};
 
 use crate::{
     dto::{CreatedEntryDto, CreatedGroupDto, VaultSnapshotDto},
     state::{DesktopError, DesktopVaultService, map_mutation_error},
 };
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EntryIconRequestDto {
+    None,
+    BuiltIn { id: u8 },
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -15,6 +31,11 @@ pub struct UpdateEntryRequestDto {
     url: Option<String>,
     password: Option<String>,
     notes: Option<String>,
+    expires: Option<bool>,
+    expiry_unix_seconds: Option<i64>,
+    totp_enabled: Option<bool>,
+    totp_uri: Option<String>,
+    icon: Option<EntryIconRequestDto>,
 }
 
 #[derive(Deserialize)]
@@ -72,6 +93,13 @@ pub struct SetCustomFieldRequestDto {
     protection: FieldProtectionRequestDto,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetEntryTagsRequestDto {
+    entry_id: String,
+    tags: Vec<String>,
+}
+
 impl DesktopVaultService {
     pub fn update_entry(
         &mut self,
@@ -80,6 +108,10 @@ impl DesktopVaultService {
         require_id(&request.entry_id)?;
         let password = request.password.map(SecretString::new);
         let notes = request.notes.map(SecretString::new);
+        let expiry = expiry_from_request(request.expires, request.expiry_unix_seconds)?;
+        let totp_uri = request.totp_uri.map(SecretString::new);
+        let totp = totp_from_request(request.totp_enabled, totp_uri.as_ref())?;
+        let icon = icon_from_request(request.icon)?;
         self.session_mut()?
             .update_entry(
                 &EntryId::new(request.entry_id),
@@ -89,8 +121,22 @@ impl DesktopVaultService {
                     url: request.url.as_deref(),
                     password: password.as_ref(),
                     notes: notes.as_ref(),
+                    expiry,
+                    totp,
+                    icon,
                 },
             )
+            .map_err(map_mutation_error)?;
+        self.snapshot()
+    }
+
+    pub fn set_entry_tags(
+        &mut self,
+        request: SetEntryTagsRequestDto,
+    ) -> Result<VaultSnapshotDto, DesktopError> {
+        require_id(&request.entry_id)?;
+        self.session_mut()?
+            .set_entry_tags(&EntryId::new(request.entry_id), &request.tags)
             .map_err(map_mutation_error)?;
         self.snapshot()
     }
@@ -121,10 +167,41 @@ impl DesktopVaultService {
         })
     }
 
+    pub fn duplicate_entry(&mut self, entry_id: String) -> Result<CreatedEntryDto, DesktopError> {
+        require_id(&entry_id)?;
+        let created = self
+            .session_mut()?
+            .duplicate_entry(&EntryId::new(entry_id))
+            .map_err(map_mutation_error)?;
+        Ok(CreatedEntryDto {
+            created_entry_id: created.as_str().to_owned(),
+            snapshot: self.snapshot()?,
+        })
+    }
+
     pub fn delete_entry(&mut self, entry_id: String) -> Result<VaultSnapshotDto, DesktopError> {
         require_id(&entry_id)?;
         self.session_mut()?
-            .permanently_delete_entry(&EntryId::new(entry_id))
+            .trash_entry(&EntryId::new(entry_id))
+            .map_err(map_mutation_error)?;
+        self.snapshot()
+    }
+
+    pub fn restore_entry(&mut self, entry_id: String) -> Result<VaultSnapshotDto, DesktopError> {
+        require_id(&entry_id)?;
+        self.session_mut()?
+            .restore_entry(&EntryId::new(entry_id))
+            .map_err(map_mutation_error)?;
+        self.snapshot()
+    }
+
+    pub fn permanently_delete_entry(
+        &mut self,
+        entry_id: String,
+    ) -> Result<VaultSnapshotDto, DesktopError> {
+        require_id(&entry_id)?;
+        self.session_mut()?
+            .permanently_delete_recycled_entry(&EntryId::new(entry_id))
             .map_err(map_mutation_error)?;
         self.snapshot()
     }
@@ -190,7 +267,26 @@ impl DesktopVaultService {
     pub fn delete_group(&mut self, group_id: String) -> Result<VaultSnapshotDto, DesktopError> {
         require_id(&group_id)?;
         self.session_mut()?
-            .permanently_delete_group(&GroupId::new(group_id))
+            .trash_group(&GroupId::new(group_id))
+            .map_err(map_mutation_error)?;
+        self.snapshot()
+    }
+
+    pub fn restore_group(&mut self, group_id: String) -> Result<VaultSnapshotDto, DesktopError> {
+        require_id(&group_id)?;
+        self.session_mut()?
+            .restore_group(&GroupId::new(group_id))
+            .map_err(map_mutation_error)?;
+        self.snapshot()
+    }
+
+    pub fn permanently_delete_group(
+        &mut self,
+        group_id: String,
+    ) -> Result<VaultSnapshotDto, DesktopError> {
+        require_id(&group_id)?;
+        self.session_mut()?
+            .permanently_delete_recycled_group(&GroupId::new(group_id))
             .map_err(map_mutation_error)?;
         self.snapshot()
     }
@@ -232,6 +328,45 @@ impl DesktopVaultService {
     }
 }
 
+fn totp_from_request<'a>(
+    enabled: Option<bool>,
+    uri: Option<&'a SecretString>,
+) -> Result<Option<EntryTotpUpdate<'a>>, DesktopError> {
+    match (enabled, uri) {
+        (None, None) => Ok(None),
+        (Some(false), None) => Ok(Some(EntryTotpUpdate::Clear)),
+        (Some(true), Some(uri)) if !uri.expose_secret().trim().is_empty() => {
+            Ok(Some(EntryTotpUpdate::Set(uri)))
+        }
+        _ => Err(DesktopError::InvalidRequest),
+    }
+}
+
+fn icon_from_request(
+    icon: Option<EntryIconRequestDto>,
+) -> Result<Option<EntryIconUpdate>, DesktopError> {
+    match icon {
+        None => Ok(None),
+        Some(EntryIconRequestDto::None) => Ok(Some(EntryIconUpdate::None)),
+        Some(EntryIconRequestDto::BuiltIn { id }) if id <= MAX_STANDARD_ICON_ID => {
+            Ok(Some(EntryIconUpdate::BuiltIn(id)))
+        }
+        Some(EntryIconRequestDto::BuiltIn { .. }) => Err(DesktopError::InvalidRequest),
+    }
+}
+
+fn expiry_from_request(
+    expires: Option<bool>,
+    expiry_unix_seconds: Option<i64>,
+) -> Result<Option<EntryExpiry>, DesktopError> {
+    match (expires, expiry_unix_seconds) {
+        (None, None) => Ok(None),
+        (Some(false), None) => Ok(Some(EntryExpiry::Disabled)),
+        (Some(true), Some(seconds)) => Ok(Some(EntryExpiry::AtUnixSeconds(seconds))),
+        _ => Err(DesktopError::InvalidRequest),
+    }
+}
+
 fn require_id(value: &str) -> Result<(), DesktopError> {
     if value.is_empty() {
         Err(DesktopError::InvalidRequest)
@@ -260,9 +395,9 @@ mod tests {
     use vault_core::{EntryId, FieldProtection, SecretString};
 
     use super::{
-        CreateEntryRequestDto, CreateGroupRequestDto, FieldProtectionRequestDto,
-        MoveEntryRequestDto, MoveGroupRequestDto, RenameGroupRequestDto, SetCustomFieldRequestDto,
-        UpdateEntryRequestDto,
+        CreateEntryRequestDto, CreateGroupRequestDto, EntryIconRequestDto,
+        FieldProtectionRequestDto, MoveEntryRequestDto, MoveGroupRequestDto, RenameGroupRequestDto,
+        SetCustomFieldRequestDto, SetEntryTagsRequestDto, UpdateEntryRequestDto,
     };
     use crate::{
         clipboard::ClipboardPort,
@@ -331,6 +466,11 @@ mod tests {
                 url: Some("m4.3://updated".to_owned()),
                 password: Some("M4.3-SECRET-PASSWORD".to_owned()),
                 notes: Some("M4.3-SECRET-NOTES".to_owned()),
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
             })
             .expect("entry update should succeed");
         assert!(updated.dirty);
@@ -342,6 +482,28 @@ mod tests {
                 .revision(),
             revision_before + 1
         );
+
+        let tagged = service
+            .set_entry_tags(SetEntryTagsRequestDto {
+                entry_id: updated.entries[0].id.clone(),
+                tags: vec!["finance".to_owned(), "primary".to_owned()],
+            })
+            .expect("tag mutation should succeed");
+        assert!(tagged.dirty);
+        assert_eq!(
+            service
+                .entry_detail(&updated.entries[0].id)
+                .expect("tagged detail")
+                .tags,
+            ["finance", "primary"]
+        );
+        assert!(matches!(
+            service.set_entry_tags(SetEntryTagsRequestDto {
+                entry_id: updated.entries[0].id.clone(),
+                tags: vec![String::new()],
+            }),
+            Err(DesktopError::InvalidRequest)
+        ));
 
         let created = service
             .create_entry(CreateEntryRequestDto {
@@ -362,6 +524,21 @@ mod tests {
                 .entries
                 .iter()
                 .any(|item| item.id == created.created_entry_id)
+        );
+
+        let duplicated = service
+            .duplicate_entry(created.created_entry_id.clone())
+            .expect("entry duplication should succeed");
+        assert!(duplicated.created_entry_id != created.created_entry_id);
+        assert!(duplicated.snapshot.dirty);
+        let duplicated_json = to_string(&duplicated).expect("duplicate result should serialize");
+        assert!(!duplicated_json.contains("M4.3-SECRET"));
+        assert!(
+            duplicated
+                .snapshot
+                .entries
+                .iter()
+                .any(|item| item.id == duplicated.created_entry_id)
         );
 
         let moved = service
@@ -472,6 +649,186 @@ mod tests {
     }
 
     #[test]
+    fn expiry_request_shape_is_validated_and_projects_safe_metadata() {
+        let mut service = unlocked_service();
+        let entry_id = service
+            .snapshot()
+            .expect("snapshot should exist")
+            .entries
+            .first()
+            .expect("fixture entry")
+            .id
+            .clone();
+
+        for (expires, expiry_unix_seconds) in [
+            (Some(true), None),
+            (Some(false), Some(2_000_000_000)),
+            (None, Some(2_000_000_000)),
+        ] {
+            assert!(matches!(
+                service.update_entry(UpdateEntryRequestDto {
+                    entry_id: entry_id.clone(),
+                    title: None,
+                    username: None,
+                    url: None,
+                    password: None,
+                    notes: None,
+                    expires,
+                    expiry_unix_seconds,
+                    totp_enabled: None,
+                    totp_uri: None,
+                    icon: None,
+                }),
+                Err(DesktopError::InvalidRequest)
+            ));
+        }
+        assert!(
+            !service
+                .snapshot()
+                .expect("snapshot should remain clean")
+                .dirty
+        );
+
+        let expiry = 2_000_000_000;
+        let updated = service
+            .update_entry(UpdateEntryRequestDto {
+                entry_id: entry_id.clone(),
+                title: None,
+                username: None,
+                url: None,
+                password: None,
+                notes: None,
+                expires: Some(true),
+                expiry_unix_seconds: Some(expiry),
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
+            })
+            .expect("valid expiry should update");
+        assert_eq!(
+            updated
+                .entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .and_then(|entry| entry.expires_at_unix_seconds),
+            Some(expiry)
+        );
+
+        let disabled = service
+            .update_entry(UpdateEntryRequestDto {
+                entry_id: entry_id.clone(),
+                title: None,
+                username: None,
+                url: None,
+                password: None,
+                notes: None,
+                expires: Some(false),
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: None,
+            })
+            .expect("expiry should disable");
+        assert_eq!(
+            disabled
+                .entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .and_then(|entry| entry.expires_at_unix_seconds),
+            None
+        );
+    }
+
+    #[test]
+    fn builtin_icon_request_is_bounded_and_projects_without_custom_icon_data() {
+        let mut service = unlocked_service();
+        let entry_id = service
+            .snapshot()
+            .expect("snapshot should exist")
+            .entries
+            .first()
+            .expect("fixture entry")
+            .id
+            .clone();
+
+        let updated = service
+            .update_entry(UpdateEntryRequestDto {
+                entry_id: entry_id.clone(),
+                title: None,
+                username: None,
+                url: None,
+                password: None,
+                notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: Some(EntryIconRequestDto::BuiltIn { id: 68 }),
+            })
+            .expect("standard icon should update");
+        let entry = updated
+            .entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .expect("updated entry should project");
+        assert!(matches!(
+            crate::dto::EntryIconDto::from(vault_core::EntryIconSummary::BuiltIn(68)),
+            crate::dto::EntryIconDto::BuiltIn { id: 68 }
+        ));
+        assert!(matches!(
+            entry.icon,
+            crate::dto::EntryIconDto::BuiltIn { id: 68 }
+        ));
+
+        let before_invalid = service.snapshot().expect("snapshot");
+        assert!(matches!(
+            service.update_entry(UpdateEntryRequestDto {
+                entry_id: entry_id.clone(),
+                title: None,
+                username: None,
+                url: None,
+                password: None,
+                notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: Some(EntryIconRequestDto::BuiltIn { id: 69 }),
+            }),
+            Err(DesktopError::InvalidRequest)
+        ));
+        assert_eq!(
+            service.snapshot().expect("snapshot after invalid").dirty,
+            before_invalid.dirty
+        );
+
+        let cleared = service
+            .update_entry(UpdateEntryRequestDto {
+                entry_id: entry_id.clone(),
+                title: None,
+                username: None,
+                url: None,
+                password: None,
+                notes: None,
+                expires: None,
+                expiry_unix_seconds: None,
+                totp_enabled: None,
+                totp_uri: None,
+                icon: Some(EntryIconRequestDto::None),
+            })
+            .expect("icon should clear");
+        assert!(matches!(
+            cleared
+                .entries
+                .iter()
+                .find(|entry| entry.id == entry_id)
+                .expect("cleared entry")
+                .icon,
+            crate::dto::EntryIconDto::None
+        ));
+    }
+
+    #[test]
     fn dirty_plain_lock_refuses_and_explicit_discard_locks_despite_clipboard_failure() {
         let source_before = fs::read(fixture_path()).expect("fixture should be readable");
         let state = AppState::new(Arc::new(FailingClipboard));
@@ -496,6 +853,11 @@ mod tests {
                     url: None,
                     password: None,
                     notes: None,
+                    expires: None,
+                    expiry_unix_seconds: None,
+                    totp_enabled: None,
+                    totp_uri: None,
+                    icon: None,
                 })
                 .expect("mutation should succeed");
         }

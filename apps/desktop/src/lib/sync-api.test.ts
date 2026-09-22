@@ -24,6 +24,8 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
       conflict: null,
       snapshot: {
         dirty: false,
+        recycleBinEnabled: true,
+        recycleBinGroupId: null,
         fileName: "fixture.kdbx",
         capabilities: {
           formatVersion: "4.1",
@@ -40,6 +42,8 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
       conflict: null,
       snapshot: {
         dirty: false,
+        recycleBinEnabled: true,
+        recycleBinGroupId: null,
         fileName: "fixture.kdbx",
         capabilities: {
           formatVersion: "4.1",
@@ -88,7 +92,13 @@ test("sync API exposes only the reviewed command surface and argument shapes", a
     "sync_now",
     "resolve_sync_conflict",
   ]);
+  await api.syncNow("profile-id", credentials, null);
   expect(calls.at(-1)?.args).toEqual({
+    profileId: "profile-id",
+    credentials,
+    masterPassword: null,
+  });
+  expect(calls.at(-2)?.args).toEqual({
     request: {
       profileId: "profile-id",
       conflictOperationId: "operation-id",

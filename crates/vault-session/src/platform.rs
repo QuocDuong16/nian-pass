@@ -10,7 +10,7 @@ pub(crate) const PRIOR_BACKUP_TEMP_PREFIX: &str = ".nian-pass-prior-backup-";
 pub(crate) const SAVE_SUPPORTED: bool = true;
 
 #[cfg(windows)]
-pub(crate) const SAVE_SUPPORTED: bool = true;
+pub(crate) const SAVE_SUPPORTED: bool = false;
 
 pub(crate) const SYNC_REPLACE_SUPPORTED: bool = true;
 
@@ -142,6 +142,8 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    #[cfg(windows)]
+    use super::replace_windows_with_backup;
     use super::{
         super::{FileFingerprint, SessionError},
         replace_windows_with_backup_transaction,
@@ -175,6 +177,28 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_replace_transaction_uses_replacefile_and_rotates_backup() {
+        let directory = temp_dir();
+        let primary = directory.join("vault.kdbx");
+        let backup = directory.join("vault.kdbx.bak");
+        let prepared = directory.join("prepared.kdbx");
+        fs::write(&primary, b"A").expect("primary");
+        fs::write(&backup, b"Z").expect("prior backup");
+        fs::write(&prepared, b"B").expect("prepared");
+        let expected = fingerprint(&primary);
+
+        replace_windows_with_backup(&prepared, &primary, &backup, &expected)
+            .expect("native ReplaceFileW transaction should succeed");
+
+        assert_eq!(fs::read(&primary).expect("primary"), b"B");
+        assert_eq!(fs::read(&backup).expect("backup"), b"A");
+        assert!(!prepared.exists());
+        assert_no_prior_backup(&directory);
+        fs::remove_dir_all(directory).expect("cleanup");
+    }
+
     #[test]
     fn existing_backup_success_rotates_only_after_replacement() {
         let directory = temp_dir();
@@ -198,6 +222,36 @@ mod tests {
         .expect("replacement succeeds");
         assert_eq!(fs::read(&primary).expect("primary"), b"B");
         assert_eq!(fs::read(&backup).expect("backup"), b"A");
+        assert_no_prior_backup(&directory);
+        fs::remove_dir_all(directory).expect("cleanup");
+    }
+
+    #[test]
+    fn first_backup_partial_replacement_failure_restores_primary_and_leaves_no_backup() {
+        let directory = temp_dir();
+        let primary = directory.join("vault.kdbx");
+        let backup = directory.join("vault.kdbx.bak");
+        let prepared = directory.join("prepared.kdbx");
+        fs::write(&primary, b"A").expect("primary");
+        fs::write(&prepared, b"B").expect("prepared");
+        let expected = fingerprint(&primary);
+
+        assert!(matches!(
+            replace_windows_with_backup_transaction(
+                &prepared,
+                &primary,
+                &backup,
+                &expected,
+                |_, destination, backup| {
+                    fs::rename(destination, backup)?;
+                    Err(io::Error::other("partial"))
+                }
+            ),
+            Err(SessionError::AtomicReplaceFailed(_))
+        ));
+        assert_eq!(fs::read(&primary).expect("primary"), b"A");
+        assert_eq!(fs::read(&prepared).expect("prepared"), b"B");
+        assert!(!backup.exists());
         assert_no_prior_backup(&directory);
         fs::remove_dir_all(directory).expect("cleanup");
     }

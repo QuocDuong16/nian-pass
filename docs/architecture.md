@@ -43,6 +43,14 @@ can ignore a conditional header, overwrite anyway, return success, and serve the
 candidate on read-back; M7 cannot always detect that protocol violation after a
 successful overwrite.
 
+Sync credentials now have optional password and keyfile components. The desktop
+adapter copies the retained keyfile into a zeroizing per-operation Rust value;
+only an optional entered password crosses IPC (`null` for keyfile-only). The
+codec uses the full composite credential for BASE, LOCAL, REMOTE, verified
+merge serialization, local install, and crash recovery. No keyfile bytes or
+paths enter the WebView, profile JSON, encrypted BASE, or recovery metadata.
+A wrong/missing component fails authentication rather than choosing a fallback.
+
 `crates/sync-engine` has no Tauri or concrete provider dependency. It owns the
 encrypted BASE repository, local/remote generation preconditions, semantic
 outcome dispatch, process-local single-use conflict tokens, and recovery
@@ -79,7 +87,7 @@ trusted.
 capture clean LOCAL source, ciphertext digest, and authority generation
 → load and verify encrypted BASE
 → bounded REMOTE read + opaque revision
-→ open BASE/LOCAL/REMOTE with the one-shot real master password
+→ open BASE/LOCAL/REMOTE with the one-shot password + Rust-owned keyfile
 → vault-sync semantic decision
 → serialize and reopen a verified encrypted candidate when needed
 → persist candidate and recovery journal
@@ -708,17 +716,21 @@ The frontend is a presentation client, not the vault source of truth. The
 desktop Rust adapter owns one `DesktopVaultService`, protected by
 application-managed synchronization, and that service owns at most one
 `VaultSession`. Selecting a file stores its absolute path only in Rust and
-returns a display filename. Unlocking moves the IPC password string immediately
-into `SecretString`, calls `VaultSession::open` on Tauri's blocking runtime,
-builds a secret-free projection, and drops the credential before returning.
+returns a display filename. Desktop keyfile selection is also native: Rust reads
+at most 1 MiB from a regular non-symlink file, retains the bytes in `SecretBytes`,
+and returns only its display filename. Unlocking moves any IPC password string
+immediately into `SecretString`, combines it with the Rust-owned optional keyfile,
+and calls `VaultSession::open_with_credential` on Tauri's blocking runtime. A
+successful unlock transfers the password/keyfile components into the active
+`DesktopVaultService` save authority; Lock/discard drops that authority.
 
 ```text
-master password (one explicit attempt)
-  -> React password input
-  -> unlock_vault IPC
-  -> SecretString
-  -> VaultSession::open
-  -> credential dropped
+password and/or keyfile
+  -> React password input + native keyfile picker
+  -> password-only IPC / filename-only keyfile DTO
+  -> SecretString + SecretBytes in Rust
+  -> VaultSession::open_with_credential
+  -> retained Rust credential authority for Save/Reload
 
 Rust-owned VaultSession
   -> Vault projection
@@ -740,13 +752,47 @@ explicit Copy Password / Copy Username
 ```
 
 The normal DTO boundary includes `SelectedVaultDto`, `VaultSnapshotDto`,
-`GroupDto`, `EntrySummaryDto`, `EntryDetailDto`, `SummaryTextDto`, clipboard/lock
-receipts, and stable error codes. `EntryDetailDto` contains stable ID,
-title/username/URL summaries, password/notes presence, and custom-field names plus
-protection states. Browse/detail DTOs exclude password and notes plaintext,
-custom-field values, TOTP/passkey data, attachments, history, raw KDBX state,
-and the master password. Reveal commands deliberately return only one validated
-string; they never add that value to a reusable DTO or global state.
+`GroupDto`, `EntrySummaryDto`, `EntryDetailDto`, `EntryHistoryDto`,
+`EntryAttachmentSummaryDto`, `SummaryTextDto`, clipboard/lock receipts, and stable
+error codes. `EntryDetailDto` contains stable ID, title/username/URL summaries,
+password/notes presence, and custom-field names plus protection states. Ordinary
+browse/detail DTOs exclude password and notes plaintext, custom-field values,
+TOTP/passkey data, attachment contents, history, raw KDBX state, and the master
+password. Desktop attachment listing is a separate lazy read that returns only name,
+byte length, and protection state. Import/export file paths stay native and attachment
+bytes move only between the native filesystem and Rust/KDBX; they are never serialized
+through the WebView boundary. The explicit desktop
+`EntryHistoryDto` is also secret-free: it contains protected-aware standard-field
+summaries, presence flags, tags/timestamps, per-item restore capability, and an
+opaque decimal string encoding of the Rust `u64` document revision. Restore sends
+that token back unchanged; Rust parses and compares it before interpreting the
+history index, preventing index drift after an intervening mutation. Historical
+secret values and attachment bytes never enter React. Restore occurs against the
+retained KDBX document, keeps current identity/location, and appends current state
+as one new history item. Attachment/custom-icon revisions fail closed until their
+reference semantics can be preserved safely. Standard entry-icon changes use the same
+tracked atomic entry update as fields/expiry/TOTP, so one Apply yields at most one history
+revision. Desktop custom-icon replacement is a separate native-picked PNG mutation: Rust
+bounds the file to 4 MiB, validates bounded PNG chunk structure and dimensions no larger
+than 4096 × 4096, then uses the tracked KDBX custom-icon mutation. Image bytes and picker
+paths never enter React, and superseded custom-icon objects remain available for historical
+back-references. The desktop
+password-health report is another explicit lazy Rust read. It scans only active
+(non-Trash) entries, compares password digests inside Rust for reuse, and returns counts plus
+per-entry booleans for missing, empty, reused, under-policy, and locally weak passwords.
+For present password fields it also returns a bounded 0–4 local strength score. The scorer
+reads the existing KDBX password `&str` in place, considers length, character classes,
+small repeated/sequential/common patterns, and title/username/URL overlap, and does not
+create a reusable password representation. Password plaintext, digests, raw length, and
+reuse-group identifiers are never serialized to the WebView. The fixed local minimum is
+12 characters; the strength score is a heuristic and is not presented as entropy,
+crack-time prediction, or online breach assessment. Desktop URL opening is also an explicit
+semantic command rather than a frontend-provided URL: Rust re-resolves the selected entry,
+accepts only a currently visible/unprotected absolute `http` or `https` URL with a host and
+without embedded username/password authority, canonicalizes it with the `url` crate, then
+passes it to the platform opener as a direct process argument. Protected or missing URLs are
+not opened, and no shell command string is constructed. Reveal commands deliberately return only one validated string;
+they never add that value to a reusable DTO or global state.
 
 React keys the detail lifetime to the stable entry ID and lock state. Password
 and notes are fetched only after their own Reveal action and are cleared on
@@ -757,16 +803,17 @@ plaintext lifetime but cannot provide deterministic JavaScript string
 zeroization.
 
 `AppState` owns a dedicated `std::sync::Mutex<()>` secret-operation lifecycle
-gate. Only Copy Password, Copy Username, and Lock use it, with the fixed lock
-order `secret-operation gate -> DesktopVaultService mutex`. Copy extracts one
-`SecretString`, releases the service mutex, writes the clipboard and installs
-the lease, then releases the operation gate. Lock acquires the same gate, drops
+gate. Semantic Copy Title, Username, URL, Notes, Password, and Custom Field
+operations share it with Lock, using the fixed lock order
+`secret-operation gate -> DesktopVaultService mutex`. Copy extracts one
+`SecretString`, releases the service mutex, writes the clipboard and installs the
+lease, then releases the operation gate. Lock acquires the same gate, drops
 `VaultSession` and the selected path, releases the service mutex, conditionally
-clears the clipboard, and only then releases the operation gate. The service
-mutex is therefore never held across OS clipboard I/O.
+clears the clipboard, and only then releases the operation gate. The service mutex
+is therefore never held across OS clipboard I/O.
 
 ```text
-Copy Password / Username       Lock
+Semantic Copy                   Lock
   -> secret-operation gate       -> same gate
   -> extract SecretString        -> drop VaultSession
   -> release service mutex       -> release service mutex
@@ -826,8 +873,12 @@ React component-local draft
 standard field through one tracked adapter mutation. One UI Apply therefore
 creates one prior-state history item and one logical revision, while same-value
 and missing-plus-empty changes remain no-ops. Structural and custom-field
-commands reuse the M2.5 tombstone, cycle, reserved-field, and protection
-semantics. React never reconstructs, optimistically splices, or owns the mutable
+commands reuse the M2.5 cycle, reserved-field, protection, and tombstone
+semantics. Product deletion adds a KDBX-native recycle-bin layer above the
+permanent-delete primitives: normal Delete moves entries or complete group
+subtrees into Trash without a tombstone, Restore is accepted only from Trash,
+and permanent deletion is accepted only after recycle-bin membership is
+revalidated. React never reconstructs, optimistically splices, or owns the mutable
 KDBX document.
 
 Password replacement starts with an empty input and never fetches the old
@@ -868,22 +919,34 @@ React remains presentation-only and never reconstructs persistence state:
 
 ```text
 React dirty snapshot
-  -> Save credential dialog
-  -> save_vault(password) semantic IPC
-  -> immediate SecretString conversion
+  -> save_vault() semantic IPC
   -> DesktopVaultService mutex
-  -> VaultSession::save
+  -> retained Rust-only composite credential
+  -> VaultSession::save_with_credential
   -> existing M3 fingerprint/verified replacement transaction
   -> fresh Rust-authoritative clean VaultSnapshotDto
 ```
 
-`save_vault` is the only desktop command that writes the KDBX source. It does
-not acquire the Copy/Lock `secret_operation_gate`, so no code holds the service
-mutex and then waits for that gate. The service mutex serializes Save with every
-mutation and Lock; the password is dropped with the blocking request and is not
-retained by `AppState`, `DesktopVaultService`, `VaultSession`, or React after the
-request completes. Save and reload responses use the existing exact-key,
-secret-free snapshot validator and additionally require `dirty=false`.
+`save_vault` carries no credential argument. The unlocked desktop service retains the exact
+password/keyfile authority established by unlock and reuses it only inside Rust for ordinary
+Save. The shared vault-operation gate serializes Save, Reload, credential rotation, source
+selection, and lifecycle-sensitive native operations. Save and reload responses use the
+existing exact-key, secret-free snapshot validator and additionally require `dirty=false`.
+
+Credential rotation is a separate explicit persistence transaction and is accepted only for a
+clean writable session. `change_master_password` preserves any retained keyfile;
+`replace_keyfile` reads the replacement through a native picker while retaining the password in
+Rust; `remove_master_password` requires a retained keyfile and switches explicitly to
+keyfile-only; `remove_keyfile` requires a nonempty retained password, rejecting an empty password
+supplied by direct IPC as the only remaining factor. The UI requires an explicit backup-keyfile
+acknowledgement before master removal, and historical `.bak` generations may still use the old
+credential. Every rotation authenticates the unchanged source with the current composite credential, serializes and verifies the candidate
+under the full replacement credential, installs through the same backup/atomic-replacement path,
+and only then replaces the retained Rust save authority. A wrong current authority, external
+source change, serialization/verification failure, or replacement failure leaves the previous
+credential authoritative. For uncertain post-replacement failures, Rust probes the canonical
+generation with both authorities and adopts the replacement only when the new credential opens
+and the old one no longer does. Rotation never turns unsaved entry edits into an implicit Save.
 
 At actual Save execution, M3 compares the complete encrypted source fingerprint
 to the session baseline. A pre-commit mismatch, missing target, or path
@@ -913,7 +976,7 @@ clean snapshot before ordinary `lock_vault` runs; close then requests the native
 window close only after Lock succeeds. Save failure or external conflict never
 calls Lock, discard, or close. Explicit discard remains separate and never
 saves. While Save is pending, mutation controls and Lock are disabled and a
-window close request is prevented. There is no autosave, Save As, force
+window close request is prevented. There is no autosave, canonical-path retargeting Save As, force
 overwrite, or automatic merge path.
 
 `vault-core` owns KDBX-independent domain types. `crates/kdbx` is the adapter
@@ -1010,14 +1073,15 @@ without exposing a `keepass-rs` enum.
 The M2.5 domain model separates bulk metadata from explicit secret access:
 
 - `EntrySummary` contains an identifier, `SummaryText` projections for Title,
-  UserName, and URL, tags, and password/notes presence flags. `SummaryText`
-  distinguishes `Missing`, `Visible(String)` (including an explicit empty
-  string), and `Protected`. The `Protected` state records presence and
-  protection without containing the field plaintext. `EntrySummary` never
-  contains protected standard-field plaintext, password or notes plaintext,
-  TOTP data, attachments, or custom-field values.
-- `SecretString` owns one explicitly requested password or notes value in a
-  zeroizing buffer. It has no `Debug`, `Display`, `Clone`, serialization, deref,
+  UserName, and URL, tags, password/notes presence flags, TOTP presence, and
+  optional expiry metadata. `SummaryText` distinguishes `Missing`,
+  `Visible(String)` (including an explicit empty string), and `Protected`.
+  The `Protected` state records presence and protection without containing the
+  field plaintext. `EntrySummary` never contains protected standard-field
+  plaintext, password or notes plaintext, TOTP provisioning material or current
+  codes, attachments, or custom-field values.
+- `SecretString` owns one explicitly requested password, notes, custom value,
+  TOTP provisioning URI, or generated TOTP code in a zeroizing buffer. It has no `Debug`, `Display`, `Clone`, serialization, deref,
   or implicit string-borrowing implementation; plaintext access requires
   `expose_secret()`.
 - `CustomFieldSummary` contains only a privacy-sensitive field name and
@@ -1066,11 +1130,14 @@ protected, including when `protect_password` is false. Database policy applies
 only to missing-field creation; an existing field's protection state always
 wins. URLs are stored verbatim without browser normalization.
 
-M2.5 adds only stable-ID structural operations:
+The stable-ID structural adapter surface now includes:
 
-- `create_entry`, `move_entry`, and `permanently_delete_entry`
-- `create_group`, `rename_group`, `move_group`, and
-  `permanently_delete_group`
+- `create_entry`, `move_entry`, `trash_entry`, `restore_entry`,
+  `permanently_delete_recycled_entry`, and the lower-level
+  `permanently_delete_entry` primitive
+- `create_group`, `rename_group`, `move_group`, `trash_group`, `restore_group`,
+  `permanently_delete_recycled_group`, and the lower-level
+  `permanently_delete_group` primitive
 - `custom_fields`, `entry_custom_field`, `set_entry_custom_field`, and
   `delete_entry_custom_field`
 
@@ -1098,12 +1165,58 @@ preserve UUID, reject root/self/descendant cycles, update `LocationChanged`, and
 make same-parent moves complete no-ops. Every public projection call returns a
 fresh snapshot: an older `Vault` value is never mutated after document changes.
 
-Permanent deletion is intentionally distinct from KeePassXC's product-level
-recycle-bin workflow. Entry deletion creates one UUID/timestamp tombstone.
-Recursive group deletion creates a tombstone for every removed entry and group,
-matching KeePassXC 2.7.12's `TestDeletedObjects` behavior, while cleaning custom
-icon back-references and metadata UUID pointers represented by `keepass-rs`.
-Root deletion is rejected. Reserved standard, TOTP, and KeePassXC passkey field
+Desktop bulk entry move, Trash, Restore, and Permanent Delete each use one frontend
+request, one Tauri command, one desktop-service mutation, and one `VaultSession` call
+for the complete batch. The service accepts 1..=1024 unique non-empty entry IDs.
+Bulk Move rejects a destination inside the recycle-bin subtree and rejects entries
+already in Trash. Bulk Restore and Bulk Permanent Delete require every selected entry
+to be inside Trash, so neither can be used to mutate live entries through recycle-bin
+semantics. Restore resolves each previous parent before mutation and falls back to the
+vault root when that parent is missing or recycled. The KDBX adapter validates all
+referenced objects first, clones the database, applies the complete batch to that
+candidate, and replaces the retained database only after every mutation succeeds.
+A failed batch therefore leaves document state unchanged; a successful changed batch
+advances the document revision exactly once.
+
+Desktop database settings use an explicit on-demand metadata read command rather than adding database name, description, or default username to the normal browse snapshot. The update command changes all three metadata fields atomically inside the retained KDBX document, applies per-field change timestamps only where values differ, advances `SettingsChanged` once, returns the canonical dirty snapshot, and never persists implicitly. Rust bounds the UTF-8 payload before mutation. A separate on-demand history-policy command exposes only the finite `HistoryMaxItems` count and the reviewed editable bound. Setting a lower finite count prunes older per-entry revisions immediately in a cloned candidate database before commit; `0` keeps no history, while no finite limit leaves count pruning disabled. Every tracked entry mutation re-applies the count policy, and a conflict-free divergent sync result is pruned after metadata/history merge. The independent KDBX `HistoryMaxSize` value remains preserved but is not interpreted because `keepass-rs` does not expose a mutable history vector or exact per-history serialized-size measurement; pruning therefore rebuilds retained `keepass` history entries inside Rust and inherits the documented lack of guaranteed zeroization for dependency-owned allocations.
+
+Recycle-bin moves and permanent deletion are intentionally distinct. If database
+policy permits it, the first soft delete creates or reuses the metadata-designated
+KDBX recycle-bin group; moving an entry or group subtree there updates location
+metadata but creates no deleted-object tombstone. Restore requires current Trash
+membership and prefers the recorded previous parent only when it still exists
+outside the recycle-bin subtree, otherwise it falls back to the vault root. Desktop
+Settings may explicitly enable or disable `RecycleBinEnabled` as one ordinary
+in-memory KDBX mutation. Disabling is accepted only when the designated Trash group
+has no direct entries or child groups; the stable group UUID is retained, enabling a
+missing Trash does not create one eagerly, and the setting still requires the normal
+explicit Save transaction. An externally supplied `RecycleBinEnabled=false` otherwise
+fails closed and is never silently changed.
+Permanent-delete entry/group commands first prove current recycle-bin membership;
+the recycle-bin root itself is never a valid target. The lower-level permanent
+entry deletion then creates one UUID/timestamp tombstone, while recursive group
+deletion creates a tombstone for every removed entry and group, matching
+KeePassXC 2.7.12's `TestDeletedObjects` behavior and cleaning represented custom
+icon back-references and metadata UUID pointers. Root deletion is rejected.
+
+Desktop TOTP support remains inside the same KDBX trust boundary. Recognized
+KeePassXC `otp`, KeeOtp query-string, KeePass `TOTP Seed`/`TOTP Settings`,
+and KeePass2 `TimeOtp-*` layouts can generate an ephemeral code when their
+parameters are supported. New or replaced configurations are canonicalized to a
+protected `otp` provisioning URI; recognized but unsupported or malformed
+layouts fail closed. Bulk projection exposes only `has_totp`. Desktop reveal
+returns one current code plus period/remaining-time metadata, while clipboard
+copy avoids returning the code to React. Configure/replace/remove is folded into
+the ordinary atomic `EntryUpdate`, producing at most one history revision for a
+form apply. Mobile currently carries only the secret-free presence bit and does
+not expose TOTP editing or Autofill.
+
+Credential-provider projection treats the recycle-bin subtree as unavailable,
+not as a normal group. Candidate enumeration and password-identity projection
+skip recycled entries, and final credential release revalidates this state before
+reading username/password plaintext. This shared Rust boundary protects browser,
+Android, and iOS credential surfaces even if a frontend accidentally displays a
+recycled record. Reserved standard, TOTP, and KeePassXC passkey field
 names cannot be accessed or modified through generic custom-field APIs. Root
 rename remains supported because it is an ordinary KeePass group metadata edit.
 
@@ -1328,7 +1441,7 @@ AutoFill smoke.
 13. **Public mutation APIs must preserve an existing KDBX field's protection mode unless an API explicitly represents a protection-mode change.**
 14. **Bulk projections must not materialize plaintext from fields marked protected in the underlying vault.**
 15. **Every structural mutation must resolve stable UUID identity before changing the database.**
-16. **Permanent deletion must create complete timestamped KDBX tombstones; recycle-bin policy must remain explicit and separate.**
+16. **Recoverable delete must use explicit KDBX recycle-bin semantics without tombstones; permanent deletion must be separately authorized for an already-recycled object and create complete timestamped tombstones.**
 17. **Invalid, unknown, same-value, and same-parent requests must not partially mutate retained database state.**
 18. **Generic custom-field APIs must not bypass standard-field, TOTP, or passkey-specific semantics.**
 19. **Ordinary save must authenticate against the unchanged current source and must never act as master-password rotation.**
@@ -1377,3 +1490,8 @@ to username, URL, password, structural operations, recursive tombstones, and
 protected custom fields. External creation evidence proves KeePassXC open/list
 only; the strict KeePassXC resave comparator remains the separate title-mutation
 pipeline.
+
+
+## Desktop encrypted export-copy boundary
+
+`export_vault_copy` is a native-picker desktop operation, not a session retarget. The operation gate is acquired before the picker opens. Rust serializes the current in-memory KDBX through the retained composite credential into a private same-directory temp, reopens it for semantic equivalence, publishes only with no-clobber semantics to a new destination, verifies the published copy again, and syncs the parent directory where supported. The active `VaultSession` path, source fingerprint, saved revision, dirty state, and sync profile binding remain unchanged. This allows an explicit recovery copy of dirty state without weakening ordinary Save conflict detection.

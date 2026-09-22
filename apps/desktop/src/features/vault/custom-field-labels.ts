@@ -3,7 +3,7 @@ export function fieldLabel(name: string): string {
 }
 
 export function fieldActionLabel(
-  action: "Edit" | "Delete",
+  action: "Copy" | "Edit" | "Delete",
   name: string,
 ): string {
   return `${action} ${name.trim() === "" ? "unnamed custom field" : name}`;

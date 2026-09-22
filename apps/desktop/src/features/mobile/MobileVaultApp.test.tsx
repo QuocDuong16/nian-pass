@@ -40,6 +40,10 @@ test("iOS unlock mounts a strict read-only browse and never probes Android reque
       fileName: "ios-fixture.kdbx",
       writable: false,
     }),
+    getEntryDetail: vi.fn().mockResolvedValue({
+      ...mobileDetail,
+      tags: ["read-only-tag"],
+    }),
   });
   render(<MobileVaultApp api={api} platform="ios" />);
   fireEvent.click(screen.getByRole("button", { name: "Open KDBX" }));
@@ -50,6 +54,10 @@ test("iOS unlock mounts a strict read-only browse and never probes Android reque
   expect(await screen.findByText(/iOS · Read only/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: /Synthetic account/ }));
   expect(await screen.findByText(/Account type · unprotected/)).toBeVisible();
+  expect(screen.getByText("read-only-tag")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Edit tags" }),
+  ).not.toBeInTheDocument();
   for (const action of ["Save", "Edit entry", "New entry", "New group"]) {
     expect(
       screen.queryByRole("button", { name: new RegExp(action, "i") }),
@@ -149,6 +157,7 @@ test("unlocked writable browse exposes CRUD but never general Reveal or Copy", a
   expect(screen.getAllByText("Password stored")).toHaveLength(2);
   expect(screen.getAllByText("Notes stored")).toHaveLength(2);
   expect(api.getEntryDetail).toHaveBeenCalledWith("entry-a");
+  expect(screen.getByRole("button", { name: "Edit tags" })).toBeVisible();
   for (const action of ["Save", "Edit entry", "New entry", "Group actions"]) {
     expect(
       screen.getByRole("button", { name: new RegExp(action, "i") }),
@@ -262,6 +271,28 @@ test("a detail response that settles after Lock cannot repopulate presentation s
   });
   expect(api.lockVault).toHaveBeenCalledOnce();
   expect(screen.queryByText("Account type")).not.toBeInTheDocument();
+});
+
+test("writable mobile tag editing uses the dedicated semantic mutation", async () => {
+  const api = await selectVault();
+  fireEvent.change(screen.getByLabelText("Master password"), {
+    target: { value: "demopass" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Synthetic account/ }),
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "Edit tags" }));
+  fireEvent.change(screen.getByLabelText("New tag"), {
+    target: { value: "mobile" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Apply tags" }));
+
+  await waitFor(() => {
+    expect(api.setEntryTags).toHaveBeenCalledWith("entry-a", ["mobile"]);
+  });
 });
 
 test("mobile entry edit, creation, and custom fields replace state from Rust receipts", async () => {

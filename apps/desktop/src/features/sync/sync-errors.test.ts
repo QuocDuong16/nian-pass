@@ -14,7 +14,7 @@ describe("sync error messages", () => {
     ["sync_state_corrupt", "metadata is corrupt"],
     ["sync_unsupported_provider", "compatible conditional-write"],
     ["sync_unsafe_provider", "compatible conditional-write"],
-    ["sync_credentials_required", "master password"],
+    ["sync_credentials_required", "active keyfile"],
     ["operation_in_progress", "already in progress"],
     ["sync_failed", "failed safely"],
   ] as const)("maps %s without exposing raw errors", (code, expected) => {

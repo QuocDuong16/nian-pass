@@ -1,16 +1,35 @@
 use serde::Serialize;
-use vault_core::{CustomFieldSummary, EntrySummary, FieldProtection, Group, SummaryText, Vault};
+use vault_core::{
+    CustomFieldSummary, EntryIconSummary, EntrySummary, FieldProtection, Group, SummaryText, Vault,
+};
+
+#[cfg(any(desktop, target_os = "android", target_os = "ios", test))]
+mod attachments;
+#[cfg(any(desktop, test))]
+mod database_settings;
+#[cfg(any(desktop, target_os = "android", target_os = "ios", test))]
+mod history;
+#[cfg(desktop)]
+mod password_health;
+#[cfg(any(desktop, test))]
+mod selection;
+#[cfg(any(desktop, target_os = "android"))]
+pub use attachments::AttachmentExportReceiptDto;
+#[cfg(any(desktop, target_os = "android", target_os = "ios", test))]
+pub use attachments::EntryAttachmentSummaryDto;
+#[cfg(any(desktop, test))]
+pub use database_settings::*;
+#[cfg(any(desktop, target_os = "android", target_os = "ios", test))]
+pub use history::EntryHistoryDto;
+#[cfg(test)]
+use password_health::PasswordHealthIssueDto;
+#[cfg(desktop)]
+pub use password_health::PasswordHealthReportDto;
+#[cfg(any(desktop, test))]
+pub use selection::{SelectedKeyfileDto, SelectedVaultDto};
 
 #[cfg(desktop)]
 use crate::clipboard::{ClipboardClearStatus, ClipboardCopy};
-
-/// Filename metadata returned after a native file selection.
-#[cfg(any(desktop, test))]
-#[derive(Clone, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SelectedVaultDto {
-    pub file_name: String,
-}
 
 /// Reviewed mobile source metadata. The opaque native handle stays in Rust.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -26,6 +45,8 @@ pub struct MobileSelectedVaultDto {
 #[serde(rename_all = "camelCase")]
 pub struct VaultCoreSnapshotDto {
     pub dirty: bool,
+    pub recycle_bin_enabled: bool,
+    pub recycle_bin_group_id: Option<String>,
     pub root_group_id: String,
     pub groups: Vec<GroupDto>,
     pub entries: Vec<EntrySummaryDto>,
@@ -38,6 +59,8 @@ pub struct VaultSnapshotDto {
     pub dirty: bool,
     pub file_name: String,
     pub capabilities: VaultCapabilitiesDto,
+    pub recycle_bin_enabled: bool,
+    pub recycle_bin_group_id: Option<String>,
     pub root_group_id: String,
     pub groups: Vec<GroupDto>,
     pub entries: Vec<EntrySummaryDto>,
@@ -114,7 +137,31 @@ pub struct EntrySummaryDto {
     pub url: SummaryTextDto,
     pub password_present: bool,
     pub notes_present: bool,
+    pub totp_present: bool,
     pub tags: Vec<String>,
+    pub expires_at_unix_seconds: Option<i64>,
+    pub icon: EntryIconDto,
+}
+
+/// Secret-free entry icon state suitable for desktop/mobile presentation.
+#[derive(Clone, Copy, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EntryIconDto {
+    None,
+    BuiltIn { id: u8 },
+    Custom,
+    NonStandard,
+}
+
+impl From<EntryIconSummary> for EntryIconDto {
+    fn from(value: EntryIconSummary) -> Self {
+        match value {
+            EntryIconSummary::None => Self::None,
+            EntryIconSummary::BuiltIn(id) => Self::BuiltIn { id },
+            EntryIconSummary::Custom => Self::Custom,
+            EntryIconSummary::NonStandard => Self::NonStandard,
+        }
+    }
 }
 
 /// Secret-free metadata for a selected entry.
@@ -127,8 +174,20 @@ pub struct EntryDetailDto {
     pub url: SummaryTextDto,
     pub password_present: bool,
     pub notes_present: bool,
+    pub totp_present: bool,
     pub tags: Vec<String>,
+    pub expires_at_unix_seconds: Option<i64>,
+    pub icon: EntryIconDto,
     pub custom_fields: Vec<CustomFieldSummaryDto>,
+}
+
+/// Ephemeral TOTP value returned only after one explicit reveal request.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TotpCodeDto {
+    pub code: String,
+    pub valid_for_seconds: u64,
+    pub period_seconds: u64,
 }
 
 /// A custom-field name and protection state, deliberately without its value.
@@ -193,13 +252,22 @@ impl VaultSnapshotDto {
         dirty: bool,
         file_name: String,
         capabilities: VaultCapabilitiesDto,
+        recycle_bin_enabled: bool,
+        recycle_bin_group_id: Option<String>,
     ) -> Self {
-        let core = VaultCoreSnapshotDto::from_vault(vault, dirty);
+        let core = VaultCoreSnapshotDto::from_vault(
+            vault,
+            dirty,
+            recycle_bin_enabled,
+            recycle_bin_group_id,
+        );
 
         Self {
             dirty: core.dirty,
             file_name,
             capabilities,
+            recycle_bin_enabled: core.recycle_bin_enabled,
+            recycle_bin_group_id: core.recycle_bin_group_id,
             root_group_id: core.root_group_id,
             groups: core.groups,
             entries: core.entries,
@@ -209,13 +277,20 @@ impl VaultSnapshotDto {
 
 impl VaultCoreSnapshotDto {
     #[must_use]
-    pub fn from_vault(vault: &Vault, dirty: bool) -> Self {
+    pub fn from_vault(
+        vault: &Vault,
+        dirty: bool,
+        recycle_bin_enabled: bool,
+        recycle_bin_group_id: Option<String>,
+    ) -> Self {
         let mut groups = Vec::with_capacity(vault.group_count());
         let mut entries = Vec::with_capacity(vault.entry_count());
         collect_group(vault.root(), &mut groups, &mut entries);
 
         Self {
             dirty,
+            recycle_bin_enabled,
+            recycle_bin_group_id,
             root_group_id: vault.root().id().as_str().to_owned(),
             groups,
             entries,
@@ -233,7 +308,10 @@ impl EntryDetailDto {
             url: entry.url().into(),
             password_present: entry.has_password(),
             notes_present: entry.has_notes(),
+            totp_present: entry.has_totp(),
             tags: entry.tags().to_vec(),
+            expires_at_unix_seconds: entry.expires_at_unix_seconds(),
+            icon: entry.icon().into(),
             custom_fields: custom_fields.iter().map(Into::into).collect(),
         }
     }
@@ -311,7 +389,10 @@ impl EntrySummaryDto {
             url: entry.url().into(),
             password_present: entry.has_password(),
             notes_present: entry.has_notes(),
+            totp_present: entry.has_totp(),
             tags: entry.tags().to_vec(),
+            expires_at_unix_seconds: entry.expires_at_unix_seconds(),
+            icon: entry.icon().into(),
         }
     }
 }
@@ -322,9 +403,10 @@ mod tests {
     use vault_core::{CustomFieldSummary, EntryId, EntrySummary, FieldProtection, SummaryText};
 
     use super::{
-        ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto, CreatedGroupDto, EntryDetailDto,
-        EntrySummaryDto, GroupDto, LockResultDto, SelectedVaultDto, SummaryTextDto,
-        VaultCapabilitiesDto, VaultSnapshotDto,
+        AttachmentExportReceiptDto, ClipboardReceiptDto, ClosePolicyDto, CreatedEntryDto,
+        CreatedGroupDto, EntryAttachmentSummaryDto, EntryDetailDto, EntryIconDto, EntrySummaryDto,
+        GroupDto, LockResultDto, PasswordHealthIssueDto, PasswordHealthReportDto, SelectedVaultDto,
+        SummaryTextDto, VaultCapabilitiesDto, VaultSnapshotDto,
     };
     use crate::clipboard::{CLIPBOARD_CLEAR_MS, ClipboardClearStatus, ClipboardCopy};
 
@@ -359,6 +441,8 @@ mod tests {
         };
         let snapshot = VaultSnapshotDto {
             dirty: false,
+            recycle_bin_enabled: true,
+            recycle_bin_group_id: None,
             file_name: "example.kdbx".to_owned(),
             capabilities: VaultCapabilitiesDto {
                 format_version: "4.1".to_owned(),
@@ -382,7 +466,10 @@ mod tests {
                 url: SummaryTextDto::Protected,
                 password_present: true,
                 notes_present: false,
+                totp_present: false,
                 tags: vec!["test".to_owned()],
+                expires_at_unix_seconds: None,
+                icon: EntryIconDto::None,
             }],
         };
 
@@ -396,6 +483,8 @@ mod tests {
         );
         let created_entry_snapshot = VaultSnapshotDto {
             dirty: true,
+            recycle_bin_enabled: true,
+            recycle_bin_group_id: None,
             file_name: "example.kdbx".to_owned(),
             capabilities: VaultCapabilitiesDto {
                 format_version: "4.1".to_owned(),
@@ -419,7 +508,10 @@ mod tests {
                 url: SummaryTextDto::Missing,
                 password_present: false,
                 notes_present: false,
+                totp_present: false,
                 tags: Vec::new(),
+                expires_at_unix_seconds: None,
+                icon: EntryIconDto::None,
             }],
         };
         assert_eq!(
@@ -432,6 +524,8 @@ mod tests {
         );
         let created_group_snapshot = VaultSnapshotDto {
             dirty: true,
+            recycle_bin_enabled: true,
+            recycle_bin_group_id: None,
             file_name: "example.kdbx".to_owned(),
             capabilities: VaultCapabilitiesDto {
                 format_version: "4.1".to_owned(),
@@ -490,6 +584,43 @@ mod tests {
             to_value(detail).expect("entry detail should serialize")
         );
         assert_eq!(
+            contract["entryAttachments"],
+            to_value([EntryAttachmentSummaryDto {
+                name: "manual.pdf".to_owned(),
+                size_bytes: 1536,
+                protected: true,
+            }])
+            .expect("attachment metadata DTO should serialize")
+        );
+        assert_eq!(
+            contract["attachmentExportReceipt"],
+            to_value(AttachmentExportReceiptDto { exported: true })
+                .expect("attachment export receipt should serialize")
+        );
+        assert_eq!(
+            contract["passwordHealthReport"],
+            to_value(PasswordHealthReportDto {
+                total_entries: 3,
+                password_entries: 2,
+                minimum_length: 12,
+                weak_score_threshold: 3,
+                issues: vec![PasswordHealthIssueDto {
+                    entry_id: "entry-example".to_owned(),
+                    group_id: "group-root".to_owned(),
+                    title: SummaryTextDto::Visible {
+                        value: "Example".to_owned(),
+                    },
+                    missing_password: false,
+                    empty_password: false,
+                    reused_password: true,
+                    below_minimum_length: true,
+                    weak_password: true,
+                    strength_score: Some(2),
+                }],
+            })
+            .expect("password health report should serialize")
+        );
+        assert_eq!(
             contract["clipboardReceipt"],
             to_value(ClipboardReceiptDto::from(ClipboardCopy {
                 generation: 1,
@@ -535,9 +666,12 @@ mod tests {
                 .collect::<std::collections::BTreeSet<_>>(),
             [
                 "customFields",
+                "expiresAtUnixSeconds",
+                "icon",
                 "id",
                 "notesPresent",
                 "passwordPresent",
+                "totpPresent",
                 "tags",
                 "title",
                 "url",

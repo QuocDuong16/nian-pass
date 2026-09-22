@@ -2,22 +2,18 @@ import { useMemo, useState } from "react";
 
 import type { DesktopApi } from "../../lib/desktop";
 import type { EntryId, VaultSnapshotDto } from "../../types/desktop";
-import { EntryCreateDialog } from "./EntryCreateDialog";
 import { EntryDetail } from "./EntryDetail";
-import { GroupActions } from "./GroupActions";
-import { GroupTree } from "./GroupTree";
 import { VaultEmptyDetail } from "./VaultEmptyDetail";
 import { VaultEntryPane } from "./VaultEntryPane";
-import {
-  VaultReadOnlyNotice,
-  VaultSettingsDialog,
-  VaultStatusBar,
-  VaultTopBar,
-} from "./VaultChrome";
-import { useSaveShortcut } from "./useSaveShortcut";
+import { VaultGroupPane } from "./VaultGroupPane";
+import { VaultOverlays } from "./VaultOverlays";
+import { VaultReadOnlyNotice, VaultStatusBar } from "./VaultChrome";
+import { VaultToolbar } from "./VaultToolbar";
 import { useSecurityFormTelemetry } from "./useSecurityFormTelemetry";
+import { useVaultBulkActions } from "./useVaultBulkActions";
+import { useVaultNavigation } from "./useVaultNavigation";
 import { useVaultSearch } from "./useVaultSearch";
-
+import { buildVaultViewModel } from "./vault-view-model";
 interface UnlockedViewProps {
   api: DesktopApi;
   snapshot: VaultSnapshotDto;
@@ -60,7 +56,6 @@ export function UnlockedView({
   const [syncBusy, setSyncBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-
   const groupsById = useMemo(
     () => new Map(snapshot.groups.map((group) => [group.id, group])),
     [snapshot.groups],
@@ -73,11 +68,25 @@ export function UnlockedView({
     groupsById.get(selectedGroupId) ?? groupsById.get(snapshot.rootGroupId);
 
   const hasDraft = creatingEntry || detailDraft || groupDraft;
-  const mutationPending = createBusy || detailBusy || groupBusy || syncBusy;
   const readOnly = !snapshot.capabilities.writable;
   const mutationDisabled = disabled || readOnly;
   const searchResults = useVaultSearch(snapshot, groupsById, searchQuery);
-
+  const navigation = useVaultNavigation({
+    groupsById,
+    entriesById,
+    setSearchQuery,
+    setSelectedGroupId,
+    setSelectedEntryId,
+    setDetailDraft,
+    onSnapshot,
+  });
+  const bulk = useVaultBulkActions({
+    onClearEntry: navigation.clearEntry,
+    onSelectGroup: navigation.selectGroup,
+    onSnapshot,
+  });
+  const mutationPending =
+    createBusy || detailBusy || groupBusy || syncBusy || bulk.busy;
   useSecurityFormTelemetry(
     hasDraft,
     mutationPending,
@@ -89,40 +98,26 @@ export function UnlockedView({
     throw new Error("Vault snapshot has no root group");
   }
 
-  const groupEntries = selectedGroup.entryIds.flatMap((id) => {
-    const entry = entriesById.get(id);
-    return entry === undefined ? [] : [entry];
-  });
-  const entries = searchResults ?? groupEntries;
-
-  const chooseGroup = (groupId: string) => {
-    if (!groupsById.has(groupId)) return;
-    setSearchQuery("");
-    setSelectedGroupId(groupId);
-    setSelectedEntryId(null);
-    setDetailDraft(false);
-  };
-
-  const chooseEntry = (entryId: string) => {
-    const entry = entriesById.get(entryId);
-    if (entry === undefined) return;
-    setSelectedGroupId(entry.groupId);
-    setSelectedEntryId(entry.id);
-    setDetailDraft(false);
-  };
-
+  const {
+    groupEntries,
+    selectedGroupRecycled,
+    selectedEntryRecycled,
+    activeGroups,
+  } = buildVaultViewModel(
+    snapshot,
+    selectedGroup,
+    entriesById,
+    selectedEntryId,
+  );
   const saveUnavailable =
     disabled || readOnly || mutationPending || !snapshot.dirty || hasDraft;
 
-  useSaveShortcut({
-    blocked: saveUnavailable,
-    settingsOpen,
-    onSave,
-  });
-
   return (
     <main className="vault-shell">
-      <VaultTopBar
+      <VaultToolbar
+        api={api}
+        privacyVersion={clearRevealsVersion}
+        settingsOpen={settingsOpen}
         snapshot={snapshot}
         searchQuery={searchQuery}
         saveStatus={saveStatus}
@@ -146,51 +141,50 @@ export function UnlockedView({
       </p>
 
       <div className="vault-layout">
-        <div className="group-pane">
-          <div className="pane-heading">Groups</div>
-          <GroupTree
-            rootGroupId={snapshot.rootGroupId}
-            groupsById={groupsById}
-            selectedGroupId={selectedGroup.id}
-            onSelect={chooseGroup}
-          />
-          <GroupActions
-            api={api}
-            group={selectedGroup}
-            snapshot={snapshot}
-            disabled={mutationDisabled}
-            onChanged={(next, nextGroupId) => {
-              setSelectedEntryId(null);
-              setSelectedGroupId(nextGroupId);
-              onSnapshot(next);
-            }}
-            onDraftChange={setGroupDraft}
-            onBusyChange={setGroupBusy}
-          />
-        </div>
+        <VaultGroupPane
+          api={api}
+          snapshot={snapshot}
+          groupsById={groupsById}
+          group={selectedGroup}
+          disabled={mutationDisabled}
+          onSelect={navigation.chooseGroup}
+          onChanged={navigation.onGroupChanged}
+          onDraftChange={setGroupDraft}
+          onBusyChange={setGroupBusy}
+        />
 
         <VaultEntryPane
+          key={`${selectedGroup.id}:${searchResults === null ? "group" : "search"}`}
+          api={api}
           group={selectedGroup}
-          entries={entries}
+          entries={searchResults ?? groupEntries}
+          activeGroups={activeGroups}
           selectedEntryId={selectedEntryId}
           searchActive={searchResults !== null}
-          disabled={mutationDisabled}
+          disabled={mutationDisabled || selectedGroupRecycled}
+          bulkDisabled={mutationDisabled || hasDraft || mutationPending}
+          recycled={selectedGroupRecycled}
+          recycleBinEnabled={snapshot.recycleBinEnabled}
           onNewEntry={() => {
             setCreatingEntry(true);
           }}
-          onSelectEntry={chooseEntry}
+          onSelectEntry={navigation.chooseEntry}
+          onSelectionStart={bulk.onSelectionStart}
+          onBusyChange={bulk.onBusyChange}
+          onBulkChanged={bulk.onChanged}
         />
 
         {selectedEntryId === null ? (
           <VaultEmptyDetail />
         ) : (
           <EntryDetail
-            key={selectedEntryId}
             api={api}
             entryId={selectedEntryId}
-            groups={snapshot.groups}
+            groups={activeGroups}
             disabled={disabled}
             mutationDisabled={readOnly}
+            recycled={selectedEntryRecycled}
+            recycleBinEnabled={snapshot.recycleBinEnabled}
             onDraftChange={setDetailDraft}
             onBusyChange={setDetailBusy}
             clearRevealsVersion={clearRevealsVersion}
@@ -199,6 +193,10 @@ export function UnlockedView({
               setSelectedEntryId(null);
               setDetailDraft(false);
               onSnapshot(next);
+            }}
+            onDuplicated={(result) => {
+              setSelectedEntryId(result.createdEntryId);
+              onSnapshot(result.snapshot);
             }}
             onMoved={(next, destination) => {
               setSelectedGroupId(destination);
@@ -209,39 +207,33 @@ export function UnlockedView({
       </div>
 
       <VaultStatusBar snapshot={snapshot} />
-
-      {settingsOpen ? (
-        <VaultSettingsDialog
-          api={api}
-          snapshot={snapshot}
-          disabled={disabled}
-          hasDraft={hasDraft}
-          mutationPending={mutationPending}
-          autoLockMs={autoLockMs}
-          onAutoLockChange={onAutoLockChange}
-          onBusyChange={setSyncBusy}
-          onSnapshot={onSnapshot}
-          onClose={() => {
-            setSettingsOpen(false);
-          }}
-        />
-      ) : null}
-
-      {creatingEntry && !mutationDisabled ? (
-        <EntryCreateDialog
-          api={api}
-          groupId={selectedGroup.id}
-          onCancel={() => {
-            setCreatingEntry(false);
-          }}
-          onCreated={(result) => {
-            setCreatingEntry(false);
-            setSelectedEntryId(result.createdEntryId);
-            onSnapshot(result.snapshot);
-          }}
-          onBusyChange={setCreateBusy}
-        />
-      ) : null}
+      <VaultOverlays
+        api={api}
+        snapshot={snapshot}
+        settingsOpen={settingsOpen}
+        disabled={disabled}
+        hasDraft={hasDraft}
+        mutationPending={mutationPending}
+        autoLockMs={autoLockMs}
+        creatingEntry={creatingEntry}
+        createAllowed={!mutationDisabled && !selectedGroupRecycled}
+        selectedGroupId={selectedGroup.id}
+        onAutoLockChange={onAutoLockChange}
+        onSyncBusy={setSyncBusy}
+        onCreateBusy={setCreateBusy}
+        onSnapshot={onSnapshot}
+        onCloseSettings={() => {
+          setSettingsOpen(false);
+        }}
+        onCancelCreate={() => {
+          setCreatingEntry(false);
+        }}
+        onCreated={(result) => {
+          setCreatingEntry(false);
+          setSelectedEntryId(result.createdEntryId);
+          onSnapshot(result.snapshot);
+        }}
+      />
     </main>
   );
 }
