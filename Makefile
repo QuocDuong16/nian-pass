@@ -93,7 +93,7 @@ rust-deps-check:
 
 rust-security-check:
 	@echo "Check Rust advisories, licenses, bans, and sources..."
-	$(TOOLS_BIN)/cargo-deny check --hide-inclusion-graph
+	$(TOOLS_BIN)/cargo-deny --locked check -D warnings --hide-inclusion-graph
 
 rust-coverage:
 	@echo "Measure Rust workspace coverage..."

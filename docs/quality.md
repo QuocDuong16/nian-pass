@@ -117,7 +117,7 @@ invalidation. These are deterministic tests; they do not claim live provider or
 Windows runtime validation.
 
 The concrete network dependencies are exactly `reqwest 0.13.4` with
-`rustls-no-provider`, `rustls 0.23.43` with Ring,
+`rustls-no-provider`, `rustls 0.23.45` with Ring,
 `aws-sdk-s3 1.144.0`, `aws-smithy-http-client 1.4.0`, and `tokio 1.53.1`. The S3
 adapter deliberately does not depend on `aws-config`: it builds the official
 SDK service config with explicit credentials, so no default credential
@@ -343,9 +343,18 @@ for behavioral assertions or the exact serialized-key whitelist.
 
 `cargo-deny` fails known vulnerabilities, yanked releases, unapproved licenses,
 unknown registries, and every unapproved git source. Crates.io and workspace
-path dependencies are approved. Duplicate versions warn because Tauri and KDBX
-currently contain legitimate multi-version graphs; they are still visible for
-review. Workspace crates are private and are not assigned an invented project
+path dependencies are approved. Duplicate versions are denied by default;
+43 existing transitive duplicate groups require 63 exact, older-version
+exceptions in `deny.toml` because the pinned dependency graph includes
+incompatible semver generations (notably Tauri, KDBX, and Windows support).
+These exceptions apply only to the duplicate-version ban: advisory, yank,
+license, and source checks still cover every crate, including skipped versions.
+`make rust-security-check` uses `cargo-deny --locked check -D warnings`, so a
+new duplicate or an obsolete exception blocks CI rather than emitting a warning.
+TODO(M4.Q-dependency-duplicates): reduce these exact exceptions when dependency
+owners converge on compatible versions; do not globally allow duplicates or
+disable advisory checks merely to clear CI output.
+Workspace crates are private and are not assigned an invented project
 license by this milestone. Approved dependency licenses are enumerated in
 `deny.toml`. M4.2 adds the OSI-approved `BSL-1.0` license used by the official
 clipboard plugin's Windows-only transitive crates; this is a license approval,
@@ -368,7 +377,6 @@ Every advisory exception must name one exact RUSTSEC ID, explain impact and why
 no safe upgrade exists, and carry a tracking issue or TODO. Wildcard ignores are
 forbidden. Current exceptions are unmaintained-only transitive dependencies:
 
-- `RUSTSEC-2024-0411` through `RUSTSEC-2024-0420`: Tauri's Linux GTK3 stack.
 - `RUSTSEC-2024-0370`: `proc-macro-error` through that GTK3 stack.
 - `RUSTSEC-2025-0075`, `RUSTSEC-2025-0080`, `RUSTSEC-2025-0081`,
   `RUSTSEC-2025-0098`, and `RUSTSEC-2025-0100`: Tauri `urlpattern`'s `unic`
