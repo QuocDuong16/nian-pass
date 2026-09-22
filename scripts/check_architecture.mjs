@@ -313,7 +313,11 @@ export function runChecks(root, budget) {
         windowsReplaceSource,
       ) ||
       !/icacls\.exe/.test(windowsReplaceSource) ||
-      !/GetSecurityDescriptorSddlForm/.test(windowsReplaceSource)
+      !/GetNamedSecurityInfoW/.test(windowsReplaceSource) ||
+      !/ConvertSecurityDescriptorToStringSecurityDescriptorW/.test(
+        windowsReplaceSource,
+      ) ||
+      !/DACL_SECURITY_INFORMATION/.test(windowsReplaceSource)
     ) {
       violations.push(
         "windows-safe-replace must keep native destination/backup DACL preservation evidence",

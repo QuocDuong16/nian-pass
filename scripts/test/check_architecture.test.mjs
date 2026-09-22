@@ -105,6 +105,34 @@ test("clean fixture permits the centralized desktop invoke adapter", (t) => {
   assert.deepEqual(runChecks(fixture(t), budget()), []);
 });
 
+test("Windows DACL runtime evidence requires native read and conversion", (t) => {
+  const root = fixture(t);
+  const source = [
+    "ReplaceFileW",
+    "icacls.exe",
+    "fn replace_file_w_preserves_primary_dacl_on_result_and_first_backup(",
+    "GetNamedSecurityInfoW",
+    "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+    "DACL_SECURITY_INFORMATION",
+  ].join("\n");
+  const path = "crates/windows-safe-replace/src/lib.rs";
+  write(root, path, source);
+  assert.deepEqual(runChecks(root, budget()), []);
+  for (const essential of [
+    "icacls.exe",
+    "GetNamedSecurityInfoW",
+    "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+    "DACL_SECURITY_INFORMATION",
+  ]) {
+    write(root, path, source.replace(essential, "omitted"));
+    assert.match(
+      runChecks(root, budget()).join("\n"),
+      /must keep native destination\/backup DACL preservation evidence/,
+      `removing ${essential} must break the security gate`,
+    );
+  }
+});
+
 test("direct invoke from a component is rejected", (t) => {
   const root = fixture(t);
   writeFileSync(

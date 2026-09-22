@@ -165,7 +165,10 @@ be established before its name becomes visible. Ordinary Forgejo CI still has
 only Windows cross-compilation, while the manual GitHub
 `windows-runtime-diagnostic` workflow now runs native `windows-safe-replace`
 tests including a destination-versus-prepared DACL mismatch, then verifies the
-result and first backup both retain the original primary DACL. It also runs the
+result and first backup both retain the original primary DACL. The test reads
+only the DACL through native `GetNamedSecurityInfoW` and converts it to SDDL
+with `ConvertSecurityDescriptorToStringSecurityDescriptorW`; failures retain
+the native Windows error code rather than hiding PowerShell stderr. It also runs the
 `vault-session` replacement transaction tests, including recovery after a
 simulated `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`-style partial move. The same
 native job now exercises the complete candidate ordinary-Save pipeline through

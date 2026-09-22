@@ -110,26 +110,106 @@ mod windows_tests {
         if output.status.success() {
             Ok(())
         } else {
-            Err(io::Error::other("icacls could not set the test DACL"))
+            Err(io::Error::other(format!(
+                "icacls could not set the test DACL (status {}): {} {}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim(),
+            )))
         }
     }
 
     fn dacl_sddl(path: &Path) -> io::Result<String> {
-        let output = Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "(Get-Acl -LiteralPath $env:NIAN_PASS_ACL_PATH).GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access)",
-            ])
-            .env("NIAN_PASS_ACL_PATH", path)
-            .output()?;
-        if !output.status.success() {
-            return Err(io::Error::other("PowerShell could not read the test DACL"));
+        use std::{ffi::c_void, os::windows::ffi::OsStrExt as _, ptr};
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::{
+                Authorization::{
+                    ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+                    SDDL_REVISION_1, SE_FILE_OBJECT,
+                },
+                DACL_SECURITY_INFORMATION,
+            },
+        };
+
+        // Both returned buffers belong to Windows, including on later failures.
+        struct LocalAllocation(*mut c_void);
+
+        impl Drop for LocalAllocation {
+            fn drop(&mut self) {
+                // SAFETY: this pointer was allocated by a Windows security API
+                // that explicitly transfers ownership to the caller.
+                unsafe { LocalFree(self.0) };
+            }
         }
-        String::from_utf8(output.stdout)
-            .map(|value| value.trim().to_owned())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "DACL output was not UTF-8"))
+
+        let path_wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut raw_descriptor = ptr::null_mut();
+        // SAFETY: the UTF-16 path is NUL-terminated and the output pointer is
+        // valid. Only the DACL is requested, so no SACL privilege is needed.
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                path_wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut raw_descriptor,
+            )
+        };
+        let descriptor = LocalAllocation(raw_descriptor);
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status as i32));
+        }
+        if descriptor.0.is_null() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "missing DACL descriptor",
+            ));
+        }
+
+        let mut raw_sddl = ptr::null_mut();
+        let mut length = 0;
+        // SAFETY: the descriptor remains owned and alive until after the
+        // conversion, and both output pointers are valid for Windows to fill.
+        let converted = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor.0,
+                SDDL_REVISION_1,
+                DACL_SECURITY_INFORMATION,
+                &mut raw_sddl,
+                &mut length,
+            )
+        };
+        let sddl = LocalAllocation(raw_sddl.cast());
+        if converted == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if sddl.0.is_null() || length == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "empty DACL SDDL",
+            ));
+        }
+        // SAFETY: the API supplies the number of UTF-16 units in its live
+        // allocation. LocalAllocation frees it after conversion is complete.
+        let units = unsafe { std::slice::from_raw_parts(raw_sddl, length as usize) };
+        String::from_utf16(units)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid DACL SDDL UTF-16"))
+    }
+
+    #[test]
+    fn dacl_reader_reports_native_error_for_missing_file() -> io::Result<()> {
+        let directory = TestDir::create()?;
+        let error = dacl_sddl(&directory.0.join("nonexistent.kdbx"))
+            .expect_err("reading a missing file DACL must fail closed");
+        assert!(
+            error.raw_os_error().is_some(),
+            "expected native Windows error: {error}"
+        );
+        Ok(())
     }
 
     #[test]

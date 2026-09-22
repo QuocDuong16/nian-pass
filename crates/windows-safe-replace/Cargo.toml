@@ -7,7 +7,7 @@ publish.workspace = true
 description = "Narrow ACL-preserving Windows ReplaceFileW boundary for Nian Pass"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem", "Win32_Security_Authorization"] }
 
 [lib]
 path = "src/lib.rs"
