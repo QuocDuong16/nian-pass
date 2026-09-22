@@ -40,6 +40,50 @@ function workflowJob(workflow, name) {
   return nextJob === -1 ? remainder : remainder.slice(0, nextJob);
 }
 
+// Verified against https://nodejs.org/dist/v26.8.1/SHASUMS256.txt.
+// Keep these independent of the workflow so a stale CI pin fails source policy.
+export function forgejoNodeArchivePinViolations(workflow) {
+  const violations = [];
+  const hashes = {
+    x64: "3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d",
+    arm64: "23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2",
+  };
+  for (const name of [
+    "rust",
+    "desktop-native-check",
+    "windows-cross-check",
+    "gateway-container",
+    "keepassxc-compat",
+  ]) {
+    const job = workflowJob(workflow, name);
+    if (!job.includes('node_version="26.8.1"')) {
+      violations.push(`${name}: pinned Node.js version is missing`);
+    }
+    for (const [arch, checksum] of Object.entries(hashes)) {
+      if (
+        !job.includes(
+          `node_arch="${arch}"\n              node_checksum="${checksum}"`,
+        )
+      ) {
+        violations.push(
+          `${name}: Node.js ${arch} archive SHA-256 pin differs from upstream`,
+        );
+      }
+    }
+    const download = job.indexOf(
+      '"https://nodejs.org/dist/v${node_version}/${node_archive}"',
+    );
+    const verify = job.indexOf("sha256sum --check -");
+    const extract = job.indexOf("tar --extract --xz");
+    if (!(download >= 0 && verify > download && extract > verify)) {
+      violations.push(
+        `${name}: Node.js download must be checksum-verified before extraction`,
+      );
+    }
+  }
+  return violations;
+}
+
 export function gatewayWorkflowDependencyViolations(workflow) {
   const job = workflowJob(workflow, "gateway-container");
   if (job === "") return ["Forgejo gateway container job is missing"];
@@ -333,6 +377,7 @@ export function runChecks(root) {
   const dockerignore = source(root, ".dockerignore");
   violations.push(...gatewaySecretBuildContextViolations({ selfHosting, dockerignore }));
   violations.push(...gatewayContainerNetworkProbeViolations(containerCheck));
+  violations.push(...forgejoNodeArchivePinViolations(workflow));
   violations.push(...gatewayWorkflowDependencyViolations(workflow));
   if (
     !/Gateway container check passed/.test(containerCheck) ||

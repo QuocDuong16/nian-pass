@@ -20,11 +20,11 @@ jobs:
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
+              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
+              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -96,11 +96,11 @@ jobs:
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
+              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
+              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -170,11 +170,11 @@ jobs:
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
+              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
+              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -216,11 +216,11 @@ jobs:
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
+              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
+              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -264,11 +264,11 @@ jobs:
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee"
+              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d"
+              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2

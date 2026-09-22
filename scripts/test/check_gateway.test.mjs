@@ -1,13 +1,50 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
   forbiddenRuntimeDependencies,
+  forgejoNodeArchivePinViolations,
   gatewayContainerNetworkProbeViolations,
   gatewaySecretBuildContextViolations,
   gatewayWorkflowDependencyViolations,
   protocolSourceViolations,
 } from "../check_gateway.mjs";
+
+test("all Forgejo Node bootstrap jobs pin upstream hashes and verify before extracting", () => {
+  const workflow = readFileSync(
+    new URL("../../.forgejo/workflows/quality.yml", import.meta.url),
+    "utf8",
+  );
+  assert.deepEqual(forgejoNodeArchivePinViolations(workflow), []);
+
+  const staleX64 = workflow.replace(
+    "3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d",
+    "982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee",
+  );
+  assert.match(
+    forgejoNodeArchivePinViolations(staleX64).join("\n"),
+    /rust: Node.js x64 archive SHA-256/,
+  );
+
+  const staleArm64 = workflow.replace(
+    "23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2",
+    "afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d",
+  );
+  assert.match(
+    forgejoNodeArchivePinViolations(staleArm64).join("\n"),
+    /rust: Node.js arm64 archive SHA-256/,
+  );
+
+  const skipVerification = workflow.replace(
+    "sha256sum --check -",
+    ": checksum skipped",
+  );
+  assert.match(
+    forgejoNodeArchivePinViolations(skipVerification).join("\n"),
+    /rust: Node.js download must be checksum-verified before extraction/,
+  );
+});
 
 test("gateway container probes use a pinned client inside the Compose network", () => {
   const networkProbe = `
