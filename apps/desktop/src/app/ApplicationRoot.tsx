@@ -70,7 +70,11 @@ export function ApplicationRoot({
   if (runtimeInfo.platform === "desktop") {
     application = (
       <BrowserConnectionApproval api={browserApproval}>
-        <App api={api} windowLifecycle={windowLifecycle} />
+        <App
+          api={api}
+          ordinarySaveSupported={runtimeInfo.ordinarySaveSupported}
+          windowLifecycle={windowLifecycle}
+        />
       </BrowserConnectionApproval>
     );
   } else if (runtimeInfo.platform === "android") {

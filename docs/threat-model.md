@@ -1225,9 +1225,11 @@ be established before publication. With no primitive satisfying all of those
 properties and no native Windows/DACL runtime evidence in current Forgejo
 infrastructure, the control remains fail-closed Windows save rather than a
 metadata repair after publication or an unsafe fallback.
-The desktop Create Vault command also fails closed before showing its save
-picker while that capability is disabled, avoiding a new vault that cannot be
-edited and saved by the application. Existing Windows vaults remain readable.
+The Rust runtime bootstrap reports the backend ordinary-Save capability to the
+desktop locked view. When it is false, the UI hides Create before master
+password entry. The Create command independently checks that backend policy
+before showing its save picker, so stale or altered UI state cannot bypass the
+gate. Existing Windows vaults remain readable.
 
 ## Deferred Apple platform design threats (future M9+)
 
@@ -1278,14 +1280,15 @@ never written to React, UserDefaults, Keychain, App Group, clipboard, or logs.
 KDF time/memory pressure in the extension fails closed and never lowers vault
 parameters.
 
-Raw C pointers introduce lifetime, null, length, allocation, double-free, and
-panic-across-ABI risks. The only manually unsafe boundary is the reviewed FFI
-module; it validates nulls and bounded lengths, performs no pointer arithmetic,
-uses explicit close/free ownership, zeroizes returned credential allocations,
-and catches Rust panics as a generic status. Native callers must return exact
-allocation triples only once; arbitrary dangling non-null pointers remain
-outside what Rust can validate and require Swift ownership discipline plus
-Xcode integration tests.
+Raw C pointers in the iOS extension introduce lifetime, null, length,
+allocation, double-free, and panic-across-ABI risks. Its manually unsafe code is
+confined to the reviewed FFI module; it validates nulls and bounded lengths,
+performs no pointer arithmetic, uses explicit close/free ownership, zeroizes
+returned credential allocations, and catches Rust panics as a generic status.
+The separate Windows replacement FFI is confined to `windows-safe-replace`.
+Native callers must return exact allocation triples only once; arbitrary
+dangling non-null pointers remain outside what Rust can validate and require
+Swift ownership discipline plus Xcode integration tests.
 
 A future Credential Provider target could compile while bypassing the reviewed Rust
 FFI and reimplementing credential or KDBX semantics in Swift. The source policy

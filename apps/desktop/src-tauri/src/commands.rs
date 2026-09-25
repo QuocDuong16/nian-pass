@@ -431,6 +431,10 @@ mod tests {
         assert_eq!(encoded["platform"], json!("desktop"));
         assert_eq!(encoded["version"], json!(env!("CARGO_PKG_VERSION")));
         assert!(encoded["commit"].as_str().is_some());
+        assert_eq!(
+            encoded["ordinarySaveSupported"],
+            json!(VaultSession::ordinary_save_supported())
+        );
     }
 
     #[test]

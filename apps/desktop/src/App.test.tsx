@@ -231,7 +231,7 @@ async function selectAndEnterPassword() {
 }
 
 test("locked view progressively asks for credentials only after vault selection", async () => {
-  render(<App api={api()} />);
+  render(<App api={api()} ordinarySaveSupported={true} />);
   expect(
     screen.getByRole("button", { name: "Create new vault" }),
   ).toBeEnabled();

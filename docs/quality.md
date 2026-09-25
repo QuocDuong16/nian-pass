@@ -296,9 +296,10 @@ Extension can be built and verified. These Apple-specific gates are excluded
 from ordinary Linux development, `quick-check`, `quality-check`, and default CI;
 Linux neither fabricates an Xcode project nor reports an iOS pass.
 
-Rust policy keeps `unsafe_code = forbid` unchanged and denies warnings,
+Rust workspace lints default to `unsafe_code = forbid` and deny warnings,
 unused must-use values, `dbg!`, `todo!`, `unimplemented!`, production unwraps,
-and stdout/stderr macros. The CLI has one centralized Clippy allowance because
+and stdout/stderr macros. Narrow reviewed native FFI crates opt into unsafe
+code explicitly. The CLI has one centralized Clippy allowance because
 stdout/stderr is its explicit sanitized user interface, not logging. The KDBX
 crate permits stderr only in tests that surface an external KeePassXC child
 failure. `expect` remains allowed for documented impossible invariants and
@@ -447,6 +448,11 @@ tests feed it through runtime validators. Exact-key validation rejects unknown
 fields so future DTO drift cannot silently expose a secret-bearing addition.
 Full type generation is deferred until a maintained generator reduces risk
 without placing export derives on core secret-bearing types.
+The desktop `runtime_info` DTO also carries `ordinarySaveSupported` directly
+from `VaultSession` policy. Exact runtime validation requires the capability
+for desktop and omits it for mobile. The locked view hides Create and its
+credential form when the value is false; the Rust Create command retains its
+independent pre-picker policy check.
 
 `apps/desktop/contracts/mobile-contract.json` covers writable selection, clean
 and dirty snapshots, creation receipts, secret-free entry detail, and every
@@ -524,12 +530,14 @@ simulator/device system smoke remains separate. The gate is excluded from Linux
 failure on Linux is not an ordinary quality failure and never substitutes for
 an Apple PASS; M5.4 is DEFERRED by roadmap decision until Apple work resumes.
 
-The workspace keeps `unsafe_code = forbid` globally. Only
-`crates/ios-credential-ffi` opts into unsafe code, with
-`unsafe_op_in_unsafe_fn = deny`; raw operations are restricted to the exact
-`src/ffi.rs` pointer/allocator boundary. Business matching, KDBX parsing,
-session registry, generation hashing, and JSON projection remain safe Rust.
-Architecture policy must never broaden this exception by wildcard.
+Workspace members inherit `unsafe_code = forbid` unless a reviewed native FFI
+crate explicitly opts into unsafe code. The current exceptions are
+`crates/ios-credential-ffi`, whose raw operations are restricted to its
+`src/ffi.rs` pointer/allocator boundary, and `crates/windows-safe-replace`,
+whose Win32 calls remain inside that crate. Both deny
+`unsafe_op_in_unsafe_fn`; business matching, KDBX parsing, session registry,
+generation hashing, and JSON projection remain safe Rust. Architecture policy
+must never broaden either exception by wildcard.
 
 M4.3 extends that fixture only with secret-free `dirty`, creation receipts, and
 close-policy samples. Password, notes, and custom-field request plaintext is

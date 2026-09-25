@@ -1,23 +1,31 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { desktopApi, type RuntimeApi } from "../lib/desktop";
 import type { DesktopWindowLifecycle } from "../lib/window-lifecycle";
 import type { RuntimePlatform } from "../types/runtime";
 import { ApplicationRoot } from "./ApplicationRoot";
+import { mutationApi } from "../test/desktop-api";
 import { createMobileApi } from "../test/mobile-api";
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
 function runtime(platform: RuntimePlatform): RuntimeApi {
+  const base = {
+    version: "0.1.0",
+    commit: "0123456789abcdef0123456789abcdef01234567",
+  };
   return {
-    getInfo: vi.fn().mockResolvedValue({
-      platform,
-      version: "0.1.0",
-      commit: "0123456789abcdef0123456789abcdef01234567",
-    }),
+    getInfo: vi
+      .fn()
+      .mockResolvedValue(
+        platform === "desktop"
+          ? { ...base, platform, ordinarySaveSupported: true }
+          : { ...base, platform },
+      ),
   };
 }
 
@@ -45,6 +53,35 @@ test("desktop runtime mounts the existing desktop application", async () => {
   await waitFor(() => {
     expect(windowLifecycle.onCloseRequested).toHaveBeenCalledOnce();
   });
+});
+
+test("desktop runtime disables Create before asking for credentials when Save is unsupported", async () => {
+  const windowLifecycle = lifecycle();
+  const createVault = vi.fn();
+  render(
+    <ApplicationRoot
+      api={mutationApi({ createVault })}
+      runtime={{
+        getInfo: vi.fn().mockResolvedValue({
+          platform: "desktop",
+          version: "0.1.0",
+          commit: "unknown",
+          ordinarySaveSupported: false,
+        }),
+      }}
+      windowLifecycle={windowLifecycle}
+    />,
+  );
+
+  expect(
+    await screen.findByText(
+      "Vault creation and saving are unavailable here. Existing vaults can still be opened read-only.",
+    ),
+  ).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Create new vault" })).toBeNull();
+  expect(screen.queryByLabelText("Vault name")).toBeNull();
+  expect(screen.queryByLabelText("Master password")).toBeNull();
+  expect(createVault).not.toHaveBeenCalled();
 });
 
 test("Android mounts the mobile vault app without desktop lifecycle", async () => {

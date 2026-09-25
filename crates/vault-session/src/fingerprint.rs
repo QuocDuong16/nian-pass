@@ -15,6 +15,7 @@ pub struct FileFingerprint {
 }
 
 impl FileFingerprint {
+    #[cfg(unix)]
     pub(crate) const fn from_parts(size: u64, sha256: [u8; 32]) -> Self {
         Self { size, sha256 }
     }

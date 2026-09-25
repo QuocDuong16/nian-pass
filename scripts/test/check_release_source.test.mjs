@@ -616,6 +616,17 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   writeFileSync(
     workflowPath,
     workflow.replace(
+      "          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session create_cleanup_preserves_external_replacement_at_published_target\n",
+      "",
+    ),
+  );
+  assert.match(
+    windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
+    /external replacement/,
+  );
+  writeFileSync(
+    workflowPath,
+    workflow.replace(
       '            "WINDOWS_REPLACEFILE_DACL_PRESERVATION=PASS",\n',
       "",
     ),

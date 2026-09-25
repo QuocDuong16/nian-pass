@@ -12,6 +12,7 @@ import { lockedErrorCode, lockedOperationMessage } from "./locked-errors";
 
 interface LockedViewProps {
   api: DesktopApi;
+  ordinarySaveSupported: boolean;
   notice?: string | null;
   onUnlocked: (snapshot: VaultSnapshotDto) => void;
 }
@@ -21,7 +22,12 @@ type LockedState =
   | { kind: "credential_required"; selection: SelectedVaultDto }
   | { kind: "creating" };
 
-export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
+export function LockedView({
+  api,
+  ordinarySaveSupported,
+  notice,
+  onUnlocked,
+}: LockedViewProps) {
   const [state, setState] = useState<LockedState>({ kind: "home" });
   const [password, setPassword] = useState("");
   const [keyfile, setKeyfile] = useState<SelectedKeyfileDto | null>(null);
@@ -111,7 +117,7 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
   const submitCreate = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     const name = vaultName.trim();
-    if (state.kind !== "creating" || busy) return;
+    if (state.kind !== "creating" || busy || !ordinarySaveSupported) return;
     if (name === "") {
       setError("Enter a vault name.");
       return;
@@ -135,12 +141,7 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
       }
     } catch (cause: unknown) {
       resetSensitiveFields();
-      const code = lockedErrorCode(cause);
-      setError(
-        code === "unsupported_persistence_platform"
-          ? "Creating and editing vaults is unavailable on Windows until safe file saving is verified. No file was created. You can still open existing vaults read-only."
-          : lockedOperationMessage(code),
-      );
+      setError(lockedOperationMessage(lockedErrorCode(cause)));
     } finally {
       setBusy(false);
     }
@@ -163,9 +164,11 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
 
         <p className="unlock-intro">
           {state.kind === "home"
-            ? "Open an existing KeePass database or create a local vault where safe saving is supported."
+            ? ordinarySaveSupported
+              ? "Open an existing KeePass database or create a local vault."
+              : "Open an existing KeePass database. Existing vaults can be opened read-only."
             : state.kind === "creating"
-              ? "Choose a name and master password. Nian Pass opens the save dialog only where safe vault saving is supported."
+              ? "Choose a name and master password. You will choose where to save the vault next."
               : "Enter the master password and, when required, choose the vault key file."}
         </p>
 
@@ -184,16 +187,23 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
             >
               Open existing vault
             </button>
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => {
-                setError(null);
-                setState({ kind: "creating" });
-              }}
-            >
-              Create new vault
-            </button>
+            {ordinarySaveSupported ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setState({ kind: "creating" });
+                }}
+              >
+                Create new vault
+              </button>
+            ) : (
+              <p className="lock-notice" role="status">
+                Vault creation and saving are unavailable here. Existing vaults
+                can still be opened read-only.
+              </p>
+            )}
           </div>
         ) : null}
 
@@ -212,7 +222,7 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
           />
         ) : null}
 
-        {state.kind === "creating" ? (
+        {state.kind === "creating" && ordinarySaveSupported ? (
           <LockedCreateForm
             vaultName={vaultName}
             password={password}

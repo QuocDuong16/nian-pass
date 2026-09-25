@@ -12,7 +12,7 @@ use super::{
 use super::{apply_restricted_permissions, sync_path};
 
 impl VaultSession {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn save_with_observer(
         &mut self,
         credential: &SecretString,

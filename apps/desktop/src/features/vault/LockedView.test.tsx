@@ -18,10 +18,36 @@ function openCreate() {
   return screen.getByLabelText("Vault name").closest("form");
 }
 
+test("unsupported Save capability blocks Create before requesting credentials", () => {
+  const createVault = vi.fn();
+  render(
+    <LockedView
+      api={mutationApi({ createVault })}
+      ordinarySaveSupported={false}
+      onUnlocked={vi.fn()}
+    />,
+  );
+
+  expect(screen.queryByRole("button", { name: "Create new vault" })).toBeNull();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Existing vaults can still be opened read-only",
+  );
+  expect(screen.queryByLabelText("Vault name")).toBeNull();
+  expect(screen.queryByLabelText("Master password")).toBeNull();
+  expect(screen.queryByLabelText("Confirm master password")).toBeNull();
+  expect(createVault).not.toHaveBeenCalled();
+});
+
 test("create vault validates progressively and submits trimmed metadata", async () => {
   const api = mutationApi();
   const onUnlocked = vi.fn();
-  render(<LockedView api={api} onUnlocked={onUnlocked} />);
+  render(
+    <LockedView
+      api={api}
+      ordinarySaveSupported={true}
+      onUnlocked={onUnlocked}
+    />,
+  );
   const form = openCreate();
   if (form === null) throw new Error("create form missing");
 
@@ -70,7 +96,7 @@ test.each([
   ["vault_create_failed", "could not safely create the vault"],
   [
     "unsupported_persistence_platform",
-    "Creating and editing vaults is unavailable on Windows",
+    "This platform cannot safely create or save vaults yet",
   ],
   ["internal", "could not complete that vault operation"],
 ] as const)(
@@ -79,7 +105,13 @@ test.each([
     const api = mutationApi({
       createVault: vi.fn().mockRejectedValue(new DesktopCommandError(code)),
     });
-    render(<LockedView api={api} onUnlocked={vi.fn()} />);
+    render(
+      <LockedView
+        api={api}
+        ordinarySaveSupported={true}
+        onUnlocked={vi.fn()}
+      />,
+    );
     openCreate();
 
     fireEvent.change(screen.getByLabelText("Vault name"), {
@@ -100,7 +132,13 @@ test.each([
 );
 
 test("Escape cancels create and clears local credentials", () => {
-  render(<LockedView api={mutationApi()} onUnlocked={vi.fn()} />);
+  render(
+    <LockedView
+      api={mutationApi()}
+      ordinarySaveSupported={true}
+      onUnlocked={vi.fn()}
+    />,
+  );
   const form = openCreate();
   if (form === null) throw new Error("create form missing");
   fireEvent.change(screen.getByLabelText("Vault name"), {
@@ -124,7 +162,13 @@ test("keyfile-only unlock stays native and never requires a password", async () 
     .mockResolvedValue({ ...mutationSnapshot, dirty: false });
   const api = mutationApi({ unlockVaultWithKeyfile });
   const onUnlocked = vi.fn();
-  render(<LockedView api={api} onUnlocked={onUnlocked} />);
+  render(
+    <LockedView
+      api={api}
+      ordinarySaveSupported={true}
+      onUnlocked={onUnlocked}
+    />,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   expect(await screen.findByText("fixture.kdbx")).toBeVisible();
@@ -152,7 +196,9 @@ test("password plus keyfile uses the composite unlock path and retry retains the
     .mockRejectedValueOnce(new DesktopCommandError("unlock_failed"))
     .mockResolvedValueOnce({ ...mutationSnapshot, dirty: false });
   const api = mutationApi({ unlockVaultWithKeyfile });
-  render(<LockedView api={api} onUnlocked={vi.fn()} />);
+  render(
+    <LockedView api={api} ordinarySaveSupported={true} onUnlocked={vi.fn()} />,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await screen.findByText("fixture.kdbx");
@@ -186,7 +232,9 @@ test("password plus keyfile uses the composite unlock path and retry retains the
 test("removing a selected keyfile clears native state and restores credential validation", async () => {
   const clearKeyfile = vi.fn().mockResolvedValue(undefined);
   const api = mutationApi({ clearKeyfile });
-  render(<LockedView api={api} onUnlocked={vi.fn()} />);
+  render(
+    <LockedView api={api} ordinarySaveSupported={true} onUnlocked={vi.fn()} />,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await screen.findByText("fixture.kdbx");
@@ -207,7 +255,9 @@ test("unlock form ignores an empty credential submit and Escape returns home", a
     .fn()
     .mockResolvedValue({ ...mutationSnapshot, dirty: false });
   const api = mutationApi({ unlockVault });
-  render(<LockedView api={api} onUnlocked={vi.fn()} />);
+  render(
+    <LockedView api={api} ordinarySaveSupported={true} onUnlocked={vi.fn()} />,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   await screen.findByText("fixture.kdbx");
@@ -234,7 +284,9 @@ test("keyfile picker failures keep the unlock flow recoverable and another vault
     .fn()
     .mockRejectedValue(new DesktopCommandError("invalid_request"));
   const api = mutationApi({ selectVault, selectKeyfile, clearKeyfile });
-  render(<LockedView api={api} onUnlocked={vi.fn()} />);
+  render(
+    <LockedView api={api} ordinarySaveSupported={true} onUnlocked={vi.fn()} />,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Open existing vault" }));
   expect(await screen.findByText("first.kdbx")).toBeVisible();

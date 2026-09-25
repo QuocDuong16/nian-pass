@@ -56,19 +56,30 @@ export function parseRuntimeInfo(value: unknown): RuntimeInfoDto {
     return invalidRuntimeInfo();
   }
   const object = value as Record<string, unknown>;
+  const platform = parseRuntimePlatform(object["platform"]);
+  const isDesktop = platform === "desktop";
   if (
-    Object.keys(object).length !== 3 ||
+    Object.keys(object).length !== (isDesktop ? 4 : 3) ||
     !("platform" in object) ||
     typeof object["version"] !== "string" ||
     !isReleaseVersion(object["version"]) ||
     typeof object["commit"] !== "string" ||
-    !/^(?:unknown|[0-9a-f]{40})$/.test(object["commit"])
+    !/^(?:unknown|[0-9a-f]{40})$/.test(object["commit"]) ||
+    (isDesktop && typeof object["ordinarySaveSupported"] !== "boolean") ||
+    (!isDesktop && "ordinarySaveSupported" in object)
   ) {
     return invalidRuntimeInfo();
   }
-  return {
-    platform: parseRuntimePlatform(object["platform"]),
+  const base = {
+    platform,
     version: object["version"],
     commit: object["commit"],
   };
+  return isDesktop
+    ? {
+        ...base,
+        platform,
+        ordinarySaveSupported: object["ordinarySaveSupported"] as boolean,
+      }
+    : { ...base, platform };
 }

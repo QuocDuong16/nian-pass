@@ -6,6 +6,83 @@
 
 use std::{io, path::Path};
 
+/// Windows volume and file index for one regular file object.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct FileIdentity {
+    volume: u32,
+    index_high: u32,
+    index_low: u32,
+}
+
+#[cfg(windows)]
+fn file_information(
+    file: &std::fs::File,
+) -> io::Result<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION> {
+    use std::{mem::MaybeUninit, os::windows::io::AsRawHandle as _};
+    use windows_sys::Win32::{
+        Foundation::HANDLE,
+        Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle},
+    };
+
+    let handle = file.as_raw_handle() as HANDLE;
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+    // SAFETY: the file handle is live for the call and the output points to a
+    // correctly sized, writable BY_HANDLE_FILE_INFORMATION buffer.
+    if unsafe { GetFileInformationByHandle(handle, information.as_mut_ptr()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: Windows initialized the complete structure after success.
+    Ok(unsafe { information.assume_init() })
+}
+
+#[cfg(windows)]
+fn identity_from_information(
+    information: windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION,
+) -> Option<FileIdentity> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    };
+
+    if information.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0
+    {
+        return None;
+    }
+    Some(FileIdentity {
+        volume: information.dwVolumeSerialNumber,
+        index_high: information.nFileIndexHigh,
+        index_low: information.nFileIndexLow,
+    })
+}
+
+/// Returns the native identity of an open regular file.
+#[cfg(windows)]
+pub fn file_identity(file: &std::fs::File) -> io::Result<FileIdentity> {
+    identity_from_information(file_information(file)?)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "not a regular file"))
+}
+
+/// Returns the identity of a named regular file without following reparse
+/// points. Missing paths and reparse points return `None`.
+#[cfg(windows)]
+pub fn file_identity_at_path(path: &Path) -> io::Result<Option<FileIdentity>> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(identity_from_information(file_information(&file)?))
+}
+
 /// Replaces `destination` with `prepared` and moves the exact former
 /// destination generation to the non-existent `backup` path.
 #[cfg(windows)]
@@ -66,7 +143,7 @@ mod windows_tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use super::replace_existing_with_backup;
+    use super::{file_identity, file_identity_at_path, replace_existing_with_backup};
 
     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -255,6 +332,20 @@ mod windows_tests {
         assert_eq!(dacl_sddl(&destination)?, destination_dacl);
         assert_eq!(dacl_sddl(&backup)?, destination_dacl);
         assert!(!prepared.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn file_identity_does_not_confuse_distinct_files_with_equal_bytes() -> io::Result<()> {
+        let directory = TestDir::create()?;
+        let original = directory.0.join("original.kdbx");
+        let replacement = directory.0.join("replacement.kdbx");
+        fs::write(&original, b"same bytes")?;
+        fs::write(&replacement, b"same bytes")?;
+
+        let original_identity = file_identity(&fs::File::open(&original)?)?;
+        let replacement_identity = file_identity_at_path(&replacement)?;
+        assert!(replacement_identity != Some(original_identity));
         Ok(())
     }
 

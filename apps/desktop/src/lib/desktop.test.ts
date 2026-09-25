@@ -363,12 +363,14 @@ test("runtime adapter invokes the narrow platform command and validates it", asy
     platform: "desktop",
     version: "0.1.0",
     commit: "unknown",
+    ordinarySaveSupported: true,
   });
 
   await expect(runtimeApi.getInfo()).resolves.toEqual({
     platform: "desktop",
     version: "0.1.0",
     commit: "unknown",
+    ordinarySaveSupported: true,
   });
   expect(invoke).toHaveBeenCalledWith("runtime_info", undefined);
 });

@@ -11,10 +11,11 @@ export function lockedOperationMessage(code: DesktopErrorCode): string {
       return "A file already exists at that location. Choose a different save location.";
     case "vault_create_failed":
       return "Nian Pass could not safely create the vault at that location.";
+    case "unsupported_persistence_platform":
+      return "This platform cannot safely create or save vaults yet. No vault was created. Existing vaults can still be opened read-only.";
     case "already_unlocked":
       return "Lock the current vault before opening another one.";
     case "unsupported_write_format":
-    case "unsupported_persistence_platform":
     case "read_only_source":
     case "entry_not_found":
     case "group_not_found":

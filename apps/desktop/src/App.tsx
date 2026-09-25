@@ -21,6 +21,7 @@ import type { VaultSnapshotDto } from "./types/desktop";
 
 interface AppProps {
   api?: DesktopApi;
+  ordinarySaveSupported?: boolean;
   windowLifecycle?: DesktopWindowLifecycle | null;
 }
 
@@ -28,6 +29,7 @@ type ExitIntent = Extract<SaveIntent, "lock" | "close">;
 
 export default function App({
   api = desktopApi,
+  ordinarySaveSupported = false,
   windowLifecycle = null,
 }: AppProps) {
   const [snapshot, setSnapshot] = useState<VaultSnapshotDto | null>(null);
@@ -89,7 +91,6 @@ export default function App({
     },
   });
   const clearSavePassword = save.clearPassword;
-
   const operationPending = locking || save.busy || mutationPending;
   const closeBlocked =
     locking || mutationPending || save.flow.kind !== "closed";
@@ -113,7 +114,6 @@ export default function App({
   useEffect(() => {
     securityActivity.current = idle.recordActivity;
   }, [idle.recordActivity]);
-
   useEffect(() => {
     clearSavePassword();
   }, [clearSavePassword, idle.privacyVersion]);
@@ -137,6 +137,7 @@ export default function App({
     return (
       <LockedView
         api={api}
+        ordinarySaveSupported={ordinarySaveSupported}
         notice={lockError}
         onUnlocked={(nextSnapshot) => {
           setLockError(null);

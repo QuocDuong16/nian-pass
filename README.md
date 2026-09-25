@@ -391,9 +391,10 @@ pre-primary save does not advance the recovery generation. A clean save performs
 no filesystem I/O.
 
 Windows ordinary Save remains disabled until native persistence evidence is
-reviewed. The desktop Create Vault command checks this backend capability
-before opening the save picker, so it cannot leave a newly created vault that
-Nian Pass immediately treats as read-only; existing Windows vaults remain
+reviewed. The Rust runtime bootstrap sends the backend ordinary-Save capability
+to the locked view, so unsupported platforms do not show the Create form or ask
+for a master password. The Create Vault command still checks the same backend
+policy before opening the save picker. Existing Windows vaults remain
 available for read-only use.
 
 The workspace also retains a KDBX-independent, secret-free metadata projection;

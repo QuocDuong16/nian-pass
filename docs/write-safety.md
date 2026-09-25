@@ -125,11 +125,22 @@ privileged `chown` or promise preservation of every metadata bit.
 
 Windows write persistence currently fails closed with
 `UnsupportedPersistencePlatform`. Rust-visible permissions cannot prove DACL
-preservation, and the workspace forbids local unsafe Rust needed by raw Win32
-bindings. Opening and read-only sessions remain supported; dirty save creates no
-temp, backup, or primary write on Windows. The desktop Create Vault command
-checks the same backend Save capability before showing its native save picker,
-so it cannot create a new vault that immediately opens read-only.
+preservation. Workspace Rust lints forbid unsafe code by default; reviewed
+native FFI crates may opt in narrowly, and `windows-safe-replace` is the
+boundary for the required Win32 call. Opening and read-only sessions remain
+supported; dirty save creates no temp, backup, or primary write on Windows. The
+desktop runtime bootstrap carries the backend ordinary-Save capability to the
+locked view, which hides Create before credential entry when persistence is
+unsupported. The Create command independently checks the same backend policy
+before showing its native save picker.
+
+Create prepares a new vault in a same-directory create-new staging file (mode
+`0600` on Unix, directory-inherited security on Windows), syncs and reopens it,
+then publishes it with a no-overwrite hard link. Failure cleanup never removes
+the user-selected target. Temporary cleanup removes only a random staging name
+whose recorded file identity still matches; symlink and reparse substitutions
+fail closed. Desktop Create remains blocked by the backend while Windows
+ordinary Save is disabled.
 
 ### M3.1 Windows replacement evaluation
 

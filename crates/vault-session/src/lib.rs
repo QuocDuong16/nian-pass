@@ -4,6 +4,7 @@
 mod create;
 mod database_settings;
 mod export;
+mod file_identity;
 mod fingerprint;
 mod mutations;
 mod open;
@@ -14,10 +15,12 @@ mod sync_persistence;
 pub use fingerprint::FileFingerprint;
 use kdbx::{KdbxCredential, KdbxDocument, KdbxError};
 pub use policy::WriteRestriction;
+#[cfg(unix)]
+use std::io::{BufReader, Read};
 use std::{
     ffi::OsString,
     fs::{self, File, Metadata, OpenOptions},
-    io::{self, BufReader, Read, Seek, SeekFrom, Write},
+    io::{self, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 pub use sync_persistence::EncryptedVaultSnapshot;
@@ -25,7 +28,9 @@ use thiserror::Error;
 use vault_core::{SecretString, Vault};
 
 const SAVE_TEMP_PREFIX: &str = ".nian-pass-save-";
+const CREATE_TEMP_PREFIX: &str = ".nian-pass-create-";
 const EXPORT_TEMP_PREFIX: &str = ".nian-pass-export-";
+#[cfg(any(unix, test))]
 const BACKUP_TEMP_PREFIX: &str = ".nian-pass-backup-";
 const TEMP_SUFFIX: &str = ".tmp";
 const TEMP_CREATE_ATTEMPTS: usize = 128;
@@ -81,6 +86,7 @@ impl VaultSession {
             Err(error) => Err(SessionError::CredentialVerificationFailed(error)),
         }
     }
+    #[cfg(unix)]
     fn prepare_backup(
         &self,
         backup_path: &Path,
@@ -131,6 +137,7 @@ impl VaultSession {
         Ok(backup)
     }
 
+    #[cfg(unix)]
     fn commit_backup(
         &self,
         mut backup: ManagedTemp,
@@ -430,18 +437,21 @@ fn reject_symlink_if_present(path: &Path) -> io::Result<()> {
     }
 }
 
+#[cfg(unix)]
 fn copy_and_fingerprint(mut source: File, destination: &mut File) -> io::Result<FileFingerprint> {
     let mut digesting_reader = DigestingReader::new(BufReader::new(&mut source));
     io::copy(&mut digesting_reader, destination)?;
     Ok(digesting_reader.finish())
 }
 
+#[cfg(unix)]
 struct DigestingReader<R> {
     inner: R,
     digest: sha2::Sha256,
     size: u64,
 }
 
+#[cfg(unix)]
 impl<R> DigestingReader<R> {
     fn new(inner: R) -> Self {
         use sha2::Digest;
@@ -460,6 +470,7 @@ impl<R> DigestingReader<R> {
     }
 }
 
+#[cfg(unix)]
 impl<R: Read> Read for DigestingReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         use sha2::Digest;
@@ -498,14 +509,6 @@ fn open_existing_file(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
-#[cfg(windows)]
-fn sync_path(_path: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "safe Windows metadata sync is unavailable",
-    ))
-}
-
 #[cfg(unix)]
 fn apply_restricted_permissions(path: &Path, source: &Metadata) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -514,17 +517,10 @@ fn apply_restricted_permissions(path: &Path, source: &Metadata) -> io::Result<()
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
-#[cfg(windows)]
-fn apply_restricted_permissions(_path: &Path, _source: &Metadata) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "safe Windows security metadata preservation is unavailable",
-    ))
-}
-
 struct ManagedTemp {
     path: PathBuf,
     file: Option<File>,
+    identity: file_identity::FileIdentity,
     armed: bool,
 }
 
@@ -535,9 +531,12 @@ impl ManagedTemp {
             let path = parent.join(name);
             match open_private_new_file(&path) {
                 Ok(file) => {
+                    let identity = file_identity::FileIdentity::from_file(&file)
+                        .map_err(SessionError::TempCreateFailed)?;
                     return Ok(Self {
                         path,
                         file: Some(file),
+                        identity,
                         armed: true,
                     });
                 }
@@ -575,7 +574,11 @@ impl Drop for ManagedTemp {
     fn drop(&mut self) {
         self.file.take();
         if self.armed {
-            let _ = fs::remove_file(&self.path);
+            let same_file = file_identity::FileIdentity::at_path(&self.path)
+                .is_ok_and(|current| current == Some(self.identity));
+            if same_file {
+                let _ = fs::remove_file(&self.path);
+            }
         }
     }
 }
@@ -621,10 +624,13 @@ enum SavePhase {
     AfterTempSync,
     AfterTempVerify,
     AfterFinalExternalCheck,
+    #[cfg(unix)]
     AfterBackupWrite,
     BeforeTargetReplace,
+    #[cfg(unix)]
     AfterTargetReplace,
     AfterFinalDocumentRead,
+    #[cfg(unix)]
     AfterBackupCommit,
 }
 
@@ -648,10 +654,12 @@ trait SaveObserver {
         platform::sync_parent(parent)
     }
 
+    #[cfg(unix)]
     fn replace_primary(&mut self, prepared: &Path, destination: &Path) -> io::Result<()> {
         platform::replace_existing(prepared, destination)
     }
 
+    #[cfg(unix)]
     fn commit_backup(&mut self, prepared: &Path, destination: &Path) -> io::Result<()> {
         platform::install_or_replace(prepared, destination)
     }
@@ -845,6 +853,96 @@ mod tests {
         assert_eq!(
             fs::read(&path).expect("existing target should remain readable"),
             original
+        );
+    }
+
+    #[test]
+    fn create_cleanup_preserves_external_replacement_at_published_target() {
+        let directory = TestDir::create();
+        let path = directory.path.join("replaced-during-create.kdbx");
+        let sentinel = b"external replacement must survive failed Create";
+        let result = VaultSession::create_with_publish_hook(
+            &path,
+            "Injected create failure",
+            &credential(),
+            |published| {
+                fs::remove_file(published).expect("published target should be removable");
+                fs::write(published, sentinel).expect("external replacement should be written");
+                Err(SessionError::CreateTarget(io::Error::other(
+                    "injected post-publish Create failure",
+                )))
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(SessionError::CreateTarget(error))
+                if error.to_string() == "injected post-publish Create failure"
+        ));
+        assert_eq!(
+            fs::read(&path).expect("external replacement should remain readable"),
+            sentinel
+        );
+    }
+
+    #[test]
+    fn create_cleanup_does_not_recreate_a_target_that_disappeared() {
+        let directory = TestDir::create();
+        let path = directory.path.join("removed-during-create.kdbx");
+        let result = VaultSession::create_with_publish_hook(
+            &path,
+            "Injected create failure",
+            &credential(),
+            |published| {
+                fs::remove_file(published).expect("published target should be removable");
+                Err(SessionError::CreateTarget(io::Error::other(
+                    "injected post-publish Create failure",
+                )))
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(SessionError::CreateTarget(error))
+                if error.to_string() == "injected post-publish Create failure"
+        ));
+        assert!(!path.exists(), "failed Create must not recreate the target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_cleanup_never_follows_a_symlink_substituted_at_target() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TestDir::create();
+        let path = directory.path.join("symlink-during-create.kdbx");
+        let external = directory.path.join("external.data");
+        let sentinel = b"external symlink target must survive";
+        fs::write(&external, sentinel).expect("external sentinel should be written");
+        let result = VaultSession::create_with_publish_hook(
+            &path,
+            "Injected create failure",
+            &credential(),
+            |published| {
+                fs::remove_file(published).expect("published target should be removable");
+                symlink(&external, published).expect("target symlink should be created");
+                Ok(())
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(SessionError::ExternalModificationDetected)
+        ));
+        assert!(
+            fs::symlink_metadata(&path)
+                .expect("substituted symlink should remain")
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read(&external).expect("symlink target remains readable"),
+            sentinel
         );
     }
 
@@ -1833,6 +1931,7 @@ mod tests {
         let credential = credential();
         let mut session = VaultSession::create(&path, "Windows candidate create", &credential)
             .expect("new vault should be created and initially verified");
+        let entry_password = SecretString::new("candidate-secret".to_owned());
         let initial_generation = fs::read(&path).expect("initial generation should be readable");
         let root = root_group(&session);
         let group = session
@@ -1845,7 +1944,7 @@ mod tests {
                     title: "Windows saved entry",
                     username: "candidate-user",
                     url: "https://example.test",
-                    password: Some("candidate-secret"),
+                    password: Some(&entry_password),
                 },
                 None,
             )
