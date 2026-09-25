@@ -127,7 +127,9 @@ Windows write persistence currently fails closed with
 `UnsupportedPersistencePlatform`. Rust-visible permissions cannot prove DACL
 preservation, and the workspace forbids local unsafe Rust needed by raw Win32
 bindings. Opening and read-only sessions remain supported; dirty save creates no
-temp, backup, or primary write on Windows.
+temp, backup, or primary write on Windows. The desktop Create Vault command
+checks the same backend Save capability before showing its native save picker,
+so it cannot create a new vault that immediately opens read-only.
 
 ### M3.1 Windows replacement evaluation
 
@@ -174,9 +176,13 @@ simulated `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`-style partial move. The same
 native job now exercises the complete candidate ordinary-Save pipeline through
 serialization, temp verification, `ReplaceFileW`, exact previous-generation
 backup verification, final reopen, and semantic verification. It also proves a
-second successful Save rotates the backup to the exact encrypted primary it
-replaces, a wrong credential leaves both primary and backup untouched, and an
-external-generation conflict preserves the external primary and existing backup.
+newly created vault can receive a group and entry, save and reopen twice, and
+retain the exact preceding primary in each backup generation; the desktop create
+command test also proves Windows refuses before opening the native save picker.
+A second successful Save independently rotates the backup to the exact
+encrypted primary it replaces, a wrong credential leaves both primary and
+backup untouched, and an external-generation conflict preserves the external
+primary and existing backup.
 The native candidate path also reopens successful keyfile-only and
 password-plus-keyfile saves with the same composite authority. A separate regression proves
 the public Save entry point remains fail-closed. This test-only

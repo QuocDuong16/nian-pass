@@ -831,6 +831,23 @@ mod tests {
         session
     }
 
+    #[test]
+    fn create_rejects_existing_target_without_deleting_its_contents() {
+        let directory = TestDir::create();
+        let path = directory.path.join("already-exists.kdbx");
+        let original = b"preserve the user's existing file";
+        fs::write(&path, original).expect("existing target should be written");
+
+        assert!(matches!(
+            VaultSession::create(&path, "Must not replace", &credential()),
+            Err(SessionError::CreateTarget(_))
+        ));
+        assert_eq!(
+            fs::read(&path).expect("existing target should remain readable"),
+            original
+        );
+    }
+
     #[cfg(any(unix, windows))]
     fn save_document_to_path(document: &KdbxDocument, path: &Path) {
         let mut output = Vec::new();
@@ -1804,6 +1821,94 @@ mod tests {
                 .title()
                 .visible(),
             Some(expected_title)
+        );
+        assert_no_transaction_temps(&directory.path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_candidate_create_edit_save_reopen_preserves_previous_generation() {
+        let directory = TestDir::create();
+        let path = directory.path.join("created-vault.kdbx");
+        let credential = credential();
+        let mut session = VaultSession::create(&path, "Windows candidate create", &credential)
+            .expect("new vault should be created and initially verified");
+        let initial_generation = fs::read(&path).expect("initial generation should be readable");
+        let root = root_group(&session);
+        let group = session
+            .create_group(&root, "Windows saved group")
+            .expect("group should be created");
+        let entry = session
+            .create_entry(
+                &group,
+                NewEntry {
+                    title: "Windows saved entry",
+                    username: "candidate-user",
+                    url: "https://example.test",
+                    password: Some("candidate-secret"),
+                },
+                None,
+            )
+            .expect("entry should be created");
+        assert!(session.is_dirty());
+
+        assert!(matches!(
+            session
+                .save_with_windows_candidate_pipeline_for_test(&credential)
+                .expect("candidate Windows create-and-save pipeline should succeed"),
+            SaveOutcome::Saved
+        ));
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("first backup should be readable"),
+            initial_generation,
+            "the first backup must retain the initially created vault"
+        );
+        let first_saved_generation = fs::read(&path).expect("first save should be readable");
+
+        let reopened = VaultSession::open(&path, &credential)
+            .expect("first candidate save should reopen with its master password");
+        let projection = reopened
+            .projection()
+            .expect("first candidate save should project");
+        assert!(projection.find_group(&group).is_some());
+        assert_eq!(
+            projection
+                .find_entry(&entry)
+                .expect("saved entry should exist")
+                .title()
+                .visible(),
+            Some("Windows saved entry")
+        );
+
+        session
+            .document_mut()
+            .set_entry_title(&entry, "Windows saved entry edited")
+            .expect("entry edit should succeed");
+        assert!(matches!(
+            session
+                .save_with_windows_candidate_pipeline_for_test(&credential)
+                .expect("second candidate Windows save should succeed"),
+            SaveOutcome::Saved
+        ));
+        assert_eq!(
+            fs::read(backup_path(&path)).expect("rotated backup should be readable"),
+            first_saved_generation,
+            "the second backup must retain the exact primary installed by the first save"
+        );
+
+        let reopened = VaultSession::open(&path, &credential)
+            .expect("second candidate save should reopen with its master password");
+        let projection = reopened
+            .projection()
+            .expect("second candidate save should project");
+        assert!(projection.find_group(&group).is_some());
+        assert_eq!(
+            projection
+                .find_entry(&entry)
+                .expect("edited entry should exist")
+                .title()
+                .visible(),
+            Some("Windows saved entry edited")
         );
         assert_no_transaction_temps(&directory.path);
     }

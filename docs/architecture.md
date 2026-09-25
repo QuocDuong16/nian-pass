@@ -107,7 +107,10 @@ A Save, external edit, source switch, or Lock therefore invalidates stale sync
 work. On Windows, M7 local application uses the narrow `ReplaceFileW` boundary
 with a backup name and zero ignore-ACL/merge flags, preserving the replaced
 file's DACL and metadata; ordinary M4 Save remains separately fail-closed until
-its complete Windows transaction is reviewed.
+its complete Windows transaction is reviewed. The desktop Create Vault command
+uses the same backend Save capability and stops before opening the save picker
+while ordinary Windows Save is disabled; existing vaults can still open
+read-only.
 
 Remote-first commit is not presented as atomic with the local filesystem. The
 journal records a random operation ID, phase, expected local digest, expected

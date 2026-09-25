@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use vault_core::SecretString;
+use vault_session::VaultSession;
 
 mod attachments;
 mod clipboard;
@@ -100,6 +101,23 @@ async fn create_vault_with_picker(
     state: State<'_, AppState>,
     picker: impl FnOnce() -> Option<FilePath> + Send + 'static,
 ) -> Result<Option<VaultSnapshotDto>, DesktopErrorDto> {
+    create_vault_with_persistence_capability(
+        vault_name,
+        password,
+        state,
+        VaultSession::ordinary_save_supported(),
+        picker,
+    )
+    .await
+}
+
+async fn create_vault_with_persistence_capability(
+    vault_name: String,
+    password: String,
+    state: State<'_, AppState>,
+    persistence_supported: bool,
+    picker: impl FnOnce() -> Option<FilePath> + Send + 'static,
+) -> Result<Option<VaultSnapshotDto>, DesktopErrorDto> {
     let vault_name = vault_name.trim().to_owned();
     if vault_name.is_empty() || password.is_empty() {
         return Err(DesktopError::InvalidRequest.into());
@@ -107,6 +125,9 @@ async fn create_vault_with_picker(
     let operation = state
         .begin_vault_operation()
         .map_err(DesktopErrorDto::from)?;
+    if !persistence_supported {
+        return Err(DesktopError::UnsupportedPersistencePlatform.into());
+    }
     let selected = tauri::async_runtime::spawn_blocking(picker)
         .await
         .map_err(|_| DesktopErrorDto::from(DesktopError::Internal))?;
@@ -371,8 +392,9 @@ mod tests {
         change_master_password, clear_keyfile, close_policy, copy_entry_custom_field,
         copy_entry_notes, copy_entry_password, copy_entry_title, copy_entry_totp_code,
         copy_entry_url, copy_entry_username, create_entry, create_group, create_vault,
-        create_vault_with_picker, credential_has_password, delete_entry, delete_entry_custom_field,
-        delete_group, delete_sync_profile, discard_changes_and_lock, duplicate_entry, entry_detail,
+        create_vault_with_persistence_capability, create_vault_with_picker,
+        credential_has_password, delete_entry, delete_entry_custom_field, delete_group,
+        delete_sync_profile, discard_changes_and_lock, duplicate_entry, entry_detail,
         entry_history, lock_vault, move_entries, move_entry, move_group, password_health_report,
         permanently_delete_entries, permanently_delete_entry, permanently_delete_group,
         reload_vault, remove_master_password, rename_group, reset_sync_state,
@@ -518,6 +540,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn create_vault_picker_flow_validates_gates_cancels_and_creates_without_gui() {
         let app = mock_app();
@@ -581,15 +604,18 @@ mod tests {
         };
         assert_eq!(created.file_name, "created-command.kdbx");
         assert_eq!(created.groups.first().expect("root group").name, "Personal");
+        assert!(created.capabilities.writable);
         assert!(path.is_file());
+        let created_bytes = std::fs::read(&path).expect("created vault should be readable");
 
         let duplicate_app = mock_app();
         duplicate_app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let duplicate_path = path.clone();
         let duplicate = tauri::async_runtime::block_on(create_vault_with_picker(
             "Duplicate".to_owned(),
             "demopass".to_owned(),
             duplicate_app.state::<AppState>(),
-            move || Some(tauri_plugin_dialog::FilePath::Path(path)),
+            move || Some(tauri_plugin_dialog::FilePath::Path(duplicate_path)),
         ));
         let Err(duplicate) = duplicate else {
             panic!("existing target must not be overwritten");
@@ -597,6 +623,52 @@ mod tests {
         assert_eq!(
             to_value(duplicate).expect("stable duplicate error"),
             json!({ "code": "vault_already_exists" })
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("existing vault should remain readable"),
+            created_bytes,
+            "a duplicate create request must preserve the existing vault bytes"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn create_vault_rejects_unsupported_capability_before_picker() {
+        let app = mock_app();
+        app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let result = tauri::async_runtime::block_on(create_vault_with_persistence_capability(
+            "Personal".to_owned(),
+            "demopass".to_owned(),
+            app.state::<AppState>(),
+            false,
+            || panic!("unsupported persistence must not show the save picker"),
+        ));
+        let Err(error) = result else {
+            panic!("unsupported persistence must stop vault creation");
+        };
+        assert_eq!(
+            to_value(error).expect("stable unsupported-platform error"),
+            json!({ "code": "unsupported_persistence_platform" })
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn create_vault_picker_flow_rejects_unsupported_persistence_before_picker() {
+        let app = mock_app();
+        app.manage(AppState::new(Arc::new(FakeClipboard(Mutex::new(None)))));
+        let result = tauri::async_runtime::block_on(create_vault_with_picker(
+            "Personal".to_owned(),
+            "demopass".to_owned(),
+            app.state::<AppState>(),
+            || panic!("unsupported Windows create must not show the save picker"),
+        ));
+        let Err(error) = result else {
+            panic!("Windows create must fail closed while ordinary Save is disabled");
+        };
+        assert_eq!(
+            to_value(error).expect("stable unsupported-platform error"),
+            json!({ "code": "unsupported_persistence_platform" })
         );
     }
 

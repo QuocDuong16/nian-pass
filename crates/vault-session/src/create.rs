@@ -23,8 +23,10 @@ impl VaultSession {
         let path = path.as_ref();
         let parent = path.parent().ok_or(SessionError::UnsupportedPath)?;
         let document = KdbxDocument::new(vault_name);
+        let mut created_target = false;
         let result = (|| {
             let mut file = open_private_new_file(path).map_err(SessionError::CreateTarget)?;
+            created_target = true;
             {
                 let mut writer = BufWriter::new(&mut file);
                 document
@@ -49,7 +51,7 @@ impl VaultSession {
                 saved_revision,
             })
         })();
-        if result.is_err() {
+        if created_target && result.is_err() {
             let _ = fs::remove_file(path);
         }
         result

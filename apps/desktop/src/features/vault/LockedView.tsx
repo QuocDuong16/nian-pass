@@ -135,7 +135,12 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
       }
     } catch (cause: unknown) {
       resetSensitiveFields();
-      setError(lockedOperationMessage(lockedErrorCode(cause)));
+      const code = lockedErrorCode(cause);
+      setError(
+        code === "unsupported_persistence_platform"
+          ? "Creating and editing vaults is unavailable on Windows until safe file saving is verified. No file was created. You can still open existing vaults read-only."
+          : lockedOperationMessage(code),
+      );
     } finally {
       setBusy(false);
     }
@@ -158,9 +163,9 @@ export function LockedView({ api, notice, onUnlocked }: LockedViewProps) {
 
         <p className="unlock-intro">
           {state.kind === "home"
-            ? "Open an existing KeePass database or create a new local vault."
+            ? "Open an existing KeePass database or create a local vault where safe saving is supported."
             : state.kind === "creating"
-              ? "Choose a name and master password. You will pick the .kdbx save location next."
+              ? "Choose a name and master password. Nian Pass opens the save dialog only where safe vault saving is supported."
               : "Enter the master password and, when required, choose the vault key file."}
         </p>
 

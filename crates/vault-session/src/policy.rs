@@ -16,6 +16,12 @@ pub enum WriteRestriction {
 }
 
 impl VaultSession {
+    /// Returns whether ordinary local Save is enabled for this target platform.
+    #[must_use]
+    pub const fn ordinary_save_supported() -> bool {
+        platform::SAVE_SUPPORTED
+    }
+
     /// Returns the exact KDBX version of the unlocked source.
     #[must_use]
     pub const fn version(&self) -> KdbxVersion {
@@ -28,12 +34,29 @@ impl VaultSession {
         if self.version() != (KdbxVersion::Kdbx4 { minor: 1 }) {
             return Some(WriteRestriction::UnsupportedWriteFormat);
         }
-        if !platform::SAVE_SUPPORTED {
+        if !Self::ordinary_save_supported() {
             return Some(WriteRestriction::UnsupportedPersistencePlatform);
         }
         if fs::metadata(&self.path).is_ok_and(|metadata| metadata.permissions().readonly()) {
             return Some(WriteRestriction::ReadOnlySource);
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VaultSession;
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_save_is_enabled_on_supported_unix_targets() {
+        assert!(VaultSession::ordinary_save_supported());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ordinary_save_remains_disabled_on_windows_until_native_evidence_is_reviewed() {
+        assert!(!VaultSession::ordinary_save_supported());
     }
 }

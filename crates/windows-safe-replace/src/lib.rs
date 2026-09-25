@@ -250,8 +250,11 @@ mod windows_tests {
 
         replace_existing_with_backup(&prepared, &destination, &backup)?;
 
+        assert_eq!(fs::read(&destination)?, b"generation-b");
+        assert_eq!(fs::read(&backup)?, b"generation-a");
         assert_eq!(dacl_sddl(&destination)?, destination_dacl);
         assert_eq!(dacl_sddl(&backup)?, destination_dacl);
+        assert!(!prepared.exists());
         Ok(())
     }
 

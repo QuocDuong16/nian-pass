@@ -147,6 +147,9 @@ not ordinary CI and does not authorize ordinary Windows Save. Real WebDAV, AWS S
 Windows desktop-to-gateway, Linux desktop-to-gateway, HTTPS reverse-proxy, and
 container runtime smoke remain manual and must each be reported as RUN or NOT RUN.
 Ordinary CI stays Forgejo-owned; the GitHub workflows remain release/diagnostic only.
+The Windows runtime workflow also runs the desktop create-command test, which
+requires unsupported persistence to be rejected before the native save picker
+is invoked; it does not count as persistence evidence by itself.
 
 M6.5 keeps `browser-source-check` and `browser-extension-check` and adds
 `browser-native-protocol-check`, `browser-native-host-check`, and

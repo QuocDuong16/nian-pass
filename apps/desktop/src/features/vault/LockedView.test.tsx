@@ -68,6 +68,10 @@ test("create vault validates progressively and submits trimmed metadata", async 
 test.each([
   ["vault_already_exists", "A file already exists at that location"],
   ["vault_create_failed", "could not safely create the vault"],
+  [
+    "unsupported_persistence_platform",
+    "Creating and editing vaults is unavailable on Windows",
+  ],
   ["internal", "could not complete that vault operation"],
 ] as const)(
   "create vault maps %s without leaking details",

@@ -46,10 +46,16 @@ jobs:
         run: |
           cargo test --locked --target x86_64-pc-windows-msvc -p windows-safe-replace
           if ($LASTEXITCODE -ne 0) { throw "windows-safe-replace native tests failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session create_rejects_existing_target_without_deleting_its_contents
+          if ($LASTEXITCODE -ne 0) { throw "vault creation overwrote an existing target" }
           cargo test --locked --target x86_64-pc-windows-msvc -p vault-session platform::tests::
           if ($LASTEXITCODE -ne 0) { throw "vault-session Windows replacement transaction tests failed" }
           cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_dirty_save_pipeline_preserves_previous_generation
           if ($LASTEXITCODE -ne 0) { throw "candidate ordinary Windows Save pipeline failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_create_edit_save_reopen_preserves_previous_generation
+          if ($LASTEXITCODE -ne 0) { throw "candidate create/edit/save/reopen pipeline failed" }
+          cargo test --locked --target x86_64-pc-windows-msvc -p nian-pass-desktop create_vault_picker_flow_rejects_unsupported_persistence_before_picker
+          if ($LASTEXITCODE -ne 0) { throw "Windows Create Vault did not fail before showing the save picker" }
           cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_second_save_rotates_backup_to_exact_previous_primary
           if ($LASTEXITCODE -ne 0) { throw "candidate ordinary Windows Save backup rotation failed" }
           cargo test --locked --target x86_64-pc-windows-msvc -p vault-session windows_candidate_wrong_credential_preserves_primary_and_backup
@@ -63,8 +69,11 @@ jobs:
           @(
             "WINDOWS_REPLACEFILE_NATIVE_TESTS=PASS",
             "WINDOWS_REPLACEFILE_DACL_PRESERVATION=PASS",
+            "WINDOWS_CREATE_EXISTING_TARGET_PRESERVED=PASS",
             "WINDOWS_REPLACEMENT_TRANSACTION_TESTS=PASS",
             "WINDOWS_ORDINARY_SAVE_CANDIDATE_PIPELINE=PASS",
+            "WINDOWS_ORDINARY_SAVE_COVERED_CREATE_EDIT_SAVE_REOPEN=PASS",
+            "WINDOWS_DESKTOP_CREATE_BLOCKED_BEFORE_PICKER=PASS",
             "WINDOWS_ORDINARY_SAVE_BACKUP_ROTATION=PASS",
             "WINDOWS_ORDINARY_SAVE_WRONG_CREDENTIAL=PASS",
             "WINDOWS_ORDINARY_SAVE_EXTERNAL_CONFLICT=PASS",

@@ -1225,6 +1225,9 @@ be established before publication. With no primitive satisfying all of those
 properties and no native Windows/DACL runtime evidence in current Forgejo
 infrastructure, the control remains fail-closed Windows save rather than a
 metadata repair after publication or an unsafe fallback.
+The desktop Create Vault command also fails closed before showing its save
+picker while that capability is disabled, avoiding a new vault that cannot be
+edited and saved by the application. Existing Windows vaults remain readable.
 
 ## Deferred Apple platform design threats (future M9+)
 
