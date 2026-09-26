@@ -5,12 +5,12 @@ interface RuntimeInfoBaseDto {
   commit: string;
 }
 
-export interface DesktopRuntimeInfoDto extends RuntimeInfoBaseDto {
+interface DesktopRuntimeInfoDto extends RuntimeInfoBaseDto {
   platform: "desktop";
   ordinarySaveSupported: boolean;
 }
 
-export interface MobileRuntimeInfoDto extends RuntimeInfoBaseDto {
+interface MobileRuntimeInfoDto extends RuntimeInfoBaseDto {
   platform: "android" | "ios";
   ordinarySaveSupported?: never;
 }
