@@ -200,6 +200,9 @@ async function renderReady(desktop = api(), entryId = "entry-a") {
     />,
   );
   await screen.findByRole("heading", { name: `Account ${entryId}` });
+  await act(async () => {
+    await Promise.resolve();
+  });
   return { desktop, ...view };
 }
 
