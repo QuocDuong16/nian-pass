@@ -78,7 +78,7 @@ test("Windows release script invokes the tested TOML toolchain helper", (t) => {
   const script = readFileSync(join(repositoryRoot, "scripts/release_windows.ps1"), "utf8");
   assert.match(
     script,
-    /Get-CheckedOutput "node" @\("scripts\/release_toolchain\.mjs", "\.mise\.toml"\)/,
+    /Get-CheckedOutput "node" @\("scripts\/release_toolchain\.mjs", "mise\.toml"\)/,
   );
   const pnpmInstall = script.indexOf('Invoke-Checked "pnpm" @("install", "--frozen-lockfile")');
   assert.ok(pnpmInstall >= 0);

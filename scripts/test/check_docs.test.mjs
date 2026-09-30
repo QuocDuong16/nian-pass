@@ -151,9 +151,9 @@ function fixture(t) {
   write(
     root,
     "Makefile",
-    "NODE_VERSION := $(shell awk -F'\\\"' '/^node = / { print $$2 }' mise.toml)\n" +
-      "PNPM_VERSION := $(shell awk -F'\\\"' '/^pnpm = \\\"[0-9]/ { print $$2 }' mise.toml)\n" +
-      "RUST_VERSION := $(shell awk -F'\\\"' '/^rust = / { print $$2 }' mise.toml)\n",
+    "NODE_VERSION := $(shell awk -F'\"' '/^node = / { print $$2 }' mise.toml)\n" +
+      "PNPM_VERSION := $(shell awk -F'\"' '/^pnpm = \"[0-9]/ { print $$2 }' mise.toml)\n" +
+      "RUST_VERSION := $(shell awk -F'\"' '/^rust = / { print $$2 }' mise.toml)\n",
   );
   return root;
 }
