@@ -4,9 +4,9 @@ CARGO_LLVM_COV_VERSION := 0.9.0
 TOOLS_ROOT := $(CURDIR)/.bin
 TOOLS_BIN := $(TOOLS_ROOT)/bin
 
-NODE_VERSION := $(shell tr -d '\r\n' < .node-version)
-PNPM_VERSION := $(shell node -p "require('./package.json').packageManager.split('@')[1]")
-RUST_VERSION := $(shell awk -F'"' '/^rust = / { print $$2 }' .mise.toml)
+NODE_VERSION := $(shell awk -F'"' '/^node = / { print $$2 }' mise.toml)
+PNPM_VERSION := $(shell awk -F'"' '/^pnpm = "[0-9]/ { print $$2 }' mise.toml)
+RUST_VERSION := $(shell awk -F'"' '/^rust = / { print $$2 }' mise.toml)
 
 RUST_COVERAGE_MIN ?= 87
 RUST_COVERAGE_DIFF_MIN ?= 85
@@ -58,7 +58,7 @@ tools-check:
 	@echo "Check pinned quality toolchain..."
 	@test "$$(rustc --version | awk '{print $$2}')" = "$(RUST_VERSION)" || { echo "Rust $(RUST_VERSION) is required (see rust-toolchain policy in docs/quality.md)." >&2; exit 1; }
 	@test "$$(node --version)" = "v$(NODE_VERSION)" || { echo "Node $(NODE_VERSION) is required; current: $$(node --version)." >&2; exit 1; }
-	@test "$$(pnpm --version)" = "$(PNPM_VERSION)" || { echo "pnpm $(PNPM_VERSION) is required; activate the root packageManager version with Corepack." >&2; exit 1; }
+	@test "$$(pnpm --version)" = "$(PNPM_VERSION)" || { echo "pnpm $(PNPM_VERSION) is required; run 'mise install' from the repository root." >&2; exit 1; }
 	@test -x "$(TOOLS_BIN)/cargo-deny" || { echo "Missing cargo-deny $(CARGO_DENY_VERSION); run 'make tools-install'." >&2; exit 1; }
 	@test -x "$(TOOLS_BIN)/cargo-machete" || { echo "Missing cargo-machete $(CARGO_MACHETE_VERSION); run 'make tools-install'." >&2; exit 1; }
 	@test -x "$(TOOLS_BIN)/cargo-llvm-cov" || { echo "Missing cargo-llvm-cov $(CARGO_LLVM_COV_VERSION); run 'make tools-install'." >&2; exit 1; }

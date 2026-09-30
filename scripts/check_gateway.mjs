@@ -40,13 +40,13 @@ function workflowJob(workflow, name) {
   return nextJob === -1 ? remainder : remainder.slice(0, nextJob);
 }
 
-// Verified against https://nodejs.org/dist/v26.8.1/SHASUMS256.txt.
+// Verified against https://nodejs.org/dist/v26.9.0/SHASUMS256.txt.
 // Keep these independent of the workflow so a stale CI pin fails source policy.
 export function forgejoNodeArchivePinViolations(workflow) {
   const violations = [];
   const hashes = {
-    x64: "3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d",
-    arm64: "23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2",
+    x64: "c6ecd8efc1c1d395265891675319da7a7b3785c6be174bd78933cf4f057624d1",
+    arm64: "686d07ed3bc5d68d9f7bd4939b7e8849a87d0664ac19c8c5474474f44cc956db",
   };
   for (const name of [
     "rust",
@@ -56,7 +56,7 @@ export function forgejoNodeArchivePinViolations(workflow) {
     "keepassxc-compat",
   ]) {
     const job = workflowJob(workflow, name);
-    if (!job.includes('node_version="26.8.1"')) {
+    if (!job.includes('node_version="26.9.0"')) {
       violations.push(`${name}: pinned Node.js version is missing`);
     }
     for (const [arch, checksum] of Object.entries(hashes)) {
@@ -84,19 +84,23 @@ export function forgejoNodeArchivePinViolations(workflow) {
   return violations;
 }
 
-export function gatewayWorkflowDependencyViolations(workflow) {
+export function gatewayWorkflowDependencyViolations(workflow, pnpmVersion) {
   const job = workflowJob(workflow, "gateway-container");
   if (job === "") return ["Forgejo gateway container job is missing"];
 
   const violations = [];
-  if (!/node_version="26\.8\.1"/.test(job)) {
+  if (!/node_version="26\.9\.0"/.test(job)) {
     violations.push(
-      "Forgejo gateway container job must install pinned Node.js 26.8.1",
+      "Forgejo gateway container job must install pinned Node.js 26.9.0",
     );
   }
-  if (!/corepack@0\.35\.0/.test(job) || !/pnpm@11\.22\.0/.test(job)) {
+  if (
+    !pnpmVersion ||
+    !job.includes(`npm install --global pnpm@${pnpmVersion}`) ||
+    /\bcorepack\b/i.test(job)
+  ) {
     violations.push(
-      "Forgejo gateway container job must install pinned Corepack and pnpm",
+      "Forgejo gateway container job must install mise-pinned pnpm directly without Corepack",
     );
   }
   if (!/make scripts-install/.test(job)) {
@@ -354,7 +358,7 @@ export function runChecks(root) {
     violations.push("background, push, and real-time sync remain out of scope");
   }
   const dockerfile = source(root, "apps/sync-gateway/Dockerfile");
-  if (!/^FROM rust:1\.98\.0-bookworm@sha256:[0-9a-f]{64} AS builder$/m.test(dockerfile)
+  if (!/^FROM rust:1\.98\.1-bookworm@sha256:[0-9a-f]{64} AS builder$/m.test(dockerfile)
     || !/^FROM debian:bookworm-slim@sha256:[0-9a-f]{64}$/m.test(dockerfile)
     || !/USER 10001:10001/.test(dockerfile)
     || /USER\s+(?:root|0(?::0)?)/i.test(dockerfile)) {
@@ -372,13 +376,16 @@ export function runChecks(root) {
   }
   const containerCheck = source(root, "scripts/check_gateway_container.sh");
   const workflow = source(root, ".forgejo/workflows/quality.yml");
+  const pnpmVersion = source(root, "mise.toml").match(
+    /^pnpm\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m,
+  )?.[1];
   const makefile = source(root, "Makefile");
   const selfHosting = source(root, "docs/self-hosting.md");
   const dockerignore = source(root, ".dockerignore");
   violations.push(...gatewaySecretBuildContextViolations({ selfHosting, dockerignore }));
   violations.push(...gatewayContainerNetworkProbeViolations(containerCheck));
   violations.push(...forgejoNodeArchivePinViolations(workflow));
-  violations.push(...gatewayWorkflowDependencyViolations(workflow));
+  violations.push(...gatewayWorkflowDependencyViolations(workflow, pnpmVersion));
   if (
     !/Gateway container check passed/.test(containerCheck) ||
     !/10001:10001/.test(containerCheck) ||

@@ -517,14 +517,20 @@ function releaseToolchains() {
   const desktopPackage = JSON.parse(
     readFileSync(resolve(repositoryRoot, "apps/desktop/package.json"), "utf8"),
   );
-  const rust = readFileSync(resolve(repositoryRoot, ".mise.toml"), "utf8").match(
-    /^rust\s*=\s*"([^"]+)"/m,
-  )?.[1];
+  const mise = readFileSync(resolve(repositoryRoot, "mise.toml"), "utf8");
+  const rust = mise.match(/^rust\s*=\s*"([^"]+)"$/m)?.[1];
+  const node = mise.match(/^node\s*=\s*"([^"]+)"$/m)?.[1];
+  const pnpm = mise.match(/^pnpm\s*=\s*"(\d+\.\d+\.\d+)"$/m)?.[1];
   if (!rust) throw new Error("could not resolve pinned Rust version");
+  if (!node) throw new Error("could not resolve pinned Node.js version");
+  if (!pnpm) throw new Error("could not resolve pinned pnpm version");
+  if (rootPackage.packageManager !== `pnpm@${pnpm}`) {
+    throw new Error("packageManager pnpm pin does not match mise.toml");
+  }
   return {
     rust,
-    node: readFileSync(resolve(repositoryRoot, ".node-version"), "utf8").trim(),
-    pnpm: rootPackage.packageManager.replace(/^pnpm@/, ""),
+    node,
+    pnpm,
     tauriCli: desktopPackage.devDependencies["@tauri-apps/cli"],
     androidSdk: "36",
     androidBuildTools: "36.0.0",

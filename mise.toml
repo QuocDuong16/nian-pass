@@ -3,6 +3,14 @@
 # rust-toolchain.toml additionally pins the Rust channel for direct cargo
 # invocations that bypass mise (editors, CI containers).
 
+[settings]
+lockfile = true
+
+[tool_alias]
+# Use pnpm's official GitHub releases across platforms, including macOS x64.
+pnpm = "github:pnpm/pnpm"
+
 [tools]
-node = "26.8.1"
-rust = "1.98.0"
+node = "26.9.0"
+pnpm = "12.7.0"
+rust = "1.98.1"

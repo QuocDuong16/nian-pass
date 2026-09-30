@@ -1,0 +1,119 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "pinDigests": true,
+  "timezone": "Asia/Ho_Chi_Minh",
+  "enabledManagers": [
+    "cargo",
+    "npm",
+    "mise",
+    "nodenv",
+    "dockerfile",
+    "docker-compose",
+    "github-actions"
+  ],
+  "labels": ["dependencies"],
+  "dependencyDashboard": true,
+  "dependencyDashboardOSVVulnerabilitySummary": "unresolved",
+  "osvVulnerabilityAlerts": true,
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 1,
+  "commitHourlyLimit": 2,
+  "packageRules": [
+    {
+      "description": "Require dashboard approval for major upgrades.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Wait seven days before Cargo, npm, or container minor updates.",
+      "matchManagers": ["cargo", "npm", "dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["minor"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Wait three days before Cargo, npm, or container patch updates.",
+      "matchManagers": ["cargo", "npm", "dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["patch"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Update Rust dependencies on Tuesdays.",
+      "matchManagers": ["cargo"],
+      "schedule": ["* * * * 2"]
+    },
+    {
+      "description": "Update Node package dependencies on Mondays.",
+      "matchManagers": ["npm"],
+      "schedule": ["* * * * 1"]
+    },
+    {
+      "description": "Update Dockerfile and Compose images on Wednesdays.",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "schedule": ["* * * * 3"]
+    },
+    {
+      "description": "Update GitHub and Forgejo Actions on Saturdays.",
+      "matchManagers": ["github-actions"],
+      "schedule": ["* * * * 6"]
+    },
+    {
+      "description": "Keep Rust and Node runtime pins coordinated across mise, manifests, Rustup, CI images, checksums, and release contracts; update versions manually.",
+      "matchManagers": ["mise", "nodenv", "npm"],
+      "matchDepNames": ["node", "rust"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "description": "Keep pnpm coordinated across mise, packageManager, CI, Windows tooling, and release checks; update versions manually.",
+      "matchManagers": ["mise", "npm"],
+      "matchDepNames": ["pnpm"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "description": "Keep Rust and Node container version changes coordinated with mise and CI contracts; update versions manually.",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchDepNames": ["node", "rust"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "description": "Require dependency dashboard approval for pinned container digest updates.",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["digest"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Keep Tauri Rust crates together.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["/^tauri(-|$)/"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Tauri Rust stack"
+    },
+    {
+      "description": "Keep Tauri UI packages together.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["/^@tauri-apps\\//"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Tauri UI stack"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "React stack"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["vitest", "/^@vitest\\//"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Vitest stack"
+    },
+    {
+      "description": "Update mise-managed development tools on Saturdays.",
+      "matchManagers": ["mise"],
+      "schedule": ["* * * * 6"]
+    }
+  ]
+}

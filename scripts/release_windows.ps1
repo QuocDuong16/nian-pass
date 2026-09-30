@@ -143,15 +143,17 @@ Remove-Item Env:NIAN_PASS_WINDOWS_PFX_BASE64 -ErrorAction SilentlyContinue
 Remove-Item Env:NIAN_PASS_WINDOWS_PFX_PASSWORD -ErrorAction SilentlyContinue
 
 $expectedNode = "v$((Get-Content -LiteralPath ".node-version" -Raw).Trim())"
-$expectedPnpm = ((Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json).packageManager -replace "^pnpm@", "")
+$packagePnpm = ((Get-Content -LiteralPath "package.json" -Raw | ConvertFrom-Json).packageManager -replace "^pnpm@", "")
+$misePnpm = [regex]::Match((Get-Content -LiteralPath "mise.toml" -Raw), '(?m)^pnpm = "(\d+\.\d+\.\d+)"$').Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($misePnpm)) { throw "Could not read the pinned pnpm version from mise.toml" }
+if ($packagePnpm -ne $misePnpm) { throw "packageManager pnpm $packagePnpm does not match mise.toml pnpm $misePnpm" }
+$expectedPnpm = $misePnpm
 if ((Get-CheckedOutput "node" @("--version")) -ne $expectedNode) { throw "Pinned Node $expectedNode is required" }
 if ([string]::IsNullOrWhiteSpace($env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT)) { throw "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT is required" }
 if (-not (Test-Path -LiteralPath $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT -PathType Container)) { throw "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT directory is missing" }
-$corepackPath = Assert-PrivateNodeToolCommand "corepack" $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT
 $pnpmPath = Assert-PrivateNodeToolCommand "pnpm" $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT
-if ((Get-CheckedOutput $corepackPath @("--version")) -ne "0.35.0") { throw "Pinned Corepack 0.35.0 is required" }
 if ((Get-CheckedOutput $pnpmPath @("--version")) -ne $expectedPnpm) { throw "Pinned pnpm $expectedPnpm is required" }
-$expectedRust = Get-CheckedOutput "node" @("scripts/release_toolchain.mjs", ".mise.toml")
+$expectedRust = Get-CheckedOutput "node" @("scripts/release_toolchain.mjs", "mise.toml")
 if ([string]::IsNullOrWhiteSpace($expectedRust)) { throw "Could not read the pinned Rust version" }
 if (((rustc --version) -split ' ')[1] -ne $expectedRust) { throw "Pinned Rust $expectedRust is required" }
 Invoke-Checked "pnpm" @("install", "--frozen-lockfile")

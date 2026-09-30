@@ -19,7 +19,7 @@ test("all Forgejo Node bootstrap jobs pin upstream hashes and verify before extr
   assert.deepEqual(forgejoNodeArchivePinViolations(workflow), []);
 
   const staleX64 = workflow.replace(
-    "3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d",
+    "c6ecd8efc1c1d395265891675319da7a7b3785c6be174bd78933cf4f057624d1",
     "982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee",
   );
   assert.match(
@@ -28,7 +28,7 @@ test("all Forgejo Node bootstrap jobs pin upstream hashes and verify before extr
   );
 
   const staleArm64 = workflow.replace(
-    "23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2",
+    "686d07ed3bc5d68d9f7bd4939b7e8849a87d0664ac19c8c5474474f44cc956db",
     "afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d",
   );
   assert.match(
@@ -138,15 +138,14 @@ test("Forgejo gateway smoke installs pinned source-policy dependencies", () => {
     runs-on: docker
     steps:
       - run: |
-          node_version="26.8.1"
-          npm install --global corepack@0.35.0
-          corepack install --global pnpm@11.22.0
+          node_version="26.9.0"
+          npm install --global pnpm@12.7.0
       - run: make scripts-install
       - run: make gateway-container-check
   another-job:
     runs-on: docker
 `;
-  assert.deepEqual(gatewayWorkflowDependencyViolations(workflow), []);
+  assert.deepEqual(gatewayWorkflowDependencyViolations(workflow, "12.7.0"), []);
 
   const withoutInstall = workflow.replace(
     "      - run: make scripts-install\n",

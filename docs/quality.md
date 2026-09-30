@@ -13,11 +13,12 @@ for feedback but is intentionally not equivalent to the full gate.
 
 ## Toolchain and local prerequisites
 
-- Rust 1.98.0 from `.mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
+- Rust 1.98.1 from `mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
   `rust-toolchain.toml` mirrors the pin for direct Cargo and editor invocations
-- Node 26.8.1 from `.node-version`
-- Corepack 0.35.0, installed explicitly in Forgejo because Node 26 does not bundle it
-- pnpm 11.22.0 from the root `packageManager`
+- Node 26.9.0 from `mise.toml`, mirrored in `.node-version` and package metadata
+- pnpm 12.7.0 from `mise.toml`, with `mise.lock` integrity hashes; the root
+  `packageManager` field mirrors the pnpm pin for workspace tooling
+- Run `mise install` from the repository root to install the locked toolchain
 - GNU Make
 - Tauri's documented headless GTK/WebKit development packages
 - Android NDK 28.2.13676358 and JDK 21 for release APK construction
@@ -32,8 +33,8 @@ SDK; failures are actionable and non-skipping.
 `make tools-install` installs `cargo-deny 0.20.2`, `cargo-machete 0.9.2`, and
 `cargo-llvm-cov 0.9.0` into ignored `.bin/`. `make tools-check` rejects missing
 or different versions. Frontend tools are exact lockfile-managed dependencies.
-Forgejo installs the exact Corepack version before enabling and installing the
-pinned pnpm release; it does not assume Corepack is bundled with Node.
+Forgejo installs the exact pnpm release recorded in `mise.toml` directly and
+checks its version before running repository commands.
 The root's exact `smol-toml 1.8.0` dependency parses Cargo policy inputs;
 `scripts-check` installs only that locked root tooling before running. No
 quality target launches a window, X11, Wayland, or a desktop session.
@@ -440,7 +441,7 @@ Rust commands; React never sees its namespace. M5.4 adds a semantic iOS Rust
 adapter contract but does not grant its plugin namespace to React.
 Production CSP tokens remain unchanged.
 
-## IPC and OpenWiki
+## IPC contract
 
 `apps/desktop/contracts/desktop-contract.json` is a synthetic, secret-free
 cross-language fixture. Rust tests compare it to actual Serde output; frontend
@@ -562,8 +563,3 @@ manual-Lock/Save races without real sleeps or a GUI runtime. The production
 focus API remains confined to `src/lib/window-lifecycle.ts`; no capability or
 plugin was added. Browser storage remains forbidden, so the timeout selection
 is intentionally memory-only.
-
-Files under `openwiki/` are generated navigation material, not the source of
-truth for M4.Q policy. Update source code, README, and `docs/`; let the scheduled
-OpenWiki workflow regenerate its pages. Do not hand-edit generated OpenWiki
-pages for milestone drift.

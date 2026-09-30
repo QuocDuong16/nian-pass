@@ -61,35 +61,6 @@ function Assert-PinnedNode {
   return $actualNode
 }
 
-function Assert-CorepackVersion {
-  param([string] $CorepackPath)
-  $corepackVersion = Get-CheckedNativeOutput "corepack --version" { & $CorepackPath --version }
-  if ($corepackVersion -ne $env:COREPACK_VERSION) { throw "Expected Corepack $env:COREPACK_VERSION but found $corepackVersion" }
-  return $corepackVersion
-}
-
-function Assert-PnpmRuntimeNode {
-  param([string] $ToolRoot, [string] $PnpmPath)
-  $guardPath = Join-Path $ToolRoot "assert-pnpm-node-runtime.cjs"
-  @'
-const expected = process.env.NIAN_PASS_EXPECTED_NODE_VERSION;
-if (process.version !== `v${expected}`) {
-  throw new Error(`pnpm is running under ${process.version}; expected v${expected}`);
-}
-'@ | Set-Content -LiteralPath $guardPath -Encoding utf8
-  $previousNodeOptions = $env:NODE_OPTIONS
-  $previousExpectedNode = $env:NIAN_PASS_EXPECTED_NODE_VERSION
-  try {
-    $env:NIAN_PASS_EXPECTED_NODE_VERSION = $env:NODE_VERSION
-    $env:NODE_OPTIONS = "--require=$guardPath"
-    Invoke-CheckedNative "pnpm runtime Node guard" { & $PnpmPath --version | Out-Null }
-  } finally {
-    if ($null -eq $previousNodeOptions) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue } else { $env:NODE_OPTIONS = $previousNodeOptions }
-    if ($null -eq $previousExpectedNode) { Remove-Item Env:NIAN_PASS_EXPECTED_NODE_VERSION -ErrorAction SilentlyContinue } else { $env:NIAN_PASS_EXPECTED_NODE_VERSION = $previousExpectedNode }
-    Remove-Item -LiteralPath $guardPath -Force -ErrorAction SilentlyContinue
-  }
-}
-
 function Assert-PnpmVersion {
   param([string] $PnpmPath)
   $pnpmVersion = Get-CheckedNativeOutput "pnpm --version" { & $PnpmPath --version }
@@ -100,12 +71,9 @@ function Assert-PnpmVersion {
 function Assert-PrivateToolchain {
   param([string] $ToolRoot)
   $nodeVersion = Assert-PinnedNode
-  $corepackPath = Assert-PrivateToolCommand "corepack" $ToolRoot
-  $corepackVersion = Assert-CorepackVersion $corepackPath
   $pnpmPath = Assert-PrivateToolCommand "pnpm" $ToolRoot
-  Assert-PnpmRuntimeNode $ToolRoot $pnpmPath
   $pnpmVersion = Assert-PnpmVersion $pnpmPath
-  return [PSCustomObject]@{ NodeVersion = $nodeVersion; CorepackVersion = $corepackVersion; PnpmVersion = $pnpmVersion; CorepackCommand = $corepackPath; PnpmCommand = $pnpmPath }
+  return [PSCustomObject]@{ NodeVersion = $nodeVersion; PnpmVersion = $pnpmVersion; PnpmCommand = $pnpmPath }
 }
 
 function Set-WorkflowEnvironment {
@@ -122,44 +90,28 @@ function Add-WorkflowPath {
 
 if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { throw "RUNNER_TEMP is required for private Node tooling" }
 $toolRoot = Join-Path $env:RUNNER_TEMP "nian-pass-node-tools"
-$corepackHome = Join-Path $env:RUNNER_TEMP "nian-pass-corepack-home"
 
 if ($VerifyOnly) {
   if ([string]::IsNullOrWhiteSpace($env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT)) { throw "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT is required for VerifyOnly" }
   Assert-PathUnderRunnerTemp "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT $toolRoot | Out-Null
-  Assert-PathUnderRunnerTemp "COREPACK_HOME" $env:COREPACK_HOME $corepackHome | Out-Null
   $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT
   Write-Host "WINDOWS_NODE_VERIFY=PASS"
   Write-Host "WINDOWS_NODE_VERSION=$($toolchain.NodeVersion)"
-  Write-Host "WINDOWS_COREPACK_VERSION=$($toolchain.CorepackVersion)"
   Write-Host "WINDOWS_PNPM_VERSION=$($toolchain.PnpmVersion)"
-  Write-Host "WINDOWS_COREPACK_COMMAND=$($toolchain.CorepackCommand)"
   Write-Host "WINDOWS_PNPM_COMMAND=$($toolchain.PnpmCommand)"
-  Write-Host "WINDOWS_PNPM_RUNTIME_NODE=$($toolchain.NodeVersion)"
 } else {
   Assert-PinnedNode | Out-Null
   Remove-Item -LiteralPath $toolRoot -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $corepackHome -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
-  New-Item -ItemType Directory -Path $corepackHome -Force | Out-Null
-  $env:COREPACK_HOME = $corepackHome
-  Invoke-CheckedNative "private Corepack install" { npm install --global --prefix $toolRoot "corepack@$env:COREPACK_VERSION" }
+  Invoke-CheckedNative "private pnpm install" { npm install --global --prefix $toolRoot "pnpm@$env:PNPM_VERSION" }
 
-  # Corepack writes its pnpm shim into this reviewed directory, never into a
-  # runner-global npm prefix such as C:\npm\prefix.
+  # Keep the pnpm executable and npm shim inside the reviewed private directory.
   $env:Path = "$toolRoot;$env:Path"
-  $corepackPath = Assert-PrivateToolCommand "corepack" $toolRoot
-  Invoke-CheckedNative "private Corepack enable" { & $corepackPath enable --install-directory $toolRoot }
-  Invoke-CheckedNative "private pnpm activation" { & $corepackPath prepare "pnpm@$env:PNPM_VERSION" --activate }
   $toolchain = Assert-PrivateToolchain $toolRoot
-  Set-WorkflowEnvironment "COREPACK_HOME" $corepackHome
   Set-WorkflowEnvironment "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" $toolRoot
   Add-WorkflowPath $toolRoot
   Write-Host "WINDOWS_NODE_VERSION=$($toolchain.NodeVersion)"
-  Write-Host "WINDOWS_COREPACK_VERSION=$($toolchain.CorepackVersion)"
   Write-Host "WINDOWS_PNPM_VERSION=$($toolchain.PnpmVersion)"
-  Write-Host "WINDOWS_COREPACK_COMMAND=$($toolchain.CorepackCommand)"
   Write-Host "WINDOWS_PNPM_COMMAND=$($toolchain.PnpmCommand)"
   Write-Host "WINDOWS_NODE_TOOL_ROOT=$toolRoot"
-  Write-Host "WINDOWS_PNPM_RUNTIME_NODE=$($toolchain.NodeVersion)"
 }

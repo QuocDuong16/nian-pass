@@ -1,9 +1,9 @@
 {
   "name": "nian-pass-workspace",
   "private": true,
-  "packageManager": "pnpm@11.22.0",
+  "packageManager": "pnpm@12.7.0",
   "engines": {
-    "node": "26.8.1"
+    "node": "26.9.0"
   },
   "scripts": {
     "desktop": "pnpm --filter @nian-pass/desktop"

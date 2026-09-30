@@ -102,13 +102,9 @@ export function githubReleaseWorkflowViolations(root) {
       `${githubWorkflow}: Windows release job must use the shared private Node tool bootstrap`,
     );
   }
-  if (
-    /npm install\s+--global\s+"corepack@\$env:COREPACK_VERSION"/i.test(
-      windowsJob,
-    )
-  ) {
+  if (/\bcorepack\b/i.test(windowsJob)) {
     violations.push(
-      `${githubWorkflow}: Windows release job must not mutate runner-global Corepack`,
+      `${githubWorkflow}: Windows release job must not use Corepack`,
     );
   }
   const windowsSetupNodeIndex = windowsJob.indexOf("uses: actions/setup-node@");
@@ -447,34 +443,21 @@ export function windowsNodeBootstrapViolations(root) {
   require(/function Assert-PinnedNode/, "must re-read the selected Node version");
   require(/\$actualNode\s+-ne\s+\$expectedNode/, "must reject an unexpected Node version");
   require(/Join-Path \$env:RUNNER_TEMP "nian-pass-node-tools"/, "must use a private RUNNER_TEMP tool root");
-  require(/Join-Path \$env:RUNNER_TEMP "nian-pass-corepack-home"/, "must use a private RUNNER_TEMP COREPACK_HOME");
-  require(/npm install --global --prefix \$toolRoot "corepack@\$env:COREPACK_VERSION"/, "must install Corepack with an explicit private npm prefix");
-  require(/\$env:COREPACK_HOME\s*=\s*\$corepackHome/, "must isolate COREPACK_HOME");
+  require(/npm install --global --prefix \$toolRoot "pnpm@\$env:PNPM_VERSION"/, "must install the exact pnpm version with an explicit private npm prefix");
   require(/Get-Command \$Name -CommandType Application -All -ErrorAction Stop/, "must enumerate Application command candidates");
   require(/\$selected\s*=\s*\$commands\[0\]/, "must select exactly the effective first command candidate");
   require(/\$source\s*=\s*\[string\] \$selected\.Path/, "must use the selected command scalar executable path");
-  require(/Assert-PrivateToolCommand "corepack" \$[Tt]oolRoot/, "must require a private Corepack executable");
   require(/Assert-PrivateToolCommand "pnpm" \$[Tt]oolRoot/, "must require a private pnpm executable");
-  require(/\$corepackVersion\s+-ne\s+\$env:COREPACK_VERSION/, "must require the exact Corepack version");
   require(/\$pnpmVersion\s+-ne\s+\$env:PNPM_VERSION/, "must require the exact pnpm version");
-  require(/NIAN_PASS_EXPECTED_NODE_VERSION/, "must provide the pnpm runtime Node guard");
-  require(/process\.version\s*!==\s*`v\$\{expected\}`/, "must reject an unexpected pnpm runtime Node version");
-  require(/NODE_OPTIONS\s*=\s*"--require=\$guardPath"/, "must load the pnpm runtime Node guard only for verification");
-  require(/Remove-Item Env:NODE_OPTIONS/, "must remove temporary NODE_OPTIONS after verification");
-  require(/Set-WorkflowEnvironment "COREPACK_HOME" \$corepackHome/, "must persist isolated COREPACK_HOME through GITHUB_ENV");
+  require(/Assert-PathUnderRunnerTemp "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT \$toolRoot/, "VerifyOnly must require the persisted private tool root under RUNNER_TEMP");
   require(/Set-WorkflowEnvironment "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" \$toolRoot/, "must persist the private tool-root identity through GITHUB_ENV");
   require(/Add-WorkflowPath \$toolRoot/, "must persist the private tool root through GITHUB_PATH");
-  require(/Assert-PathUnderRunnerTemp "NIAN_PASS_WINDOWS_NODE_TOOL_ROOT" \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT \$toolRoot/, "VerifyOnly must require the persisted private tool root under RUNNER_TEMP");
-  require(/Assert-PathUnderRunnerTemp "COREPACK_HOME" \$env:COREPACK_HOME \$corepackHome/, "VerifyOnly must require the persisted private COREPACK_HOME");
   require(/Assert-PrivateToolchain \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT/, "VerifyOnly must reverify the private toolchain");
-  require(/Assert-PnpmRuntimeNode \$ToolRoot \$pnpmPath/, "must run the pnpm runtime Node guard through the shared verification path");
   require(/WINDOWS_NODE_VERIFY=PASS/, "VerifyOnly must emit successful post-step verification evidence");
-  require(/WINDOWS_COREPACK_COMMAND=\$\(\$toolchain\.CorepackCommand\)/, "must report the selected Corepack command");
   require(/WINDOWS_PNPM_COMMAND=\$\(\$toolchain\.PnpmCommand\)/, "must report the selected pnpm command");
+  require(/Assert-PrivateToolchain \$env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT/, "VerifyOnly must reverify the private toolchain");
   const forbiddenVerifyOnlyOperations = [
     /npm\s+install/i,
-    /corepackPath\s+enable/i,
-    /corepackPath\s+prepare/i,
     /Invoke-WebRequest/i,
     /Invoke-RestMethod/i,
     /Start-BitsTransfer/i,
@@ -490,9 +473,9 @@ export function windowsNodeBootstrapViolations(root) {
       `${helperPath}: VerifyOnly must not perform install, activation, network, or download operations`,
     );
   }
-  if (/npm install\s+--global\s+"corepack@/i.test(helper)) {
+  if (/\bcorepack\b/i.test(helper)) {
     violations.push(
-      `${helperPath}: runner-global Corepack installation is forbidden`,
+      `${helperPath}: Corepack must not be part of the Windows pnpm setup`,
     );
   }
   if (
@@ -555,7 +538,7 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
     setupNodeIndex > frozenLockfileIndex
   ) {
     violations.push(
-      `${workflowPath}: setup-node must run after checkout and before the private Corepack/pnpm bootstrap`,
+      `${workflowPath}: setup-node must run after checkout and before the private pnpm bootstrap`,
     );
   }
   require(/\.\/scripts\/bootstrap_windows_node_tools\.ps1/, "must use the shared private Node tool bootstrap");
@@ -577,9 +560,9 @@ export function windowsRuntimeDiagnosticWorkflowViolations(root) {
       `${workflowPath}: diagnostic build step must run VerifyOnly before the desktop Tauri build`,
     );
   }
-  if (/npm install\s+--global\s+"corepack@/i.test(workflow)) {
+  if (/\bcorepack\b/i.test(workflow)) {
     violations.push(
-      `${workflowPath}: runner-global Corepack installation is forbidden`,
+      `${workflowPath}: Corepack must not be part of the Windows diagnostic toolchain`,
     );
   }
   require(/git rev-parse HEAD/, "must record the checked-out commit SHA");
@@ -770,6 +753,15 @@ export function sourcePolicyViolations(root) {
     );
   }
   const windowsRelease = read(root, "scripts/release_windows.ps1");
+  if (
+    !/Get-Content -LiteralPath "mise\.toml"[\s\S]*?\$packagePnpm -ne \$misePnpm/.test(
+      windowsRelease,
+    )
+  ) {
+    violations.push(
+      "scripts/release_windows.ps1: Windows release must read pnpm from mise.toml and reject packageManager drift",
+    );
+  }
   const peStackReserveParser = existsSync(
     resolve(root, "scripts/pe_stack_reserve.mjs"),
   )
@@ -805,6 +797,7 @@ export function sourcePolicyViolations(root) {
     );
   }
   if (
+    /\bcorepack\b/i.test(windowsRelease) ||
     !/Get-Command \$Name -CommandType Application -All -ErrorAction Stop/.test(
       windowsRelease,
     ) ||
@@ -815,7 +808,7 @@ export function sourcePolicyViolations(root) {
     )
   ) {
     violations.push(
-      "scripts/release_windows.ps1: private Corepack/pnpm resolution must select and validate one effective Application command path",
+      "scripts/release_windows.ps1: private pnpm resolution must select and validate one effective Application command path",
     );
   }
   const releaseWorkflow = read(root, ".github/workflows/release.yml");
@@ -859,7 +852,7 @@ export function sourcePolicyViolations(root) {
 
   const rootPackage = JSON.parse(read(root, "package.json"));
   const nodeVersion = read(root, ".node-version").trim();
-  const mise = parseToml(read(root, ".mise.toml"));
+  const mise = parseToml(read(root, "mise.toml"));
   const rustToolchain = parseToml(read(root, "rust-toolchain.toml"));
   const workspace = parseToml(read(root, "Cargo.toml"));
   if (
@@ -867,7 +860,7 @@ export function sourcePolicyViolations(root) {
     mise.tools?.node !== nodeVersion
   ) {
     violations.push(
-      "Node pins in package.json, .node-version, and .mise.toml must match",
+      "Node pins in package.json, .node-version, and mise.toml must match",
     );
   }
   const rustVersion = mise.tools?.rust;
@@ -876,11 +869,31 @@ export function sourcePolicyViolations(root) {
     workspace.workspace?.package?.["rust-version"] !== rustVersion
   ) {
     violations.push(
-      "Rust pins in Cargo.toml, rust-toolchain.toml, and .mise.toml must match",
+      "Rust pins in Cargo.toml, rust-toolchain.toml, and mise.toml must match",
     );
   }
-  if (!/^pnpm@\d+\.\d+\.\d+$/.test(rootPackage.packageManager ?? "")) {
-    violations.push("packageManager must pin one exact pnpm version");
+  const pnpmVersion = mise.tools?.pnpm;
+  if (!/^\d+\.\d+\.\d+$/.test(pnpmVersion ?? "")) {
+    violations.push("mise.toml must pin one exact pnpm version");
+  }
+  if (rootPackage.packageManager !== `pnpm@${pnpmVersion}`) {
+    violations.push("package.json packageManager must mirror the mise.toml pnpm pin");
+  }
+  const pnpmWorkflowPins = [
+    [".forgejo/workflows/quality.yml", read(root, ".forgejo/workflows/quality.yml"), `npm install --global pnpm@${pnpmVersion}`],
+    [".github/workflows/release.yml", read(root, ".github/workflows/release.yml"), `npm install --global \"pnpm@\${PNPM_VERSION}\"`],
+    [".github/workflows/windows-runtime-diagnostic.yml", read(root, ".github/workflows/windows-runtime-diagnostic.yml"), `PNPM_VERSION: \"${pnpmVersion}\"`],
+  ];
+  for (const [path, contents, expected] of pnpmWorkflowPins) {
+    if (!contents.includes(expected)) {
+      violations.push(`${path}: must use the pnpm version pinned by mise.toml (${pnpmVersion})`);
+    }
+    if (/\bcorepack\b/i.test(contents)) {
+      violations.push(`${path}: Corepack must not be part of the pnpm toolchain`);
+    }
+  }
+  if (!read(root, "Makefile").includes("PNPM_VERSION := $(shell awk -F'\"' '/^pnpm = \"[0-9]/ { print $$2 }' mise.toml)")) {
+    violations.push("Makefile must source PNPM_VERSION from mise.toml");
   }
 
   for (const name of [
@@ -943,7 +956,6 @@ export function sourcePolicyViolations(root) {
   violations.push(...windowsRuntimeDiagnosticWorkflowViolations(root));
   for (const workflow of [
     ".forgejo/workflows/quality.yml",
-    ".forgejo/workflows/openwiki-update.yml",
     ".github/workflows/release.yml",
     ".github/workflows/windows-runtime-diagnostic.yml",
   ]) {

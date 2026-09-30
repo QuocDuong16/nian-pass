@@ -36,10 +36,9 @@ concurrency:
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-  NODE_VERSION: "26.8.1"
-  PNPM_VERSION: "11.22.0"
-  COREPACK_VERSION: "0.35.0"
-  RUST_VERSION: "1.98.0"
+  NODE_VERSION: "26.9.0"
+  PNPM_VERSION: "12.7.0"
+  RUST_VERSION: "1.98.1"
 
 jobs:
   preflight:
@@ -64,9 +63,7 @@ jobs:
       - name: Install pinned release tools
         run: |
           set -Eeuo pipefail
-          npm install --global "corepack@${COREPACK_VERSION}"
-          corepack enable
-          corepack install --global "pnpm@${PNPM_VERSION}"
+          npm install --global "pnpm@${PNPM_VERSION}"
           rustup toolchain install "${RUST_VERSION}" --profile minimal
           rustup default "${RUST_VERSION}"
           pnpm install --frozen-lockfile
@@ -117,9 +114,7 @@ jobs:
           set -Eeuo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends build-essential dbus-x11 file libayatana-appindicator3-dev libfuse2 librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf unzip xvfb
-          npm install --global "corepack@${COREPACK_VERSION}"
-          corepack enable
-          corepack install --global "pnpm@${PNPM_VERSION}"
+          npm install --global "pnpm@${PNPM_VERSION}"
           rustup toolchain install "${RUST_VERSION}" --profile minimal
           rustup default "${RUST_VERSION}"
           pnpm install --frozen-lockfile
@@ -223,9 +218,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "${{ needs.preflight.outputs.commit }}"
-          npm install --global "corepack@${COREPACK_VERSION}"
-          corepack enable
-          corepack install --global "pnpm@${PNPM_VERSION}"
+          npm install --global "pnpm@${PNPM_VERSION}"
           pnpm install --frozen-lockfile
           make release-browser-package
       - name: Upload browser payload
@@ -261,9 +254,7 @@ jobs:
       - name: Install pinned Android release tools
         run: |
           set -Eeuo pipefail
-          npm install --global "corepack@${COREPACK_VERSION}"
-          corepack enable
-          corepack install --global "pnpm@${PNPM_VERSION}"
+          npm install --global "pnpm@${PNPM_VERSION}"
           rustup toolchain install "${RUST_VERSION}" --profile minimal
           rustup default "${RUST_VERSION}"
           rustup target add aarch64-linux-android x86_64-linux-android --toolchain "${RUST_VERSION}"
@@ -327,9 +318,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "${{ needs.preflight.outputs.commit }}"
-          npm install --global "corepack@${COREPACK_VERSION}"
-          corepack enable
-          corepack install --global "pnpm@${PNPM_VERSION}"
+          npm install --global "pnpm@${PNPM_VERSION}"
           pnpm install --frozen-lockfile
           make gateway-container-check release-gateway-image
       - name: Upload gateway payload
@@ -358,9 +347,7 @@ jobs:
       - name: Install pinned attestation tools
         run: |
           set -Eeuo pipefail
-          npm install --global "corepack@${COREPACK_VERSION}"
-          corepack enable
-          corepack install --global "pnpm@${PNPM_VERSION}"
+          npm install --global "pnpm@${PNPM_VERSION}"
           rustup toolchain install "${RUST_VERSION}" --profile minimal
           rustup default "${RUST_VERSION}"
           pnpm install --frozen-lockfile

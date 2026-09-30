@@ -10,21 +10,21 @@ jobs:
     runs-on: docker
     timeout-minutes: 35
     container:
-      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
+      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
 
     steps:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.8.1"
+          node_version="26.9.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
+              node_checksum="c6ecd8efc1c1d395265891675319da7a7b3785c6be174bd78933cf4f057624d1"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
+              node_checksum="686d07ed3bc5d68d9f7bd4939b7e8849a87d0664ac19c8c5474474f44cc956db"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -54,7 +54,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 25
     container:
-      image: node:26.8.1-bookworm@sha256:9f94d34c787165dca03b74e5bf9c3bf90e8de79b19aa3d87fe1fa1694bf75c89
+      image: node:26.9.0-bookworm@sha256:347d9d5391493c2fc3f0d161b75a9cab64a9805064b1b01b099f8ee97f98ed47
 
     steps:
       - name: Check out repository
@@ -62,12 +62,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install and activate pinned pnpm
+      - name: Install pinned pnpm directly
         run: |
-          npm install --global corepack@0.35.0
-          corepack enable
-          corepack install --global pnpm@11.22.0
-          corepack --version
+          npm install --global pnpm@12.7.0
           pnpm --version
 
       - name: Run repository policy gates
@@ -86,21 +83,21 @@ jobs:
     runs-on: docker
     timeout-minutes: 50
     container:
-      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
+      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
 
     steps:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.8.1"
+          node_version="26.9.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
+              node_checksum="c6ecd8efc1c1d395265891675319da7a7b3785c6be174bd78933cf4f057624d1"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
+              node_checksum="686d07ed3bc5d68d9f7bd4939b7e8849a87d0664ac19c8c5474474f44cc956db"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -136,12 +133,9 @@ jobs:
             libxdo-dev \
             wget
 
-      - name: Install and activate pinned pnpm
+      - name: Install pinned pnpm directly
         run: |
-          npm install --global corepack@0.35.0
-          corepack enable
-          corepack install --global pnpm@11.22.0
-          corepack --version
+          npm install --global pnpm@12.7.0
           pnpm --version
 
       - name: Install pinned Rust quality tooling
@@ -160,21 +154,21 @@ jobs:
     runs-on: docker
     timeout-minutes: 20
     container:
-      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
+      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
 
     steps:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.8.1"
+          node_version="26.9.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
+              node_checksum="c6ecd8efc1c1d395265891675319da7a7b3785c6be174bd78933cf4f057624d1"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
+              node_checksum="686d07ed3bc5d68d9f7bd4939b7e8849a87d0664ac19c8c5474474f44cc956db"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -212,15 +206,15 @@ jobs:
       - name: Install pinned Node.js runtime
         run: |
           set -Eeuo pipefail
-          node_version="26.8.1"
+          node_version="26.9.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
+              node_checksum="c6ecd8efc1c1d395265891675319da7a7b3785c6be174bd78933cf4f057624d1"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
+              node_checksum="686d07ed3bc5d68d9f7bd4939b7e8849a87d0664ac19c8c5474474f44cc956db"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2
@@ -240,10 +234,7 @@ jobs:
 
       - name: Install pinned gateway policy dependencies
         run: |
-          npm install --global corepack@0.35.0
-          corepack enable
-          corepack install --global pnpm@11.22.0
-          corepack --version
+          npm install --global pnpm@12.7.0
           pnpm --version
           make scripts-install
 
@@ -254,21 +245,21 @@ jobs:
     runs-on: docker
     timeout-minutes: 30
     container:
-      image: rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922
+      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
 
     steps:
       - name: Install Node.js runtime for actions
         run: |
           set -Eeuo pipefail
-          node_version="26.8.1"
+          node_version="26.9.0"
           case "$(uname -m)" in
             x86_64)
               node_arch="x64"
-              node_checksum="3e301118d7df53d563b7e96c1617545f26e2f76f9724be668d6cab65c15dda5d"
+              node_checksum="c6ecd8efc1c1d395265891675319da7a7b3785c6be174bd78933cf4f057624d1"
               ;;
             aarch64)
               node_arch="arm64"
-              node_checksum="23c1b4d19e2f12a7d06fe8aa3d6e0e4923cf77a47e13c5ccdf32fadaa33960f2"
+              node_checksum="686d07ed3bc5d68d9f7bd4939b7e8849a87d0664ac19c8c5474474f44cc956db"
               ;;
             *)
               echo "Unsupported runner architecture: $(uname -m)" >&2

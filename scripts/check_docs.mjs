@@ -45,14 +45,14 @@ export function runChecks(root) {
   const workflow = readRequired(root, ".forgejo/workflows/quality.yml", violations);
   const packageSource = readRequired(root, "package.json", violations);
   const nodeVersion = readRequired(root, ".node-version", violations).trim();
-  const mise = readRequired(root, ".mise.toml", violations);
+  const mise = readRequired(root, "mise.toml", violations);
   const rustToolchain = readRequired(root, "rust-toolchain.toml", violations);
   const makefile = readRequired(root, "Makefile", violations);
 
   requirePattern(violations, "SECURITY.md", securityPolicy, /supported versions[\s\S]{0,1200}reporting a vulnerability[\s\S]{0,1800}does not promise[\s\S]{0,100}(?:SLA|response)/i, "supported versions, private reporting, and honest response policy are required");
   requirePattern(violations, "docs/security-audit-m8.md", securityAudit, /BLOCKER[\s\S]{0,1000}HIGH[\s\S]{0,5000}ACCEPTED RISK[\s\S]{0,5000}Secret inventory/i, "rated findings and secret inventory are required");
   requirePattern(violations, "docs/release.md", release, /clean checkout[\s\S]{0,1400}release-source-check[\s\S]{0,5000}SHA-256[\s\S]{0,5000}NOT RUN/i, "canonical release, integrity, and honest status procedure are required");
-  requirePattern(violations, "docs/reproducible-builds.md", reproducible, /VERSION[\s\S]{0,800}Rust 1\.98\.0[\s\S]{0,2200}CycloneDX/i, "version, toolchain, and SBOM reproducibility policy are required");
+  requirePattern(violations, "docs/reproducible-builds.md", reproducible, /VERSION[\s\S]{0,800}Rust 1\.98\.1[\s\S]{0,2200}CycloneDX/i, "version, toolchain, and SBOM reproducibility policy are required");
   requirePattern(violations, "docs/release-checklist.md", releaseChecklist, /No committed secrets[\s\S]{0,1000}CSP[\s\S]{0,1000}runtime[\s\S]{0,500}NOT RUN/i, "release security checklist is incomplete");
   requirePattern(violations, "docs/release-status-template.md", releaseStatus, /Forgejo canonical CI[\s\S]{0,1200}Windows full GUI runtime[\s\S]{0,1200}Android runtime[\s\S]{0,1200}Artifact secret scan[\s\S]{0,800}GitHub Release publication/i, "release status matrix is incomplete");
   requirePattern(violations, "docs/ipc-surface.md", ipcSurface, /Session control[\s\S]{0,1800}Vault mutation[\s\S]{0,1800}Browser[\s\S]{0,1800}Android/i, "Tauri IPC command classification is incomplete");
@@ -100,7 +100,7 @@ export function runChecks(root) {
   requirePattern(violations, "README.md", readme, /privacy shield[\s\S]{0,300}(?:not|isn't)[\s\S]{0,80}screenshot/i, "M4.5 privacy-shield limitation is missing");
   requirePattern(violations, "README.md", readme, /timeout[\s\S]{0,160}(?:application-)?memory only/i, "M4.5 memory-only timeout setting is missing");
   requirePattern(violations, "docs/threat-model.md", threatModel, /dirty[\s\S]{0,120}timeout[\s\S]{0,240}(?:never|explicit)[\s\S]{0,100}discard/i, "M4.5 dirty-idle non-discard control is missing");
-  requirePattern(violations, "AGENTS.md", agents, /Do not hand-edit generated OpenWiki pages/i, "generated OpenWiki ownership rule is missing");
+  requirePattern(violations, "AGENTS.md", agents, /Serena MCP is the primary tool for understanding and navigating this repository/i, "Serena navigation policy is missing");
   requirePattern(violations, "README.md", readme, /Android 8\.0[\s\S]{0,80}API 26/i, "Android API 26 minimum is missing");
   requirePattern(violations, "README.md", readme, /make mobile-android-check/, "real Android build gate is missing");
   requirePattern(violations, "docs/architecture.md", architecture, /apps\/desktop[\s\S]{0,180}historical/i, "shared Tauri host naming debt is missing");
@@ -147,7 +147,6 @@ export function runChecks(root) {
     [/pnpm audit --prod/i, "frontend production audit policy is missing"],
     [/navigator\.clipboard/i, "browser clipboard ban is missing"],
     [/clipboard-manager[\s\S]{0,160}apps\/desktop\/src-tauri/i, "Rust clipboard allowlist is missing"],
-    [/OpenWiki[\s\S]{0,500}(?:not|isn't)[\s\S]{0,40}source of[\s\S]{0,10}truth/i, "OpenWiki source-of-truth policy is missing"],
   ];
   for (const [pattern, message] of qualityRequirements) {
     requirePattern(violations, "docs/quality.md", quality, pattern, message);
@@ -160,22 +159,37 @@ export function runChecks(root) {
     violations.push("package.json: invalid JSON");
   }
   const declaredNode = packageJson.engines?.node;
+  const configuredNodeVersion = mise.match(
+    /^node\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m,
+  )?.[1];
   const packageManager = packageJson.packageManager;
   if (declaredNode !== nodeVersion || !/^\d+\.\d+\.\d+$/.test(nodeVersion)) {
     violations.push(".node-version and package.json engines.node must contain the same exact version");
+  }
+  if (configuredNodeVersion === undefined) {
+    violations.push("mise.toml: Node.js must be pinned to an exact version");
+  } else if (configuredNodeVersion !== nodeVersion) {
+    violations.push(".node-version must mirror mise Node " + configuredNodeVersion);
+  }
+  const nodeVersionAssignment =
+    "NODE_VERSION := $(shell awk -F'\"' '/^node = / { print $$2 }' mise.toml)";
+  if (!makefile.includes(nodeVersionAssignment)) {
+    violations.push("Makefile: NODE_VERSION must be sourced from mise.toml");
   }
   if (nodeVersion !== "" && !workflow.includes(nodeVersion)) {
     violations.push(`.forgejo/workflows/quality.yml: pinned Node ${nodeVersion} is not reused`);
   }
   const rustVersion = mise.match(/^rust\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m)?.[1];
   if (rustVersion === undefined) {
-    violations.push(".mise.toml: Rust must be pinned to an exact version");
+    violations.push("mise.toml: Rust must be pinned to an exact version");
   } else {
     if (!rustToolchain.includes(`channel = "${rustVersion}"`)) {
       violations.push(`rust-toolchain.toml: must mirror mise Rust ${rustVersion}`);
     }
-    if (!makefile.includes("RUST_VERSION := $(shell") || !makefile.includes(".mise.toml")) {
-      violations.push("Makefile: RUST_VERSION must be sourced from .mise.toml");
+    const rustVersionAssignment =
+      "RUST_VERSION := $(shell awk -F'\"' '/^rust = / { print $$2 }' mise.toml)";
+    if (!makefile.includes(rustVersionAssignment)) {
+      violations.push("Makefile: RUST_VERSION must be sourced from mise.toml");
     }
     if (!workflow.includes(`rust:${rustVersion}-bookworm`)) {
       violations.push(`.forgejo/workflows/quality.yml: pinned Rust ${rustVersion} is not reused`);
@@ -184,20 +198,25 @@ export function runChecks(root) {
       violations.push(`docs/quality.md: pinned Rust ${rustVersion} is not documented`);
     }
   }
-  const corepackVersion = quality.match(/\bCorepack\s+(\d+\.\d+\.\d+)\b/i)?.[1];
-  if (corepackVersion === undefined) {
-    violations.push("docs/quality.md: Corepack must be pinned explicitly for Node 26");
-  } else if (!workflow.includes(`npm install --global corepack@${corepackVersion}`)) {
-    violations.push(
-      `.forgejo/workflows/quality.yml: pinned Corepack ${corepackVersion} must be installed explicitly`,
-    );
-  }
+  const configuredPnpmVersion = mise.match(/^pnpm\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m)?.[1];
   const pnpmVersion =
     typeof packageManager === "string" ? packageManager.match(/^pnpm@(\d+\.\d+\.\d+)$/)?.[1] : undefined;
   if (pnpmVersion === undefined) {
     violations.push("package.json: packageManager must pin an exact pnpm version");
-  } else if (!workflow.includes(`pnpm@${pnpmVersion}`)) {
-    violations.push(`.forgejo/workflows/quality.yml: pinned pnpm ${pnpmVersion} is not reused`);
+  } else if (configuredPnpmVersion === undefined) {
+    violations.push("mise.toml: pnpm must be pinned to an exact version");
+  } else if (pnpmVersion !== configuredPnpmVersion) {
+    violations.push(`package.json: packageManager must mirror mise pnpm ${configuredPnpmVersion}`);
+  } else if (!workflow.includes(`npm install --global pnpm@${configuredPnpmVersion}`)) {
+    violations.push(`.forgejo/workflows/quality.yml: must install mise-pinned pnpm ${configuredPnpmVersion} directly`);
+  }
+  if (/\bcorepack\b/i.test(workflow) || /\bCorepack\b/i.test(quality)) {
+    violations.push("Corepack must not be part of the pinned pnpm toolchain");
+  }
+  const pnpmVersionAssignment =
+    "PNPM_VERSION := $(shell awk -F'\"' '/^pnpm = \"[0-9]/ { print $$2 }' mise.toml)";
+  if (!makefile.includes(pnpmVersionAssignment)) {
+    violations.push("Makefile: PNPM_VERSION must be sourced from mise.toml");
   }
 
   const desktopFrontendJob = workflowJob(workflow, "desktop-frontend");
@@ -217,17 +236,9 @@ export function runChecks(root) {
         ".forgejo/workflows/quality.yml: desktop-native-check must own browser-integration-check",
       );
     }
-    if (
-      corepackVersion !== undefined &&
-      !desktopNativeJob.includes(`npm install --global corepack@${corepackVersion}`)
-    ) {
+    if (configuredPnpmVersion !== undefined && !desktopNativeJob.includes(`npm install --global pnpm@${configuredPnpmVersion}`)) {
       violations.push(
-        `.forgejo/workflows/quality.yml: desktop-native-check must install pinned Corepack ${corepackVersion}`,
-      );
-    }
-    if (pnpmVersion !== undefined && !desktopNativeJob.includes(`pnpm@${pnpmVersion}`)) {
-      violations.push(
-        `.forgejo/workflows/quality.yml: desktop-native-check must activate pinned pnpm ${pnpmVersion}`,
+        `.forgejo/workflows/quality.yml: desktop-native-check must install mise-pinned pnpm ${configuredPnpmVersion}`,
       );
     }
   }

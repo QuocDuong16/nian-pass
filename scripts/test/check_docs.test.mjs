@@ -81,7 +81,7 @@ function fixture(t) {
     "Coverage ratchet. Lowering requires architecture or security review. eslint-disable is forbidden. " +
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
-      "Rust 1.98.0. Corepack 0.35.0. OpenWiki is not the source of truth. " +
+      "Rust 1.98.1. pnpm 12.7.0 from mise.toml, the toolchain source of truth. " +
       "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
       "M5.5 requires PowerManager.isInteractive and SystemClock.elapsedRealtime lifecycle source ratchets; same-process Lock/unlock timeout retention and new-root reset are tested; Android instrumentation only compiles headlessly.\n" +
       "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension. browser-source-check then browser-extension-check then browser-native-protocol-check then browser-native-host-check then browser-integration-check do not require Chrome Chromium or Firefox GUI browsers.\n" +
@@ -106,7 +106,7 @@ function fixture(t) {
   write(
     root,
     "docs/reproducible-builds.md",
-    "VERSION is authoritative. Rust 1.98.0 is pinned. Generate a CycloneDX inventory.\n",
+    "VERSION is authoritative. Rust 1.98.1 is pinned. Generate a CycloneDX inventory.\n",
   );
   write(
     root,
@@ -123,12 +123,12 @@ function fixture(t) {
     "docs/ipc-surface.md",
     "Session control owns Lock. Vault mutation is Rust-owned. Browser approval is opaque. Android remains native.\n",
   );
-  write(root, "AGENTS.md", "Do not hand-edit generated OpenWiki pages.\n");
-  write(root, ".node-version", "26.8.1\n");
+  write(root, "AGENTS.md", "Serena MCP is the primary tool for understanding and navigating this repository.\n");
+  write(root, ".node-version", "26.9.0\n");
   write(
     root,
     "package.json",
-    '{"engines":{"node":"26.8.1"},"packageManager":"pnpm@11.22.0"}\n',
+    '{"engines":{"node":"26.9.0"},"packageManager":"pnpm@12.7.0"}\n',
   );
   write(
     root,
@@ -136,23 +136,24 @@ function fixture(t) {
     "jobs:\n" +
       "  desktop-frontend:\n" +
       "    container:\n" +
-      "      image: node:26.8.1-bookworm\n" +
+      "      image: node:26.9.0-bookworm\n" +
       "    steps:\n" +
       "      - run: make browser-source-check browser-extension-check\n" +
       "  desktop-native-check:\n" +
       "    container:\n" +
-      "      image: rust:1.98.0-bookworm\n" +
+      "      image: rust:1.98.1-bookworm\n" +
       "    steps:\n" +
-      "      - run: npm install --global corepack@0.35.0\n" +
-      "      - run: corepack install --global pnpm@11.22.0\n" +
+      "      - run: npm install --global pnpm@12.7.0\n" +
       "      - run: make browser-integration-check\n",
   );
-  write(root, ".mise.toml", '[tools]\nrust = "1.98.0"\n');
-  write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.98.0"\n');
+  write(root, "mise.toml", '[tools]\nnode = "26.9.0"\npnpm = "12.7.0"\nrust = "1.98.1"\n');
+  write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.98.1"\n');
   write(
     root,
     "Makefile",
-    "RUST_VERSION := $(shell awk -F'\\\"' '/^rust = / { print $$2 }' .mise.toml)\n",
+    "NODE_VERSION := $(shell awk -F'\\\"' '/^node = / { print $$2 }' mise.toml)\n" +
+      "PNPM_VERSION := $(shell awk -F'\\\"' '/^pnpm = \\\"[0-9]/ { print $$2 }' mise.toml)\n" +
+      "RUST_VERSION := $(shell awk -F'\\\"' '/^rust = / { print $$2 }' mise.toml)\n",
   );
   return root;
 }
@@ -170,10 +171,10 @@ test("runtime version drift is rejected", (t) => {
 test("Rust toolchain drift from mise is rejected", (t) => {
   const root = fixture(t);
   write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.97.1"\n');
-  assert.match(runChecks(root).join("\n"), /must mirror mise Rust 1\.98\.0/);
+  assert.match(runChecks(root).join("\n"), /must mirror mise Rust 1\.98\.1/);
 });
 
-test("missing explicit Corepack bootstrap is rejected", (t) => {
+test("missing direct pnpm installation is rejected", (t) => {
   const root = fixture(t);
   write(
     root,
@@ -181,17 +182,17 @@ test("missing explicit Corepack bootstrap is rejected", (t) => {
     "jobs:\n" +
       "  desktop-frontend:\n" +
       "    container:\n" +
-      "      image: node:26.8.1-bookworm\n" +
+      "      image: node:26.9.0-bookworm\n" +
       "  desktop-native-check:\n" +
       "    container:\n" +
-      "      image: rust:1.98.0-bookworm\n" +
+      "      image: rust:1.98.1-bookworm\n" +
       "    steps:\n" +
-      "      - run: corepack install --global pnpm@11.22.0\n" +
+      "      - run: node --version\n" +
       "      - run: make browser-integration-check\n",
   );
   assert.match(
     runChecks(root).join("\n"),
-    /Corepack 0\.35\.0 must be installed explicitly/,
+    /must install mise-pinned pnpm 12\.7\.0 directly/,
   );
 });
 
@@ -214,19 +215,17 @@ test("browser integration requires the native Rust job and pinned pnpm", (t) => 
     join(root, ".forgejo/workflows/quality.yml"),
     "utf8",
   )
-    .replace("      - run: npm install --global corepack@0.35.0\n", "")
-    .replace("      - run: corepack install --global pnpm@11.22.0\n", "")
+    .replace("      - run: npm install --global pnpm@12.7.0\n", "")
     .replace("      - run: make browser-integration-check\n", "");
   write(root, ".forgejo/workflows/quality.yml", workflow);
   const violations = runChecks(root).join("\n");
   assert.match(violations, /must own browser-integration-check/);
-  assert.match(violations, /must install pinned Corepack 0\.35\.0/);
-  assert.match(violations, /must activate pinned pnpm 11\.22\.0/);
+  assert.match(violations, /must install mise-pinned pnpm 12\.7\.0/);
 });
 
 test("missing quality policy is reported", (t) => {
   const root = fixture(t);
-  write(root, "docs/quality.md", "OpenWiki\n");
+  write(root, "docs/quality.md", "No policy\n");
   const violations = runChecks(root).join("\n");
   assert.match(violations, /coverage ratchet/);
   assert.match(violations, /unsafe Rust/);

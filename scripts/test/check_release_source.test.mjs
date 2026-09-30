@@ -535,7 +535,7 @@ test("manual Windows runtime diagnostic workflow is narrowly constrained", (t) =
   );
   assert.match(
     windowsRuntimeDiagnosticWorkflowViolations(root).join("\n"),
-    /setup-node must run after checkout and before the private Corepack\/pnpm bootstrap/,
+    /setup-node must run after checkout and before the private pnpm bootstrap/,
   );
   writeFileSync(
     workflowPath,
@@ -674,23 +674,6 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
     helperPath,
     helper
       .replaceAll(
-        'Assert-PrivateToolCommand "corepack" $ToolRoot',
-        '$corepackPath = "C:\\npm\\prefix\\corepack.cmd"',
-      )
-      .replaceAll(
-        'Assert-PrivateToolCommand "corepack" $toolRoot',
-        '$corepackPath = "C:\\npm\\prefix\\corepack.cmd"',
-      ),
-  );
-  assert.match(
-    windowsNodeBootstrapViolations(root).join("\n"),
-    /private Corepack executable/,
-  );
-
-  writeFileSync(
-    helperPath,
-    helper
-      .replaceAll(
         'Assert-PrivateToolCommand "pnpm" $ToolRoot',
         '$pnpmPath = "C:\\npm\\prefix\\pnpm.cmd"',
       )
@@ -740,37 +723,13 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      '$env:NODE_OPTIONS = "--require=$guardPath"',
-      '$env:NODE_OPTIONS = ""',
+      'npm install --global --prefix $toolRoot "pnpm@$env:PNPM_VERSION"',
+      'npm install --global "pnpm@$env:PNPM_VERSION"',
     ),
   );
   assert.match(
     windowsNodeBootstrapViolations(root).join("\n"),
-    /pnpm runtime Node guard/,
-  );
-
-  writeFileSync(
-    helperPath,
-    helper.replace(
-      "process.version !== `v${expected}`",
-      "process.version === `v${expected}`",
-    ),
-  );
-  assert.match(
-    windowsNodeBootstrapViolations(root).join("\n"),
-    /unexpected pnpm runtime Node version/,
-  );
-
-  writeFileSync(
-    helperPath,
-    helper.replace(
-      'npm install --global --prefix $toolRoot "corepack@$env:COREPACK_VERSION"',
-      'npm install --global "corepack@$env:COREPACK_VERSION"',
-    ),
-  );
-  assert.match(
-    windowsNodeBootstrapViolations(root).join("\n"),
-    /explicit private npm prefix|runner-global Corepack installation/,
+    /explicit private npm prefix/,
   );
 
   writeFileSync(
@@ -800,20 +759,8 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
   writeFileSync(
     helperPath,
     helper.replace(
-      'Assert-PathUnderRunnerTemp "COREPACK_HOME" $env:COREPACK_HOME $corepackHome',
-      "$corepackHome = $env:COREPACK_HOME",
-    ),
-  );
-  assert.match(
-    windowsNodeBootstrapViolations(root).join("\n"),
-    /persisted private COREPACK_HOME/,
-  );
-
-  writeFileSync(
-    helperPath,
-    helper.replace(
       "  $toolchain = Assert-PrivateToolchain $env:NIAN_PASS_WINDOWS_NODE_TOOL_ROOT",
-      '  npm install --global --prefix $toolRoot "corepack@$env:COREPACK_VERSION"',
+      '  npm install --global --prefix $toolRoot "pnpm@$env:PNPM_VERSION"',
     ),
   );
   assert.match(
@@ -845,17 +792,6 @@ test("shared Windows Node bootstrap is private, pinned, and fail-closed", (t) =>
     /VerifyOnly must not perform install, activation, network, or download operations/,
   );
 
-  writeFileSync(
-    helperPath,
-    helper.replace(
-      "  Assert-PnpmRuntimeNode $ToolRoot $pnpmPath",
-      "  # pnpm runtime guard removed",
-    ),
-  );
-  assert.match(
-    windowsNodeBootstrapViolations(root).join("\n"),
-    /pnpm runtime Node guard through the shared verification path/,
-  );
 });
 
 test("Windows release workflow verifies the persisted private toolchain before building", (t) => {
