@@ -54,6 +54,7 @@ export default defineConfig(({ mode }) => {
     ],
     test: {
       environment: "jsdom",
+      clearMocks: false,
       globals: true,
       coverage: {
         provider: "v8",

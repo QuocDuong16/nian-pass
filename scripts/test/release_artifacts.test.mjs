@@ -448,7 +448,7 @@ test("release manifest binds artifacts to source, toolchains, and signing", () =
     version: "0.1.0-rc.9",
     tag: "v0.1.0-rc.9",
     commit: "a".repeat(40),
-    toolchains: { rust: "1.98.1", node: "26.9.0" },
+    toolchains: { rust: "1.99.0", node: "26.9.0" },
     signing: { windows: "NOT RUN" },
     validation: { "Windows full GUI runtime": "NOT RUN" },
     infrastructure: { provider: "GitHub Actions hosted runners" },
@@ -457,7 +457,7 @@ test("release manifest binds artifacts to source, toolchains, and signing", () =
   assert.equal(manifest.schemaVersion, 2);
   assert.equal(manifest.releaseKind, "prerelease");
   assert.equal(manifest.workflow, ".github/workflows/release.yml");
-  assert.equal(manifest.toolchains.rust, "1.98.1");
+  assert.equal(manifest.toolchains.rust, "1.99.0");
   assert.equal(manifest.artifacts[0].sha256, "b".repeat(64));
   assert.equal(manifest.signing.windows, "NOT RUN");
   assert.equal(manifest.validation["Windows full GUI runtime"], "NOT RUN");

@@ -118,7 +118,7 @@ test("repository audit targets retain bounded fail-closed registry policy", () =
     resolve(repositoryRoot, "scripts/run_pnpm_audit.mjs"),
     "utf8",
   );
-  assert.equal(makefile.match(/node scripts\/run_pnpm_audit\.mjs/g)?.length, 2);
+  assert.equal(makefile.match(/node scripts\/run_pnpm_audit\.mjs/g)?.length, 3);
   assert.match(source, /spawnSync\("pnpm", \["audit", "--prod", "--json"\]/);
   assert.match(source, /MAX_ATTEMPTS = 2/);
   assert.match(source, /ATTEMPT_TIMEOUT_MS = 90_000/);

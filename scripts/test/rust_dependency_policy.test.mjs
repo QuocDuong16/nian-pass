@@ -62,7 +62,7 @@ test("CI promotes every cargo-deny warning to failure without unlocking dependen
 
 test("historical transitive duplicates have only exact, tracked, non-stale exemptions", () => {
   assert.deepEqual(legacyDuplicateViolations(), []);
-  assert.equal(deny.bans.skip.length, 63);
+  assert.equal(deny.bans.skip.length, 57);
   const broadened = structuredClone(deny);
   broadened.bans.skip[0].version = ">=0.21";
   assert.match(
@@ -91,12 +91,7 @@ test("vulnerable rustls is upgraded, not exempted from advisory scanning", () =>
       .map(({ version }) => version),
     ["0.23.45"],
   );
-  assert.deepEqual(deny.advisories.ignore.map(({ id }) => id).sort(), [
+  assert.deepEqual(deny.advisories.ignore.map(({ id }) => id), [
     "RUSTSEC-2024-0370",
-    "RUSTSEC-2025-0075",
-    "RUSTSEC-2025-0080",
-    "RUSTSEC-2025-0081",
-    "RUSTSEC-2025-0098",
-    "RUSTSEC-2025-0100",
   ]);
 });

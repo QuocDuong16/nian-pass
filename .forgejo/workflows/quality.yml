@@ -10,7 +10,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 35
     container:
-      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
+      image: rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
 
     steps:
       - name: Install Node.js runtime for actions
@@ -64,7 +64,7 @@ jobs:
 
       - name: Install pinned pnpm directly
         run: |
-          npm install --global pnpm@12.7.0
+          npm install --global pnpm@12.9.1
           pnpm --version
 
       - name: Run repository policy gates
@@ -83,7 +83,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 50
     container:
-      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
+      image: rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
 
     steps:
       - name: Install Node.js runtime for actions
@@ -135,7 +135,7 @@ jobs:
 
       - name: Install pinned pnpm directly
         run: |
-          npm install --global pnpm@12.7.0
+          npm install --global pnpm@12.9.1
           pnpm --version
 
       - name: Install pinned Rust quality tooling
@@ -154,7 +154,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 20
     container:
-      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
+      image: rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
 
     steps:
       - name: Install Node.js runtime for actions
@@ -234,7 +234,7 @@ jobs:
 
       - name: Install pinned gateway policy dependencies
         run: |
-          npm install --global pnpm@12.7.0
+          npm install --global pnpm@12.9.1
           pnpm --version
           make scripts-install
 
@@ -245,7 +245,7 @@ jobs:
     runs-on: docker
     timeout-minutes: 30
     container:
-      image: rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e
+      image: rust:1.99.0-bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
 
     steps:
       - name: Install Node.js runtime for actions

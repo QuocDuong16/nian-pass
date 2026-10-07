@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: "jsdom",
+      clearMocks: false,
       setupFiles: "./src/test/setup.ts",
       css: true,
       coverage: {

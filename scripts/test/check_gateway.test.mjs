@@ -5,11 +5,29 @@ import { test } from "node:test";
 import {
   forbiddenRuntimeDependencies,
   forgejoNodeArchivePinViolations,
+  gatewayBuilderImageViolations,
   gatewayContainerNetworkProbeViolations,
   gatewaySecretBuildContextViolations,
   gatewayWorkflowDependencyViolations,
   protocolSourceViolations,
 } from "../check_gateway.mjs";
+
+test("gateway builder image follows the pinned Rust toolchain", () => {
+  const dockerfile = `
+FROM rust:1.99.0-bookworm@sha256:${"a".repeat(64)} AS builder
+`;
+  assert.deepEqual(gatewayBuilderImageViolations(dockerfile, "1.99.0"), []);
+  const staleImage = dockerfile.replace("1.99.0", "1.98.1");
+  assert.match(
+    gatewayBuilderImageViolations(staleImage, "1.99.0").join("\n"),
+    /must match rust-toolchain\.toml/,
+  );
+  const unpinnedDigest = dockerfile.replace("a".repeat(64), "not-a-digest");
+  assert.match(
+    gatewayBuilderImageViolations(unpinnedDigest, "1.99.0").join("\n"),
+    /must match rust-toolchain\.toml/,
+  );
+});
 
 test("all Forgejo Node bootstrap jobs pin upstream hashes and verify before extracting", () => {
   const workflow = readFileSync(
@@ -139,13 +157,13 @@ test("Forgejo gateway smoke installs pinned source-policy dependencies", () => {
     steps:
       - run: |
           node_version="26.9.0"
-          npm install --global pnpm@12.7.0
+          npm install --global pnpm@12.9.1
       - run: make scripts-install
       - run: make gateway-container-check
   another-job:
     runs-on: docker
 `;
-  assert.deepEqual(gatewayWorkflowDependencyViolations(workflow, "12.7.0"), []);
+  assert.deepEqual(gatewayWorkflowDependencyViolations(workflow, "12.9.1"), []);
 
   const withoutInstall = workflow.replace(
     "      - run: make scripts-install\n",

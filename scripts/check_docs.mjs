@@ -52,7 +52,7 @@ export function runChecks(root) {
   requirePattern(violations, "SECURITY.md", securityPolicy, /supported versions[\s\S]{0,1200}reporting a vulnerability[\s\S]{0,1800}does not promise[\s\S]{0,100}(?:SLA|response)/i, "supported versions, private reporting, and honest response policy are required");
   requirePattern(violations, "docs/security-audit-m8.md", securityAudit, /BLOCKER[\s\S]{0,1000}HIGH[\s\S]{0,5000}ACCEPTED RISK[\s\S]{0,5000}Secret inventory/i, "rated findings and secret inventory are required");
   requirePattern(violations, "docs/release.md", release, /clean checkout[\s\S]{0,1400}release-source-check[\s\S]{0,5000}SHA-256[\s\S]{0,5000}NOT RUN/i, "canonical release, integrity, and honest status procedure are required");
-  requirePattern(violations, "docs/reproducible-builds.md", reproducible, /VERSION[\s\S]{0,800}Rust 1\.98\.1[\s\S]{0,2200}CycloneDX/i, "version, toolchain, and SBOM reproducibility policy are required");
+  requirePattern(violations, "docs/reproducible-builds.md", reproducible, /VERSION[\s\S]{0,800}Rust \d+\.\d+\.\d+[\s\S]{0,2200}CycloneDX/i, "version, toolchain, and SBOM reproducibility policy are required");
   requirePattern(violations, "docs/release-checklist.md", releaseChecklist, /No committed secrets[\s\S]{0,1000}CSP[\s\S]{0,1000}runtime[\s\S]{0,500}NOT RUN/i, "release security checklist is incomplete");
   requirePattern(violations, "docs/release-status-template.md", releaseStatus, /Forgejo canonical CI[\s\S]{0,1200}Windows full GUI runtime[\s\S]{0,1200}Android runtime[\s\S]{0,1200}Artifact secret scan[\s\S]{0,800}GitHub Release publication/i, "release status matrix is incomplete");
   requirePattern(violations, "docs/ipc-surface.md", ipcSurface, /Session control[\s\S]{0,1800}Vault mutation[\s\S]{0,1800}Browser[\s\S]{0,1800}Android/i, "Tauri IPC command classification is incomplete");
@@ -196,6 +196,9 @@ export function runChecks(root) {
     }
     if (!quality.includes(`Rust ${rustVersion}`)) {
       violations.push(`docs/quality.md: pinned Rust ${rustVersion} is not documented`);
+    }
+    if (!reproducible.includes(`Rust ${rustVersion}`)) {
+      violations.push(`docs/reproducible-builds.md: pinned Rust ${rustVersion} is not documented`);
     }
   }
   const configuredPnpmVersion = mise.match(/^pnpm\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m)?.[1];

@@ -81,7 +81,7 @@ function fixture(t) {
     "Coverage ratchet. Lowering requires architecture or security review. eslint-disable is forbidden. " +
       "unsafe_code = forbid. Exceptions require an exact path. cargo-deny. pnpm audit --prod. " +
       "navigator.clipboard is forbidden. clipboard-manager only in apps/desktop/src-tauri. " +
-      "Rust 1.98.1. pnpm 12.7.0 from mise.toml, the toolchain source of truth. " +
+      "Rust 1.99.0. pnpm 12.9.1 from mise.toml, the toolchain source of truth. " +
       "mobile-tools-check then mobile-android-check. credentials:1.6.0 and a single-use opaque token.\n" +
       "M5.5 requires PowerManager.isInteractive and SystemClock.elapsedRealtime lifecycle source ratchets; same-process Lock/unlock timeout retention and new-root reset are tested; Android instrumentation only compiles headlessly.\n" +
       "mobile-ios-tools-check requires macOS; mobile-ios-check verifies an embedded .appex extension. browser-source-check then browser-extension-check then browser-native-protocol-check then browser-native-host-check then browser-integration-check do not require Chrome Chromium or Firefox GUI browsers.\n" +
@@ -106,7 +106,7 @@ function fixture(t) {
   write(
     root,
     "docs/reproducible-builds.md",
-    "VERSION is authoritative. Rust 1.98.1 is pinned. Generate a CycloneDX inventory.\n",
+    "VERSION is authoritative. Rust 1.99.0 is pinned. Generate a CycloneDX inventory.\n",
   );
   write(
     root,
@@ -128,7 +128,7 @@ function fixture(t) {
   write(
     root,
     "package.json",
-    '{"engines":{"node":"26.9.0"},"packageManager":"pnpm@12.7.0"}\n',
+    '{"engines":{"node":"26.9.0"},"packageManager":"pnpm@12.9.1"}\n',
   );
   write(
     root,
@@ -141,13 +141,13 @@ function fixture(t) {
       "      - run: make browser-source-check browser-extension-check\n" +
       "  desktop-native-check:\n" +
       "    container:\n" +
-      "      image: rust:1.98.1-bookworm\n" +
+      "      image: rust:1.99.0-bookworm\n" +
       "    steps:\n" +
-      "      - run: npm install --global pnpm@12.7.0\n" +
+      "      - run: npm install --global pnpm@12.9.1\n" +
       "      - run: make browser-integration-check\n",
   );
-  write(root, "mise.toml", '[tools]\nnode = "26.9.0"\npnpm = "12.7.0"\nrust = "1.98.1"\n');
-  write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.98.1"\n');
+  write(root, "mise.toml", '[tools]\nnode = "26.9.0"\npnpm = "12.9.1"\nrust = "1.99.0"\n');
+  write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.99.0"\n');
   write(
     root,
     "Makefile",
@@ -171,7 +171,7 @@ test("runtime version drift is rejected", (t) => {
 test("Rust toolchain drift from mise is rejected", (t) => {
   const root = fixture(t);
   write(root, "rust-toolchain.toml", '[toolchain]\nchannel = "1.97.1"\n');
-  assert.match(runChecks(root).join("\n"), /must mirror mise Rust 1\.98\.1/);
+  assert.match(runChecks(root).join("\n"), /must mirror mise Rust 1\.99\.0/);
 });
 
 test("missing direct pnpm installation is rejected", (t) => {
@@ -185,14 +185,14 @@ test("missing direct pnpm installation is rejected", (t) => {
       "      image: node:26.9.0-bookworm\n" +
       "  desktop-native-check:\n" +
       "    container:\n" +
-      "      image: rust:1.98.1-bookworm\n" +
+      "      image: rust:1.99.0-bookworm\n" +
       "    steps:\n" +
       "      - run: node --version\n" +
       "      - run: make browser-integration-check\n",
   );
   assert.match(
     runChecks(root).join("\n"),
-    /must install mise-pinned pnpm 12\.7\.0 directly/,
+    /must install mise-pinned pnpm 12\.9\.1 directly/,
   );
 });
 
@@ -215,12 +215,12 @@ test("browser integration requires the native Rust job and pinned pnpm", (t) => 
     join(root, ".forgejo/workflows/quality.yml"),
     "utf8",
   )
-    .replace("      - run: npm install --global pnpm@12.7.0\n", "")
+    .replace("      - run: npm install --global pnpm@12.9.1\n", "")
     .replace("      - run: make browser-integration-check\n", "");
   write(root, ".forgejo/workflows/quality.yml", workflow);
   const violations = runChecks(root).join("\n");
   assert.match(violations, /must own browser-integration-check/);
-  assert.match(violations, /must install mise-pinned pnpm 12\.7\.0/);
+  assert.match(violations, /must install mise-pinned pnpm 12\.9\.1/);
 });
 
 test("missing quality policy is reported", (t) => {

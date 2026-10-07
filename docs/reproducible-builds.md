@@ -11,7 +11,7 @@ rather than an operator checkbox.
 
 `mise.toml` is the source of truth for Node, pnpm, and Rust; `.node-version`,
 Cargo, rustup, package metadata, container, and CI pins are checked mirrors.
-Pinned inputs are Rust 1.98.1, Node 26.9.0, pnpm 12.7.0,
+Pinned inputs are Rust 1.99.0, Node 26.9.0, pnpm 12.9.1,
 Tauri CLI 2.11.4, Android SDK/API 36, Build Tools 36.0.0, NDK 28.2.13676358,
 Gradle 8.14.3 with its distribution SHA-256, exact Cargo/npm/Gradle dependencies, digest-pinned container
 bases, and full-commit-pinned Forgejo and GitHub actions. `Cargo.lock` and `pnpm-lock.yaml` are

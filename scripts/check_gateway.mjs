@@ -116,6 +116,18 @@ export function gatewayWorkflowDependencyViolations(workflow, pnpmVersion) {
   return violations;
 }
 
+export function gatewayBuilderImageViolations(dockerfile, rustVersion) {
+  const builderVersion = dockerfile.match(
+    /^FROM rust:(\d+\.\d+\.\d+)-bookworm@sha256:[0-9a-f]{64} AS builder$/m,
+  )?.[1];
+  if (!rustVersion || builderVersion !== rustVersion) {
+    return [
+      "Linux gateway builder image must match rust-toolchain.toml and pin its digest",
+    ];
+  }
+  return [];
+}
+
 export function gatewayContainerNetworkProbeViolations(containerCheck) {
   const violations = [];
   if (
@@ -358,11 +370,14 @@ export function runChecks(root) {
     violations.push("background, push, and real-time sync remain out of scope");
   }
   const dockerfile = source(root, "apps/sync-gateway/Dockerfile");
-  if (!/^FROM rust:1\.98\.1-bookworm@sha256:[0-9a-f]{64} AS builder$/m.test(dockerfile)
-    || !/^FROM debian:bookworm-slim@sha256:[0-9a-f]{64}$/m.test(dockerfile)
+  const rustVersion = source(root, "rust-toolchain.toml").match(
+    /^channel\s*=\s*"(\d+\.\d+\.\d+)"\s*$/m,
+  )?.[1];
+  violations.push(...gatewayBuilderImageViolations(dockerfile, rustVersion));
+  if (!/^FROM debian:bookworm-slim@sha256:[0-9a-f]{64}$/m.test(dockerfile)
     || !/USER 10001:10001/.test(dockerfile)
     || /USER\s+(?:root|0(?::0)?)/i.test(dockerfile)) {
-    violations.push("Linux gateway container build is missing");
+    violations.push("Linux gateway runtime image must remain digest-pinned and non-root");
   }
   if (/^(?:ARG|ENV)\s+.*(?:GATEWAY_TOKEN|gateway.token)/im.test(dockerfile)) {
     violations.push("gateway token must never be baked into the container image");

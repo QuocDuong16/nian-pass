@@ -357,7 +357,7 @@ test("npm alias of clipboard manager remains forbidden", (t) => {
   write(
     root,
     "apps/desktop/package.json",
-    '{"dependencies":{"clipboard":"npm:@tauri-apps/plugin-clipboard-manager@2.3.2"}}\n',
+    '{"dependencies":{"clipboard":"npm:@tauri-apps/plugin-clipboard-manager@2.4.1"}}\n',
   );
   assert.match(
     runChecks(root).join("\n"),

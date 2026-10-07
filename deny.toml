@@ -5,11 +5,6 @@ all-features = true
 yanked = "deny"
 ignore = [
   { id = "RUSTSEC-2024-0370", reason = "Transitive GTK3 macro dependency from Tauri; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },
-  { id = "RUSTSEC-2025-0075", reason = "Transitive Tauri urlpattern dependency; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },
-  { id = "RUSTSEC-2025-0080", reason = "Transitive Tauri urlpattern dependency; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },
-  { id = "RUSTSEC-2025-0081", reason = "Transitive Tauri urlpattern dependency; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },
-  { id = "RUSTSEC-2025-0098", reason = "Transitive Tauri urlpattern dependency; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },
-  { id = "RUSTSEC-2025-0100", reason = "Transitive Tauri urlpattern dependency; no safe upgrade is available. Tracked by TODO(M4.Q-dependency-unmaintained) in docs/quality.md." },
 ]
 
 [licenses]
@@ -81,15 +76,10 @@ skip = [
   { name = "thiserror", version = "=1.0.69", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "thiserror-impl", version = "=1.0.69", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "toml", version = "=0.8.2", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
-  { name = "toml", version = "=0.9.12+spec-1.1.0", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "toml_datetime", version = "=0.6.3", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
-  { name = "toml_datetime", version = "=0.7.5+spec-1.1.0", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "toml_edit", version = "=0.19.15", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "toml_edit", version = "=0.20.2", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
-  { name = "windows-core", version = "=0.61.2", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
-  { name = "windows-link", version = "=0.1.3", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
-  { name = "windows-result", version = "=0.3.4", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
-  { name = "windows-strings", version = "=0.4.2", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
+  { name = "winreg", version = "=0.55.0", reason = "Required transitively by tauri-winres 0.3.6 through embed-resource 3.0.11; the browser host uses winreg 0.56.0. Tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "windows-sys", version = "=0.45.0", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "windows-sys", version = "=0.52.0", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "windows-sys", version = "=0.59.0", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
@@ -112,7 +102,6 @@ skip = [
   { name = "windows_x86_64_msvc", version = "=0.42.2", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "windows_x86_64_msvc", version = "=0.52.6", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
   { name = "winnow", version = "=0.5.40", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
-  { name = "winnow", version = "=0.7.15", reason = "Pinned transitive compatibility; tracked by TODO(M4.Q-dependency-duplicates) in docs/quality.md." },
 ]
 skip-tree = []
 

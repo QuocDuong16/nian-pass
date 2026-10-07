@@ -445,7 +445,7 @@ test("Android release staging uses pre-build clean verification and post-build m
   );
   assert.match(
     makefile,
-    /release-stage: release-source-postbuild-check\n\tnode scripts\/stage_release\.mjs/,
+    /^release-stage: release-source-postbuild-check(?: ##[^\r\n]*)?\n\tnode scripts\/stage_release\.mjs/m,
   );
   assert.doesNotMatch(makefile, /release-stage: release-source-check/);
   assert.match(

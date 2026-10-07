@@ -4,5 +4,5 @@
 - Desktop: Tauri 2 with React/TypeScript, Vite, pnpm; Node scripts enforce architecture, security, release, and documentation policy.
 - Mobile host code includes generated Tauri Android/Kotlin integration and retained iOS/Swift FFI foundations.
 - Forgejo is the canonical quality CI; GitHub workflows cover release and Windows diagnostics. Docker builds the self-hosted gateway.
-- `mise.toml` is the toolchain source of truth; `mise.lock` locks tool metadata. Rustup, Cargo MSRV, `.node-version`, package engines, containers, and CI values are checked mirrors.
+- `mise.toml` is the toolchain source of truth; `mise.lock` locks tool metadata. Rustup, Cargo MSRV, `.node-version`, package engines, containers, and CI values are checked mirrors. The sync-gateway Rust builder image must match the `rust-toolchain.toml` channel and use a SHA-256 digest.
 - Serena project servers: TypeScript, Rust, and Bash, indexed from the repository root.

@@ -17,7 +17,7 @@ serde_json.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-winreg = "=0.55.0"
+winreg = "=0.56.0"
 
 [dev-dependencies]
 interprocess.workspace = true

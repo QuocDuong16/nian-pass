@@ -13,12 +13,13 @@ for feedback but is intentionally not equivalent to the full gate.
 
 ## Toolchain and local prerequisites
 
-- Rust 1.98.1 from `mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
+- Rust 1.99.0 from `mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
   `rust-toolchain.toml` mirrors the pin for direct Cargo and editor invocations
 - Node 26.9.0 from `mise.toml`, mirrored in `.node-version` and package metadata
-- pnpm 12.7.0 from `mise.toml`, with `mise.lock` integrity hashes; the root
+- pnpm 12.9.1 from `mise.toml`, with `mise.lock` integrity hashes; the root
   `packageManager` field mirrors the pnpm pin for workspace tooling
-- Run `mise install` from the repository root to install the locked toolchain
+- Run `make toolchain-install` to install the mise-locked runtimes and audit tools;
+  `make toolchain-check` verifies those pins
 - GNU Make
 - Tauri's documented headless GTK/WebKit development packages
 - Android NDK 28.2.13676358 and JDK 21 for release APK construction
@@ -31,11 +32,11 @@ developer shell profiles. `ANDROID_HOME` or `ANDROID_SDK_ROOT` must identify the
 SDK; failures are actionable and non-skipping.
 
 `make tools-install` installs `cargo-deny 0.20.2`, `cargo-machete 0.9.2`, and
-`cargo-llvm-cov 0.9.0` into ignored `.bin/`. `make tools-check` rejects missing
-or different versions. Frontend tools are exact lockfile-managed dependencies.
-Forgejo installs the exact pnpm release recorded in `mise.toml` directly and
-checks its version before running repository commands.
-The root's exact `smol-toml 1.8.0` dependency parses Cargo policy inputs;
+`cargo-llvm-cov 0.9.0` into ignored `.bin/`. `make tools-check` verifies the
+mise pins and those local Rust tools. Frontend dependencies use the frozen
+pnpm lockfile. Forgejo installs the exact pnpm release recorded in `mise.toml`
+directly and checks its version before running repository commands.
+The root's exact `smol-toml 1.9.0` dependency parses Cargo policy inputs;
 `scripts-check` installs only that locked root tooling before running. No
 quality target launches a window, X11, Wayland, or a desktop session.
 
@@ -349,7 +350,7 @@ for behavioral assertions or the exact serialized-key whitelist.
 `cargo-deny` fails known vulnerabilities, yanked releases, unapproved licenses,
 unknown registries, and every unapproved git source. Crates.io and workspace
 path dependencies are approved. Duplicate versions are denied by default;
-43 existing transitive duplicate groups require 63 exact, older-version
+40 existing transitive duplicate groups require 57 exact, older-version
 exceptions in `deny.toml` because the pinned dependency graph includes
 incompatible semver generations (notably Tauri, KDBX, and Windows support).
 These exceptions apply only to the duplicate-version ban: advisory, yank,
@@ -383,14 +384,11 @@ no safe upgrade exists, and carry a tracking issue or TODO. Wildcard ignores are
 forbidden. Current exceptions are unmaintained-only transitive dependencies:
 
 - `RUSTSEC-2024-0370`: `proc-macro-error` through that GTK3 stack.
-- `RUSTSEC-2025-0075`, `RUSTSEC-2025-0080`, `RUSTSEC-2025-0081`,
-  `RUSTSEC-2025-0098`, and `RUSTSEC-2025-0100`: Tauri `urlpattern`'s `unic`
-  dependencies.
 
-TODO(M4.Q-dependency-unmaintained): re-evaluate and remove these exact ignores
-when the pinned Tauri Linux stack provides a non-GTK3/non-`unic` upgrade. Any
-new vulnerability (as distinct from unmaintained metadata) remains a hard
-failure and must not be added to this group automatically.
+TODO(M4.Q-dependency-unmaintained): re-evaluate and remove this exact ignore
+when the GTK3 stack provides a maintained macro dependency. Any new
+vulnerability (as distinct from unmaintained metadata) remains a hard failure
+and must not be added to this group automatically.
 
 ## Architecture and security exceptions
 
