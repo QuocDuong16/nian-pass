@@ -38,7 +38,7 @@ containers without mise install the same pinned versions through
 `make tools-install-ci`. Frontend dependencies use the frozen
 pnpm lockfile. Forgejo installs the exact pnpm release recorded in `mise.toml`
 directly and checks its version before running repository commands.
-The root's exact `smol-toml 1.9.0` dependency parses Cargo policy inputs;
+The root's exact `smol-toml 1.9.1` dependency parses Cargo policy inputs;
 `scripts-check` installs only that locked root tooling before running. No
 quality target launches a window, X11, Wayland, or a desktop session.
 
