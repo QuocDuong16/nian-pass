@@ -511,7 +511,7 @@ version from the opened file plus group and entry counts.
 ## Development
 
 ```bash
-make tools-install     # one-time pinned Rust quality tooling
+make toolchain-install # one-time pinned toolchains and Rust quality tools
 make quality-check    # canonical full pre-merge gate
 make quick-check      # faster feedback; not equivalent to quality-check
 ```

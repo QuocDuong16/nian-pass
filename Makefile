@@ -4,13 +4,11 @@ CARGO ?= cargo
 MISE ?= mise
 PNPM ?= pnpm
 
-CARGO_DENY_VERSION := 0.20.2
-CARGO_MACHETE_VERSION := 0.9.2
-CARGO_LLVM_COV_VERSION := 0.9.0
 CARGO_AUDIT_VERSION := $(shell awk -F'"' '/^"cargo:cargo-audit" = / { print $$4 }' mise.toml)
 CARGO_OUTDATED_VERSION := $(shell awk -F'"' '/^"cargo:cargo-outdated" = / { print $$4 }' mise.toml)
-TOOLS_ROOT := $(CURDIR)/.bin
-TOOLS_BIN := $(TOOLS_ROOT)/bin
+CARGO_DENY_VERSION := $(shell awk -F'"' '/^"cargo:cargo-deny" = / { print $$4 }' mise.toml)
+CARGO_MACHETE_VERSION := $(shell awk -F'"' '/^"cargo:cargo-machete" = / { print $$4 }' mise.toml)
+CARGO_LLVM_COV_VERSION := $(shell awk -F'"' '/^"cargo:cargo-llvm-cov" = / { print $$4 }' mise.toml)
 
 NODE_VERSION := $(shell awk -F'"' '/^node = / { print $$2 }' mise.toml)
 PNPM_VERSION := $(shell awk -F'"' '/^pnpm = "[0-9]/ { print $$2 }' mise.toml)
@@ -35,7 +33,7 @@ CORE_PACKAGES := -p nian-pass-cli -p kdbx -p vault-core -p vault-session -p vaul
 .PHONY: help clean deps-install format format-check test build audit outdated check \
 	toolchain-install toolchain-check \
 	rust-audit rust-outdated ui-audit ui-outdated \
-	tools-install tools-check fixture-check \
+	tools-install-ci tools-check fixture-check \
 	rust-format rust-lint rust-test rust-doc rust-deps-check rust-security-check \
 	rust-coverage rust-coverage-check rust-coverage-diff rust-core-check rust-check \
 	desktop-install desktop-format desktop-format-check desktop-lint desktop-no-eslint-disable \
@@ -65,33 +63,34 @@ deps-install: ## Install all pnpm workspace dependencies from the frozen lockfil
 	$(PNPM) install --frozen-lockfile
 
 ##@ Tooling and fixtures
-toolchain-install: ## Install repository-pinned runtimes and Cargo audit/update tools with mise
-	MISE_LOCKED_SCOPES=project $(MISE) install --locked node pnpm rust cargo:cargo-audit cargo:cargo-outdated
+toolchain-install: ## Install every mise-pinned runtime, Cargo tool, and rustup component
+	MISE_LOCKED_SCOPES=project $(MISE) install --locked node pnpm rust \
+		"cargo:cargo-audit" "cargo:cargo-outdated" "cargo:cargo-deny" "cargo:cargo-machete" "cargo:cargo-llvm-cov"
+	rustup component add llvm-tools-preview rustfmt clippy
 
-toolchain-check: ## Verify Rust, Node, pnpm, cargo-audit, and cargo-outdated match mise pins
+toolchain-check: ## Verify every mise-pinned runtime and Cargo tool
 	@test "$$($(MISE) exec -- rustc --version | awk '{print $$2}')" = "$(RUST_VERSION)" || { echo "Rust $(RUST_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- node --version)" = "v$(NODE_VERSION)" || { echo "Node $(NODE_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- pnpm --version)" = "$(PNPM_VERSION)" || { echo "pnpm $(PNPM_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- cargo audit --version | awk '{print $$2}')" = "$(CARGO_AUDIT_VERSION)" || { echo "cargo-audit $(CARGO_AUDIT_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- cargo outdated --version | awk '{print $$2}')" = "$(CARGO_OUTDATED_VERSION)" || { echo "cargo-outdated $(CARGO_OUTDATED_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
-	@printf 'Rust %s; Node %s; pnpm %s; cargo-audit %s; cargo-outdated %s\n' "$(RUST_VERSION)" "$(NODE_VERSION)" "$(PNPM_VERSION)" "$(CARGO_AUDIT_VERSION)" "$(CARGO_OUTDATED_VERSION)"
+	@test "$$($(MISE) exec -- cargo deny --version | awk '{print $$2}')" = "$(CARGO_DENY_VERSION)" || { echo "cargo-deny $(CARGO_DENY_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
+	@test "$$($(MISE) exec -- cargo machete --version)" = "$(CARGO_MACHETE_VERSION)" || { echo "cargo-machete $(CARGO_MACHETE_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
+	@test "$$($(MISE) exec -- cargo llvm-cov --version)" = "cargo-llvm-cov $(CARGO_LLVM_COV_VERSION)" || { echo "cargo-llvm-cov $(CARGO_LLVM_COV_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
+	@printf 'Rust %s; Node %s; pnpm %s; cargo-audit %s; cargo-outdated %s; cargo-deny %s; cargo-machete %s; cargo-llvm-cov %s\n' \
+		"$(RUST_VERSION)" "$(NODE_VERSION)" "$(PNPM_VERSION)" "$(CARGO_AUDIT_VERSION)" "$(CARGO_OUTDATED_VERSION)" "$(CARGO_DENY_VERSION)" "$(CARGO_MACHETE_VERSION)" "$(CARGO_LLVM_COV_VERSION)"
 
-tools-install: ## Install the pinned local Rust quality tools and components
-	@echo "Install pinned Rust quality tools locally..."
-	mkdir -p "$(TOOLS_ROOT)"
-	cargo install --locked --force --version $(CARGO_DENY_VERSION) --root "$(TOOLS_ROOT)" cargo-deny
-	cargo install --locked --force --version $(CARGO_MACHETE_VERSION) --root "$(TOOLS_ROOT)" cargo-machete
-	cargo install --locked --force --version $(CARGO_LLVM_COV_VERSION) --root "$(TOOLS_ROOT)" cargo-llvm-cov
-	rustup component add llvm-tools-preview rustfmt clippy
+tools-install-ci: ## Install the mise-pinned Rust quality tools into a container's PATH
+	@echo "Install mise-pinned Rust quality tools for this environment..."
+	cargo install --locked --force --version $(CARGO_DENY_VERSION) cargo-deny
+	cargo install --locked --force --version $(CARGO_MACHETE_VERSION) cargo-machete
+	cargo install --locked --force --version $(CARGO_LLVM_COV_VERSION) cargo-llvm-cov
 
-tools-check: toolchain-check ## Verify pinned toolchains and local Rust quality tools
+tools-check: toolchain-check ## Verify pinned toolchains, resolved quality tools, and components
 	@echo "Check pinned quality toolchain..."
-	@test -x "$(TOOLS_BIN)/cargo-deny" || { echo "Missing cargo-deny $(CARGO_DENY_VERSION); run 'make tools-install'." >&2; exit 1; }
-	@test -x "$(TOOLS_BIN)/cargo-machete" || { echo "Missing cargo-machete $(CARGO_MACHETE_VERSION); run 'make tools-install'." >&2; exit 1; }
-	@test -x "$(TOOLS_BIN)/cargo-llvm-cov" || { echo "Missing cargo-llvm-cov $(CARGO_LLVM_COV_VERSION); run 'make tools-install'." >&2; exit 1; }
-	@test "$$($(TOOLS_BIN)/cargo-deny --version | awk '{print $$2}')" = "$(CARGO_DENY_VERSION)"
-	@test "$$($(TOOLS_BIN)/cargo-machete --version)" = "$(CARGO_MACHETE_VERSION)"
-	@PATH="$(TOOLS_BIN):$$PATH" cargo llvm-cov --version | grep -Fx "cargo-llvm-cov $(CARGO_LLVM_COV_VERSION)"
+	@test "$$(cargo deny --version | awk '{print $$2}')" = "$(CARGO_DENY_VERSION)" || { echo "cargo-deny $(CARGO_DENY_VERSION) is required at $$(command -v cargo-deny || echo '(not found)'); run 'make toolchain-install' and remove stray global copies." >&2; exit 1; }
+	@test "$$(cargo machete --version)" = "$(CARGO_MACHETE_VERSION)" || { echo "cargo-machete $(CARGO_MACHETE_VERSION) is required at $$(command -v cargo-machete || echo '(not found)'); run 'make toolchain-install' and remove stray global copies." >&2; exit 1; }
+	@cargo llvm-cov --version | grep -Fx "cargo-llvm-cov $(CARGO_LLVM_COV_VERSION)" || { echo "cargo-llvm-cov $(CARGO_LLVM_COV_VERSION) is required at $$(command -v cargo-llvm-cov || echo '(not found)'); run 'make toolchain-install' and remove stray global copies." >&2; exit 1; }
 	@rustup component list --installed | grep -Eq '^llvm-tools(-|$$)'
 
 fixture-check: ## Verify the committed KDBX test fixture checksums
@@ -117,11 +116,11 @@ rust-doc: ## Build workspace documentation with warnings denied
 
 rust-deps-check: ## Detect unused Rust dependencies
 	@echo "Check unused Rust dependencies..."
-	$(TOOLS_BIN)/cargo-machete
+	cargo machete
 
 rust-security-check: ## Check Rust advisories, licenses, bans, and sources
 	@echo "Check Rust advisories, licenses, bans, and sources..."
-	$(TOOLS_BIN)/cargo-deny --locked check -D warnings --hide-inclusion-graph
+	cargo deny --locked check -D warnings --hide-inclusion-graph
 
 rust-audit: ## Check Cargo.lock against the RustSec advisory database
 	$(MISE) exec -- $(CARGO) audit
@@ -132,7 +131,7 @@ rust-outdated: ## List newer direct Rust dependencies across workspace members
 rust-coverage: ## Generate Rust workspace LCOV coverage
 	@echo "Measure Rust workspace coverage..."
 	mkdir -p target/coverage
-	PATH="$(TOOLS_BIN):$$PATH" cargo llvm-cov --locked --workspace --all-features \
+	cargo llvm-cov --locked --workspace --all-features \
 		--lcov --output-path "$(RUST_LCOV)" \
 		--ignore-filename-regex 'apps/(desktop/src-tauri/(build.rs|src/main.rs)|sync-gateway/src/main.rs)'
 

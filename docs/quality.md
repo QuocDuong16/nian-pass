@@ -13,10 +13,10 @@ for feedback but is intentionally not equivalent to the full gate.
 
 ## Toolchain and local prerequisites
 
-- Rust 1.99.0 from `mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
+- Rust 1.99.1 from `mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
   `rust-toolchain.toml` mirrors the pin for direct Cargo and editor invocations
 - Node 26.9.0 from `mise.toml`, mirrored in `.node-version` and package metadata
-- pnpm 12.9.1 from `mise.toml`, with `mise.lock` integrity hashes; the root
+- pnpm 12.14.0 from `mise.toml`, with `mise.lock` integrity hashes; the root
   `packageManager` field mirrors the pnpm pin for workspace tooling
 - Run `make toolchain-install` to install the mise-locked runtimes and audit tools;
   `make toolchain-check` verifies those pins
@@ -31,9 +31,11 @@ does not download these large system components, accept licenses, or modify
 developer shell profiles. `ANDROID_HOME` or `ANDROID_SDK_ROOT` must identify the
 SDK; failures are actionable and non-skipping.
 
-`make tools-install` installs `cargo-deny 0.20.2`, `cargo-machete 0.9.2`, and
-`cargo-llvm-cov 0.9.0` into ignored `.bin/`. `make tools-check` verifies the
-mise pins and those local Rust tools. Frontend dependencies use the frozen
+`make toolchain-install` installs every mise-pinned runtime and Rust quality
+tool (`cargo-deny 0.20.2`, `cargo-machete 0.9.2`, `cargo-llvm-cov 0.9.0`) and
+`make tools-check` verifies the pins and the binaries the gates resolve; CI
+containers without mise install the same pinned versions through
+`make tools-install-ci`. Frontend dependencies use the frozen
 pnpm lockfile. Forgejo installs the exact pnpm release recorded in `mise.toml`
 directly and checks its version before running repository commands.
 The root's exact `smol-toml 1.9.0` dependency parses Cargo policy inputs;
@@ -119,8 +121,8 @@ invalidation. These are deterministic tests; they do not claim live provider or
 Windows runtime validation.
 
 The concrete network dependencies are exactly `reqwest 0.13.4` with
-`rustls-no-provider`, `rustls 0.23.45` with Ring,
-`aws-sdk-s3 1.144.0`, `aws-smithy-http-client 1.4.0`, and `tokio 1.53.1`. The S3
+`rustls-no-provider`, `rustls 0.23.46` with Ring,
+`aws-sdk-s3 1.144.0`, `aws-smithy-http-client 1.4.0`, and `tokio 1.53.2`. The S3
 adapter deliberately does not depend on `aws-config`: it builds the official
 SDK service config with explicit credentials, so no default credential
 provider or hidden metadata request can start. The SDK HTTPS client is built

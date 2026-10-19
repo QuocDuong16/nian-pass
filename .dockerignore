@@ -1,5 +1,4 @@
 .git
-.bin
 node_modules
 target
 artifacts
