@@ -62,7 +62,7 @@ test("CI promotes every cargo-deny warning to failure without unlocking dependen
 
 test("historical transitive duplicates have only exact, tracked, non-stale exemptions", () => {
   assert.deepEqual(legacyDuplicateViolations(), []);
-  assert.equal(deny.bans.skip.length, 57);
+  assert.equal(deny.bans.skip.length, 56);
   const broadened = structuredClone(deny);
   broadened.bans.skip[0].version = ">=0.21";
   assert.match(

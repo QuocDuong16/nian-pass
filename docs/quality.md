@@ -352,7 +352,7 @@ for behavioral assertions or the exact serialized-key whitelist.
 `cargo-deny` fails known vulnerabilities, yanked releases, unapproved licenses,
 unknown registries, and every unapproved git source. Crates.io and workspace
 path dependencies are approved. Duplicate versions are denied by default;
-40 existing transitive duplicate groups require 57 exact, older-version
+39 existing transitive duplicate groups require 56 exact, older-version
 exceptions in `deny.toml` because the pinned dependency graph includes
 incompatible semver generations (notably Tauri, KDBX, and Windows support).
 These exceptions apply only to the duplicate-version ban: advisory, yank,
