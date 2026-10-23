@@ -64,7 +64,7 @@ jobs:
 
       - name: Install pinned pnpm directly
         run: |
-          npm install --global pnpm@12.14.0
+          npm install --global pnpm@12.15.0
           pnpm --version
 
       - name: Run repository policy gates
@@ -135,7 +135,7 @@ jobs:
 
       - name: Install pinned pnpm directly
         run: |
-          npm install --global pnpm@12.14.0
+          npm install --global pnpm@12.15.0
           pnpm --version
 
       - name: Install pinned Rust quality tooling
@@ -234,7 +234,7 @@ jobs:
 
       - name: Install pinned gateway policy dependencies
         run: |
-          npm install --global pnpm@12.14.0
+          npm install --global pnpm@12.15.0
           pnpm --version
           make scripts-install
 
