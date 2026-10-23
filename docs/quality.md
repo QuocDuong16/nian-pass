@@ -16,7 +16,7 @@ for feedback but is intentionally not equivalent to the full gate.
 - Rust 1.99.1 from `mise.toml`, with rustfmt, Clippy, and `llvm-tools-preview`;
   `rust-toolchain.toml` mirrors the pin for direct Cargo and editor invocations
 - Node 26.9.0 from `mise.toml`, mirrored in `.node-version` and package metadata
-- pnpm 12.14.0 from `mise.toml`, with `mise.lock` integrity hashes; the root
+- pnpm 12.15.0 from `mise.toml`, with `mise.lock` integrity hashes; the root
   `packageManager` field mirrors the pnpm pin for workspace tooling
 - Run `make toolchain-install` to install the mise-locked runtimes and audit tools;
   `make toolchain-check` verifies those pins
@@ -32,7 +32,7 @@ developer shell profiles. `ANDROID_HOME` or `ANDROID_SDK_ROOT` must identify the
 SDK; failures are actionable and non-skipping.
 
 `make toolchain-install` installs every mise-pinned runtime and Rust quality
-tool (`cargo-deny 0.20.2`, `cargo-machete 0.9.2`, `cargo-llvm-cov 0.9.0`) and
+tool (`cargo-deny 0.20.2`, `cargo-machete 0.9.2`, `cargo-llvm-cov 0.9.1`) and
 `make tools-check` verifies the pins and the binaries the gates resolve; CI
 containers without mise install the same pinned versions through
 `make tools-install-ci`. Frontend dependencies use the frozen
