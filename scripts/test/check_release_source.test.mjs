@@ -468,11 +468,16 @@ test("Android release staging uses pre-build clean verification and post-build m
 
 test("release dependency policy accepts exact versions only", () => {
   assert.equal(isExactVersion("2.11.4"), true);
+  assert.equal(isExactVersion("npm:typescript@7.0.2"), true);
+  assert.equal(isExactVersion("npm:@typescript/typescript6@6.0.2"), true);
   for (const value of [
     "latest",
     "^2.11.4",
     "~2.11.4",
     "git+https://example.invalid/x",
+    "npm:typescript@latest",
+    "npm:typescript@^7.0.2",
+    "npm:@typescript/typescript6",
   ]) {
     assert.equal(isExactVersion(value), false);
   }

@@ -53,7 +53,16 @@ function dependencyRequirement(value) {
 }
 
 export function isExactVersion(value) {
-  return isReleaseVersion(value);
+  if (isReleaseVersion(value)) return true;
+  if (typeof value !== "string" || !value.startsWith("npm:")) return false;
+  const spec = value.slice("npm:".length);
+  const separator = spec.lastIndexOf("@");
+  if (separator <= 0) return false;
+  const name = spec.slice(0, separator);
+  const version = spec.slice(separator + 1);
+  return (
+    /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(name) && isReleaseVersion(version)
+  );
 }
 
 export function githubReleaseWorkflowViolations(root) {
