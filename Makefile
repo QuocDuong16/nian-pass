@@ -5,7 +5,6 @@ MISE ?= mise
 PNPM ?= pnpm
 
 CARGO_AUDIT_VERSION := $(shell awk -F'"' '/^"cargo:cargo-audit" = / { print $$4 }' mise.toml)
-CARGO_OUTDATED_VERSION := $(shell awk -F'"' '/^"cargo:cargo-outdated" = / { print $$4 }' mise.toml)
 CARGO_DENY_VERSION := $(shell awk -F'"' '/^"cargo:cargo-deny" = / { print $$4 }' mise.toml)
 CARGO_MACHETE_VERSION := $(shell awk -F'"' '/^"cargo:cargo-machete" = / { print $$4 }' mise.toml)
 CARGO_LLVM_COV_VERSION := $(shell awk -F'"' '/^"cargo:cargo-llvm-cov" = / { print $$4 }' mise.toml)
@@ -65,7 +64,7 @@ deps-install: ## Install all pnpm workspace dependencies from the frozen lockfil
 ##@ Tooling and fixtures
 toolchain-install: ## Install every mise-pinned runtime, Cargo tool, and rustup component
 	MISE_LOCKED_SCOPES=project $(MISE) install --locked node pnpm rust \
-		"cargo:cargo-audit" "cargo:cargo-outdated" "cargo:cargo-deny" "cargo:cargo-machete" "cargo:cargo-llvm-cov"
+		"cargo:cargo-audit" "cargo:cargo-deny" "cargo:cargo-machete" "cargo:cargo-llvm-cov"
 	rustup component add llvm-tools-preview rustfmt clippy
 
 toolchain-check: ## Verify every mise-pinned runtime and Cargo tool
@@ -73,12 +72,11 @@ toolchain-check: ## Verify every mise-pinned runtime and Cargo tool
 	@test "$$($(MISE) exec -- node --version)" = "v$(NODE_VERSION)" || { echo "Node $(NODE_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- pnpm --version)" = "$(PNPM_VERSION)" || { echo "pnpm $(PNPM_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- cargo audit --version | awk '{print $$2}')" = "$(CARGO_AUDIT_VERSION)" || { echo "cargo-audit $(CARGO_AUDIT_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
-	@test "$$($(MISE) exec -- cargo outdated --version | awk '{print $$2}')" = "$(CARGO_OUTDATED_VERSION)" || { echo "cargo-outdated $(CARGO_OUTDATED_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- cargo deny --version | awk '{print $$2}')" = "$(CARGO_DENY_VERSION)" || { echo "cargo-deny $(CARGO_DENY_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- cargo machete --version)" = "$(CARGO_MACHETE_VERSION)" || { echo "cargo-machete $(CARGO_MACHETE_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
 	@test "$$($(MISE) exec -- cargo llvm-cov --version)" = "cargo-llvm-cov $(CARGO_LLVM_COV_VERSION)" || { echo "cargo-llvm-cov $(CARGO_LLVM_COV_VERSION) is required; run 'make toolchain-install'." >&2; exit 1; }
-	@printf 'Rust %s; Node %s; pnpm %s; cargo-audit %s; cargo-outdated %s; cargo-deny %s; cargo-machete %s; cargo-llvm-cov %s\n' \
-		"$(RUST_VERSION)" "$(NODE_VERSION)" "$(PNPM_VERSION)" "$(CARGO_AUDIT_VERSION)" "$(CARGO_OUTDATED_VERSION)" "$(CARGO_DENY_VERSION)" "$(CARGO_MACHETE_VERSION)" "$(CARGO_LLVM_COV_VERSION)"
+	@printf 'Rust %s; Node %s; pnpm %s; cargo-audit %s; cargo-deny %s; cargo-machete %s; cargo-llvm-cov %s\n' \
+		"$(RUST_VERSION)" "$(NODE_VERSION)" "$(PNPM_VERSION)" "$(CARGO_AUDIT_VERSION)" "$(CARGO_DENY_VERSION)" "$(CARGO_MACHETE_VERSION)" "$(CARGO_LLVM_COV_VERSION)"
 
 tools-install-ci: ## Install the mise-pinned Rust quality tools into a container's PATH
 	@echo "Install mise-pinned Rust quality tools for this environment..."
@@ -126,7 +124,7 @@ rust-audit: ## Check Cargo.lock against the RustSec advisory database
 	$(MISE) exec -- $(CARGO) audit
 
 rust-outdated: ## List newer direct Rust dependencies across workspace members
-	$(MISE) exec -- $(CARGO) outdated --workspace --root-deps-only
+	CARGO="$(CARGO)" $(MISE) exec -- node scripts/run_cargo_outdated.mjs
 
 rust-coverage: ## Generate Rust workspace LCOV coverage
 	@echo "Measure Rust workspace coverage..."
