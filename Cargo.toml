@@ -37,36 +37,36 @@ strip = "symbols"
 [workspace.dependencies]
 atomic-write-file = "=0.3.1"
 bytes = "=1.12.1"
-aws-sdk-s3 = { version = "=1.144.0", default-features = false, features = ["behavior-version-latest", "http-1x", "rt-tokio"] }
-aws-smithy-http-client = { version = "=1.4.0", default-features = false, features = ["rustls-ring"] }
-clap = { version = "=4.6.6", features = ["derive"] }
+aws-sdk-s3 = { version = "=1.157.0", default-features = false, features = ["behavior-version-latest", "http-1x", "rt-tokio"] }
+aws-smithy-http-client = { version = "=1.5.2", default-features = false, features = ["rustls-ring"] }
+clap = { version = "=4.6.7", features = ["derive"] }
 chrono = "=0.4.45"
 futures-util = "=0.3.34"
 http-body-util = "=0.1.5"
-hyper = { version = "=1.11.0", features = ["http1", "server"] }
-hyper-util = { version = "=0.1.20", features = ["tokio"] }
-keepass = { version = "=0.13.21", default-features = false, features = ["save_kdbx4", "totp"] }
+hyper = { version = "=1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "=0.1.21", features = ["tokio"] }
+keepass = { version = "=0.17.0", default-features = false, features = ["save_kdbx4", "totp"] }
 getrandom = "=0.4.3"
 rpassword = "=7.5.4"
-reqwest = { version = "=0.13.4", default-features = false, features = ["rustls-no-provider", "stream"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider", "stream"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.151"
-sha2 = "=0.11.0"
+serde_json = "=1.0.154"
+sha2 = "=0.11.1"
 subtle = "=2.6.1"
-thiserror = "=2.0.20"
-tokio = { version = "=1.53.2", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+thiserror = "=2.0.21"
+tokio = { version = "=1.54.1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 url = "=2.5.8"
-uuid = { version = "=1.24.1", features = ["serde", "v4"] }
+uuid = { version = "=1.29.0", features = ["serde", "v4"] }
 sync-provider-core = { path = "crates/sync-provider-core" }
 sync-gateway-protocol = { path = "crates/sync-gateway-protocol" }
 sync-provider-gateway = { path = "crates/sync-provider-gateway" }
 vault-core = { path = "crates/vault-core" }
-zeroize = "=1.9.0"
+zeroize = "=1.9.1"
 credential-provider-core = { path = "crates/credential-provider-core" }
 browser-native-protocol = { path = "crates/browser-native-protocol" }
-interprocess = "=2.4.3"
-rustix = { version = "=1.1.4", default-features = false, features = ["fs", "process", "std"] }
+interprocess = "=2.4.7"
+rustix = { version = "=1.1.6", default-features = false, features = ["fs", "process", "std"] }
 windows-safe-replace = { path = "crates/windows-safe-replace" }
 
 [workspace.lints.rust]

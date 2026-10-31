@@ -1,4 +1,4 @@
-use keepass::db::{Icon, fields};
+use keepass::db::{Icon, Times, fields};
 use vault_core::{
     EntryExpiry, EntryIconUpdate, EntryId, EntryTotpUpdate, EntryUpdate, MAX_STANDARD_ICON_ID,
     SecretString,
@@ -87,16 +87,17 @@ impl KdbxDocument {
             .collect::<Vec<_>>();
         let expiry_change = match update.expiry {
             None => None,
+            // keepass 0.17 stores expiry unconditionally; epoch encodes "unset".
             Some(EntryExpiry::Disabled) => (current.times.expires == Some(true)
-                || current.times.expiry.is_some())
-            .then_some((EntryExpiry::Disabled, None)),
+                || current.times.expiry != Times::epoch())
+            .then_some((EntryExpiry::Disabled, Times::epoch())),
             Some(EntryExpiry::AtUnixSeconds(seconds)) => {
                 let timestamp = chrono::DateTime::from_timestamp(seconds, 0)
                     .map(|value| value.naive_utc())
                     .ok_or(KdbxError::InvalidExpiry)?;
                 let unchanged =
-                    current.times.expires == Some(true) && current.times.expiry == Some(timestamp);
-                (!unchanged).then_some((EntryExpiry::AtUnixSeconds(seconds), Some(timestamp)))
+                    current.times.expires == Some(true) && current.times.expiry == timestamp;
+                (!unchanged).then_some((EntryExpiry::AtUnixSeconds(seconds), timestamp))
             }
         };
         let icon_change = match update.icon {
@@ -155,15 +156,10 @@ impl KdbxDocument {
             }
             if let Some((expiry, timestamp)) = expiry_change {
                 match expiry {
-                    EntryExpiry::Disabled => {
-                        tracked.times.expires = Some(false);
-                        tracked.times.expiry = None;
-                    }
-                    EntryExpiry::AtUnixSeconds(_) => {
-                        tracked.times.expires = Some(true);
-                        tracked.times.expiry = timestamp;
-                    }
+                    EntryExpiry::Disabled => tracked.times.expires = Some(false),
+                    EntryExpiry::AtUnixSeconds(_) => tracked.times.expires = Some(true),
                 }
+                tracked.times.expiry = timestamp;
                 tracked.times.last_modification = Some(keepass::db::Times::now());
             }
             if let Some(icon) = icon_change {

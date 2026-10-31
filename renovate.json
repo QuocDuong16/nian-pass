@@ -58,8 +58,7 @@
       "schedule": ["* * * * 6"]
     },
     {
-      "description": "Keep Rust and Node runtime pins coordinated across mise, manifests, Rustup, CI images, checksums, and release contracts; update versions manually.",
-      "matchManagers": ["mise", "nodenv", "npm"],
+      "description": "Keep Node and Rust toolchain pins coordinated across mise, manifests, Rustup, workflow containers, CI images, checksums, and release contracts; update versions manually.",
       "matchDepNames": ["node", "rust"],
       "matchUpdateTypes": ["major", "minor", "patch"],
       "enabled": false
@@ -68,13 +67,6 @@
       "description": "Keep pnpm coordinated across mise, packageManager, CI, Windows tooling, and release checks; update versions manually.",
       "matchManagers": ["mise", "npm"],
       "matchDepNames": ["pnpm"],
-      "matchUpdateTypes": ["major", "minor", "patch"],
-      "enabled": false
-    },
-    {
-      "description": "Keep Rust and Node container version changes coordinated with mise and CI contracts; update versions manually.",
-      "matchManagers": ["dockerfile", "docker-compose"],
-      "matchDepNames": ["node", "rust"],
       "matchUpdateTypes": ["major", "minor", "patch"],
       "enabled": false
     },

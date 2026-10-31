@@ -37,7 +37,7 @@ concurrency:
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
   NODE_VERSION: "26.9.0"
-  PNPM_VERSION: "12.15.0"
+  PNPM_VERSION: "12.16.1"
   RUST_VERSION: "1.99.1"
 
 jobs:

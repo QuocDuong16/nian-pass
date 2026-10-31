@@ -980,7 +980,6 @@ fn project_entry_summary(entry: keepass::db::EntryRef<'_>) -> EntrySummary {
     .with_expiry(
         (entry.times.expires == Some(true))
             .then_some(entry.times.expiry)
-            .flatten()
             .map(|value| value.and_utc().timestamp()),
     )
 }
@@ -2910,7 +2909,7 @@ mod tests {
             source.override_url = Some("cmd://duplicate".to_owned());
             source.quality_check = false;
             source.times.creation = Some(Times::epoch());
-            source.times.expiry = Some(Times::epoch());
+            source.times.expiry = Times::epoch();
             source.times.expires = Some(true);
             source.set_protected("Private duplicate field", "SECRET-DUPLICATE-VALUE");
             source.set_icon_builtin(17);
@@ -5251,13 +5250,7 @@ mod tests {
             .entry(upstream_id)
             .expect("updated entry should exist");
         assert_eq!(updated.times.expires, Some(true));
-        assert_eq!(
-            updated
-                .times
-                .expiry
-                .map(|value| value.and_utc().timestamp()),
-            Some(expiry)
-        );
+        assert_eq!(updated.times.expiry.and_utc().timestamp(), expiry);
         assert_eq!(history_len(&updated), history_before + 1);
         assert_eq!(document.revision(), revision_before + 1);
         assert_eq!(
@@ -5310,7 +5303,7 @@ mod tests {
             .entry(upstream_id)
             .expect("entry should remain");
         assert_eq!(disabled.times.expires, Some(false));
-        assert!(disabled.times.expiry.is_none());
+        assert_eq!(disabled.times.expiry, Times::epoch());
         assert_eq!(history_len(&disabled), history_before + 2);
         assert_eq!(document.revision(), revision_before + 2);
         assert_eq!(
